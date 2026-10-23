@@ -1,7 +1,10 @@
 # VoxCordis
 
-A local AI companion for the desktop. This repository holds the installers;
-the app checks it for updates.
+![VoxCordis](docs/banner.png)
+
+A local AI companion for the desktop (Linux & Windows). It chats with a
+local LLM, paints through InvokeAI, keeps its files in a real folder on disk,
+and remembers things in a SQLite memory.
 
 Download the newest version from [Releases](../../releases/latest):
 
@@ -11,4 +14,9 @@ Download the newest version from [Releases](../../releases/latest):
 Once installed, VoxCordis updates itself: when a new version is out, an
 **Update** button appears in the app's top bar.
 
-Copyright (C) 2026 Nucume
+## License
+
+Copyright (C) 2026 Nucume.
+
+VoxCordis is in early testing. The source code
+will be published under the GNU GPL v3 with version 0.2.
