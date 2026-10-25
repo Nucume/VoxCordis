@@ -1,0 +1,48 @@
+# Flatpak manifest for VoxCordis.
+#
+# CI builds the Flutter Linux bundle first and drops it in <repo>/bundle/,
+# then this manifest wraps it. Flathub would instead want the app built from
+# source inside flatpak-builder (see docs/RELEASING.md).
+app-id: com.nucume.companion
+runtime: org.gnome.Platform
+runtime-version: '48'
+sdk: org.gnome.Sdk
+command: voxcordis
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  # GPU for the window and for Vulkan inference in the built-in runtime.
+  - --device=dri
+  # Downloads the llama.cpp runtime and models, talks to local LLM servers
+  # and InvokeAI.
+  - --share=network
+  # The companion folder can live anywhere in home and must stay reachable
+  # after a restart.
+  - --filesystem=home
+modules:
+  - name: voxcordis
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/voxcordis /app/bin
+      - cp -a bundle/. /app/voxcordis/
+      - ln -s /app/voxcordis/companion /app/bin/voxcordis
+      - install -Dm644 com.nucume.companion.desktop /app/share/applications/com.nucume.companion.desktop
+      - install -Dm644 com.nucume.companion.metainfo.xml /app/share/metainfo/com.nucume.companion.metainfo.xml
+      - install -Dm644 app_icon_512.png /app/share/icons/hicolor/512x512/apps/com.nucume.companion.png
+      - install -Dm644 app_icon_256.png /app/share/icons/hicolor/256x256/apps/com.nucume.companion.png
+      - install -Dm644 app_icon_128.png /app/share/icons/hicolor/128x128/apps/com.nucume.companion.png
+    sources:
+      - type: dir
+        path: ../../bundle
+        dest: bundle
+      - type: file
+        path: ../linux/com.nucume.companion.desktop
+      - type: file
+        path: ../linux/com.nucume.companion.metainfo.xml
+      - type: file
+        path: ../../macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_512.png
+      - type: file
+        path: ../../macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_256.png
+      - type: file
+        path: ../../macos/Runner/Assets.xcassets/AppIcon.appiconset/app_icon_128.png

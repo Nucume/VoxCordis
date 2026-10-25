@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Copyright (C) 2026 Nucume -->
+<component type="desktop-application">
+  <id>com.nucume.companion</id>
+  <name>VoxCordis</name>
+  <summary>A local AI companion for the desktop</summary>
+  <developer id="com.nucume">
+    <name>Nucume</name>
+  </developer>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+  <description>
+    <p>
+      VoxCordis chats with a local language model it runs itself, keeps its
+      files in a folder you choose, and remembers things in a memory you can
+      read, edit, pin and forget.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/Nucume/VoxCordis</url>
+  <url type="bugtracker">https://github.com/Nucume/VoxCordis/issues</url>
+  <launchable type="desktop-id">com.nucume.companion.desktop</launchable>
+  <content_rating type="oars-1.1"/>
+  <releases>
+    <release version="0.2.0" date="2026-10-25"/>
+    <release version="0.1.0" date="2026-10-23"/>
+  </releases>
+</component>

@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=VoxCordis
+GenericName=AI Companion
+Comment=A local AI companion that chats, remembers and keeps its things in a real folder
+Exec=voxcordis
+Icon=com.nucume.companion
+StartupWMClass=com.nucume.companion
+Terminal=false
+Categories=Network;Chat;Utility;
+Keywords=AI;LLM;companion;chat;

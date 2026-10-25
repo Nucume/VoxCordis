@@ -1,0 +1,165 @@
+{#- chatml-tools: adapted from llama.cpp models/templates/NousResearch-Hermes-3-Llama-3.1-8B-tool_use.jinja (MIT, ggml-org/llama.cpp). Used for GGUFs whose own template has no tool calling. -#}
+{%- macro json_to_python_type(json_spec) %}
+{%- set basic_type_map = {
+    "string": "str",
+    "number": "float",
+    "integer": "int",
+    "boolean": "bool"
+} %}
+
+{%- if basic_type_map[json_spec.type] is defined %}
+    {{- basic_type_map[json_spec.type] }}
+{%- elif json_spec.type == "array" %}
+    {{- "list[" +  json_to_python_type(json_spec|items) + "]"}}
+{%- elif json_spec.type == "object" %}
+    {%- if json_spec.additionalProperties is defined %}
+        {{- "dict[str, " + json_to_python_type(json_spec.additionalProperties) + ']'}}
+    {%- else %}
+        {{- "dict" }}
+    {%- endif %}
+{%- elif json_spec.type is iterable %}
+    {{- "Union[" }}
+    {%- for t in json_spec.type %}
+      {{- json_to_python_type({"type": t}) }}
+      {%- if not loop.last %}
+        {{- "," }} 
+    {%- endif %}
+    {%- endfor %}
+    {{- "]" }}
+{%- else %}
+    {{- "Any" }}
+{%- endif %}
+{%- endmacro %}
+
+
+{{- bos_token }}
+{#- VoxCordis: the app's system prompt comes first, in the same system turn as the tools, so roleplay finetunes read the character before the tool list and never see "You are a function calling AI model". -#}
+{%- if messages[0].role == "system" %}
+    {%- set system_message = messages[0].content %}
+    {%- set loop_messages = messages[1:] %}
+{%- else %}
+    {%- set system_message = "" %}
+    {%- set loop_messages = messages %}
+{%- endif %}
+{{- '<|im_start|>system
+' + system_message }}
+{%- if tools %}
+{{- "
+
+# Tools
+You can call these tools when they help. Tool calls are invisible to your human; never mention them in your reply. <tools> " }}
+{%- for tool in tools %}
+    {%- if tool.function is defined %}
+        {%- set tool = tool.function %}
+    {%- endif %}
+    {{- '{"type": "function", "function": ' }}
+    {{- '{"name": "' + tool.name + '", ' }}
+    {{- '"description": "' + tool.name + '(' }}
+    {%- for param_name, param_fields in tool.parameters.properties|items %}
+        {{- param_name + ": " + json_to_python_type(param_fields) }}
+        {%- if not loop.last %}
+            {{- ", " }}
+        {%- endif %}
+    {%- endfor %}
+    {{- ")" }}
+    {%- if tool.return is defined %}
+        {{- " -> " + json_to_python_type(tool.return) }}
+    {%- endif %}
+    {{- " - " + tool.description + "
+
+" }}
+    {%- for param_name, param_fields in tool.parameters.properties|items %}
+        {%- if loop.first %}
+            {{- "    Args:
+" }}
+        {%- endif %}
+        {{- "        " + param_name + "(" + json_to_python_type(param_fields) + "): " + (param_fields.description or "")|trim + "
+" }}
+    {%- endfor %}
+    {%- if tool.return is defined and tool.return.description is defined %}
+        {{- "
+    Returns:
+        " + tool.return.description }}
+    {%- endif %}
+    {{- '"' }}
+    {{- ', "parameters": ' }}
+    {%- if tool.parameters.properties | length == 0 %}
+        {{- "{}" }}
+    {%- else %}
+        {{- tool.parameters|tojson }}
+    {%- endif %}
+    {{- "}" }}
+    {%- if not loop.last %}
+        {{- "
+" }}
+    {%- endif %}
+{%- endfor %}
+{{- " </tools>
+To call a tool, write a JSON object with its name and arguments inside <tool_call></tool_call> tags:
+<tool_call>
+" }}
+{{- '{"name": <function-name>, "arguments": <args-dict>}' }}
+{{- "
+</tool_call>" }}
+{%- endif %}
+{{- '<|im_end|>
+' }}
+{%- for message in loop_messages %}
+    {%- if message.role == "user" or message.role == "system" or (message.role == "assistant" and message.tool_calls is not defined) %}
+        {{- '<|im_start|>' + message.role + '
+' + message.content + '<|im_end|>' + '
+' }}
+    {%- elif message.role == "assistant" %}
+        {{- '<|im_start|>' + message.role }}
+    {%- for tool_call in message.tool_calls %}
+       {{- '
+<tool_call>
+' }}           {%- if tool_call.function is defined %}
+                {%- set tool_call = tool_call.function %}
+            {%- endif %}
+            {{- '{' }}
+            {{- '"name": "' }}
+            {{- tool_call.name }}
+            {{- '"' }}
+            {{- ', '}}
+            {%- if tool_call.arguments is defined %}
+                {{- '"arguments": ' }}
+                {%- if tool_call.arguments is string %}
+                    {{- tool_call.arguments }}
+                {%- else %}
+                    {{- tool_call.arguments|tojson }}
+                {%- endif %}
+            {%- endif %}
+             {{- '}' }}
+            {{- '
+</tool_call>' }}
+    {%- endfor %}
+        {{- '<|im_end|>
+' }}
+    {%- elif message.role == "tool" %}
+        {%- if loop.previtem and loop.previtem.role != "tool" %}
+            {{- '<|im_start|>tool
+' }}
+        {%- endif %}
+        {{- '<tool_response>
+' }}
+        {{- message.content }}
+        {%- if not loop.last %}
+            {{- '
+</tool_response>
+' }}
+        {%- else %}
+            {{- '
+</tool_response>' }}
+        {%- endif %}
+        {%- if not loop.last and loop.nextitem.role != "tool" %}
+            {{- '<|im_end|>' }}
+        {%- elif loop.last %}
+            {{- '<|im_end|>' }}
+        {%- endif %}
+    {%- endif %}
+{%- endfor %}
+{%- if add_generation_prompt %}
+    {{- '<|im_start|>assistant
+' }}
+{%- endif %}

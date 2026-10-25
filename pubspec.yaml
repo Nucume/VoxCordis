@@ -1,0 +1,36 @@
+name: companion
+description: A private AI companion for the desktop. Runs a local LLM, keeps its files in a real folder and remembers in a memory you can edit.
+publish_to: 'none'
+version: 0.2.0+2
+
+environment:
+  sdk: ^3.8.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  file_selector: ^1.0.3
+  flutter_acrylic: ^1.1.4
+  http: ^1.2.2
+  path: ^1.9.0
+  path_provider: ^2.1.4
+  sqflite_common_ffi: ^2.3.4
+  url_launcher: ^6.3.1
+  uuid: ^4.5.1
+  intl: ^0.20.3
+  archive: ^4.5.2
+  crypto: ^3.0.6
+  desktop_webview_window: ^0.4.0
+  ffi: ^2.1.0
+  cryptography: ^2.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/brand/
+    - assets/chat_templates/
