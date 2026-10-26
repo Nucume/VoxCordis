@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../data/database_key.dart';
+import '../../shell/window_frame.dart';
 import '../../theme/app_theme.dart';
 
 /// Shown instead of the app when the chats and memories are encrypted but
@@ -22,10 +23,13 @@ class UnlockApp extends StatelessWidget {
     debugShowCheckedModeBanner: false,
     theme: AppTheme.dark(_accent),
     color: Colors.transparent,
-    home: AuroraBackground(
-      accent: _accent,
-      child: UnlockScreen(dbKey: dbKey, onUnlocked: onUnlocked),
+    builder: (context, navigator) => WindowCorners(
+      child: AuroraBackground(
+        accent: _accent,
+        child: WindowFrame(child: navigator!),
+      ),
     ),
+    home: UnlockScreen(dbKey: dbKey, onUnlocked: onUnlocked),
   );
 }
 

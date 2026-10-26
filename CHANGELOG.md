@@ -13,6 +13,20 @@ the ids); it is left out of the release page.
 ## Unreleased
 
 ### New
+- **A VoxCordis title bar** on Windows and Linux, in the app's own colours, with minimise, maximise and close. Drag it to move the window, double-click it to maximise. Prefer your system's bar? Turn on *Use the system title bar* in **Settings → Appearance**. On KDE that brings back the Breeze bar instead of the big GTK one. On Windows 11, hovering the maximise button still offers Snap Layouts.
+
+### Changed
+- **A much bigger Booru tags skill.** Your companion now has the real Danbooru vocabulary for faces, eyes, hair, clothes, poses, lighting, composition and adult scenes, split into small files it reads only when a picture needs them, so it fits even a small memory span. If you never changed the old Booru tags skill, it is replaced on its own; if you did, *Restore starter skills* in the Skills tab brings in the new one.
+
+### Fixed
+- **Open and Save dialogs look like your system's.** On Linux they come from your desktop now, so KDE shows its own file dialog. On Windows they no longer draw in the old classic style.
+- **Pickers in Settings no longer bump into each other.** The ones at the end of a row line up and have room to breathe.
+- **The Colorway orb fades with the theme.** Switching between dark and light no longer makes it jump to the new colours before the rest of the window.
+- **VoxCordis has its icon on Linux** in the system tray, Alt+Tab and the taskbar, instead of an empty spot or a generic "W". It also shows up in your app menu now.
+
+## 0.3.0
+
+### New
 - **Your companion can draw.** Turn on *Let your companion draw* in **Settings → Images** and download a picture model: Stable Diffusion XL, Anima Turbo or Anima Aesthetic (anime), Animagine XL 4.0 (anime) or RealVisXL 5.0 (photos). Or add your own .safetensors model, as Civitai offers them. Everything is drawn on your computer with stable-diffusion.cpp, and nothing leaves it. Your companion picks the model and LoRAs for each picture itself, and the picture shows up in the chat a little after its reply. You can draw by hand in the Images tab too, with an Advanced switch for the model, size, steps, guidance, seed and LoRA weights.
 - **LoRAs.** Add LoRA files in Settings → Images, with a .txt note beside each for its trigger words, and your companion uses them when they suit.
 - **A Booru tags skill** teaches your companion to write Danbooru-style tags for the anime models.

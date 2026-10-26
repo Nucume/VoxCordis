@@ -1,6 +1,7 @@
 #include "my_application.h"
 
 #include <flutter_linux/flutter_linux.h>
+#include <string.h>
 #ifdef GDK_WINDOWING_X11
 #include <gdk/gdkx.h>
 #endif
@@ -25,32 +26,36 @@ static void my_application_activate(GApplication* application) {
   GtkWindow* window =
       GTK_WINDOW(gtk_application_window_new(GTK_APPLICATION(application)));
 
-  // Use a header bar when running in GNOME as this is the common style used
-  // by applications and is the setup most users will be using (e.g. Ubuntu
-  // desktop).
-  // If running on X and not using GNOME then just use a traditional title bar
-  // in case the window manager does more exotic layout, e.g. tiling.
-  // If running on Wayland assume the header bar will work (may need changing
-  // if future cases occur).
-  gboolean use_header_bar = TRUE;
+  // VoxCordis draws its own title bar unless "Use the system title bar" is
+  // on (Settings > Appearance, kept as a flag file the app writes). For its
+  // own bar the window needs a GTK header bar, even off GNOME: GTK then
+  // draws the frame itself (shadow, resize edges) and the app hides the
+  // header bar before the first frame.
+  g_autofree gchar* system_bar_flag = g_build_filename(
+      g_get_user_data_dir(), APPLICATION_ID, "system-title-bar", nullptr);
+  gboolean own_bar = !g_file_test(system_bar_flag, G_FILE_TEST_EXISTS);
+
+  // With the system's bar: a header bar on GNOME, where it is the usual
+  // style. Elsewhere (KDE, tiling window managers) a traditional title bar,
+  // so the window manager draws its own decorations, e.g. KDE's Breeze.
+  const gchar* desktop = g_getenv("XDG_CURRENT_DESKTOP");
+  gboolean use_header_bar =
+      own_bar || (desktop != nullptr && strstr(desktop, "GNOME") != nullptr);
 #ifdef GDK_WINDOWING_X11
   GdkScreen* screen = gtk_window_get_screen(window);
-  if (GDK_IS_X11_SCREEN(screen)) {
+  if (!own_bar && GDK_IS_X11_SCREEN(screen)) {
     const gchar* wm_name = gdk_x11_screen_get_window_manager_name(screen);
-    if (g_strcmp0(wm_name, "GNOME Shell") != 0) {
-      use_header_bar = FALSE;
-    }
+    use_header_bar = g_strcmp0(wm_name, "GNOME Shell") == 0;
   }
 #endif
   if (use_header_bar) {
     GtkHeaderBar* header_bar = GTK_HEADER_BAR(gtk_header_bar_new());
-    gtk_widget_show(GTK_WIDGET(header_bar));
+    if (!own_bar) gtk_widget_show(GTK_WIDGET(header_bar));
     gtk_header_bar_set_title(header_bar, "VoxCordis");
     gtk_header_bar_set_show_close_button(header_bar, TRUE);
     gtk_window_set_titlebar(window, GTK_WIDGET(header_bar));
-  } else {
-    gtk_window_set_title(window, "VoxCordis");
   }
+  gtk_window_set_title(window, "VoxCordis");
 
   gtk_window_set_default_size(window, 1280, 820);
 

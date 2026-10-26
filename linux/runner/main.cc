@@ -8,6 +8,10 @@ int main(int argc, char** argv) {
   // notably on NVIDIA. The Soulkyn browser window doesn't need it. Set
   // before any thread starts; a value the user set wins.
   setenv("WEBKIT_DISABLE_DMABUF_RENDERER", "1", 0);
+  // Open and Save dialogs from the desktop itself (xdg-desktop-portal):
+  // KDE's own file dialog on Plasma, GNOME's on GNOME, instead of GTK's
+  // generic one everywhere. GTK falls back to its own where no portal runs.
+  setenv("GTK_USE_PORTAL", "1", 0);
 
   g_autoptr(MyApplication) app = my_application_new();
   return g_application_run(G_APPLICATION(app), argc, argv);

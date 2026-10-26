@@ -163,12 +163,17 @@ class Skills {
     var changed = false;
     final dir = dirIn(folder);
     for (final b in BuiltInSkills.all) {
-      if (state.seen.contains(b.id)) continue;
       final file = File(p.join(dir.path, b.id, fileName));
-      if (!await file.exists()) {
-        await file.parent.create(recursive: true);
-        await file.writeAsString(b.toMarkdown());
+      if (state.seen.contains(b.id)) {
+        // A newer version replaces an older one nobody changed.
+        if (b.older.isNotEmpty &&
+            await file.exists() &&
+            b.isOlder(await file.readAsString())) {
+          await _writeBuiltIn(dir, b);
+        }
+        continue;
       }
+      if (!await file.exists()) await _writeBuiltIn(dir, b);
       state.seen.add(b.id);
       if (b.on) state.on.add(b.id);
       changed = true;
@@ -199,6 +204,19 @@ class Skills {
     if (changed) await _saveState(folder, state);
     skills.sort((a, b) => a.displayTitle.compareTo(b.displayTitle));
     return skills;
+  }
+
+  /// Writes starter skill [b] into [dir]: its SKILL.md and the files that
+  /// come with it.
+  static Future<void> _writeBuiltIn(Directory dir, BuiltInSkill b) async {
+    final folder = Directory(p.join(dir.path, b.id));
+    await folder.create(recursive: true);
+    await File(p.join(folder.path, fileName)).writeAsString(b.toMarkdown());
+    for (final e in b.files.entries) {
+      final out = File(p.join(folder.path, e.key));
+      await out.parent.create(recursive: true);
+      await out.writeAsString(e.value);
+    }
   }
 
   static Future<Skill> _read(
@@ -414,9 +432,7 @@ class Skills {
   static Future<void> restoreBuiltIns(String folder) async {
     final state = await _state(folder);
     for (final b in BuiltInSkills.all) {
-      final file = File(p.join(dirIn(folder).path, b.id, fileName));
-      await file.parent.create(recursive: true);
-      await file.writeAsString(b.toMarkdown());
+      await _writeBuiltIn(dirIn(folder), b);
       state.seen.add(b.id);
       state.review.remove(b.id);
       if (b.on) state.on.add(b.id);

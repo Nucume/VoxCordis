@@ -10,11 +10,17 @@ import 'data/database_key.dart';
 import 'features/unlock/unlock_app.dart';
 import 'services/changelog.dart';
 import 'services/system/background.dart';
+import 'services/system/desktop_entry.dart';
+import 'shell/window_frame.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await _makeWindowTranslucent();
   final dir = await AppServices.supportDir();
+  // VoxCordis' own title bar, unless the system's was chosen.
+  await TitleBarChoice.load(dir);
+  // Linux: the icon for Alt+Tab and the taskbar.
+  DesktopEntry.install().ignore();
   final key = DatabaseKey(dir);
   // Started by the login item: out of the way once the window is up.
   final hidden = args.contains(Background.startHiddenArg);

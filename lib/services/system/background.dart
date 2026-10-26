@@ -187,10 +187,13 @@ class Background with WindowListener {
     }
   }
 
+  /// [command] quoted for a .desktop file's Exec line, as the spec asks.
+  static String quoteExec(String command) =>
+      '"${command.replaceAll(r'\', r'\\\\').replaceAll('"', r'\"').replaceAll(r'$', r'\$').replaceAll('`', r'\`')}"';
+
   /// The autostart .desktop file for [command], quoted as the spec asks.
   static String linuxAutostartEntry(String command) {
-    final quoted =
-        '"${command.replaceAll(r'\', r'\\\\').replaceAll('"', r'\"').replaceAll(r'$', r'\$').replaceAll('`', r'\`')}"';
+    final quoted = quoteExec(command);
     return '[Desktop Entry]\n'
         'Type=Application\n'
         'Name=VoxCordis\n'

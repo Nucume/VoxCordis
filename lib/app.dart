@@ -5,6 +5,7 @@ import 'data/looks.dart';
 import 'data/settings.dart';
 import 'features/setup/setup_wizard.dart';
 import 'shell/home_shell.dart';
+import 'shell/window_frame.dart';
 import 'theme/app_theme.dart';
 import 'theme/system_theme.dart';
 
@@ -92,26 +93,31 @@ class _CompanionAppState extends State<CompanionApp>
             glows: [for (final c in glows) Color(c)],
           ),
           color: Colors.transparent,
-          home: AuroraBackground(
-            accent: accent,
-            colors: [for (final c in glows) Color(c)],
-            layout:
-                settings.value.backgroundLayout ??
-                AuroraBackground.defaultLayout,
-            // Moving only during setup: it costs the graphics card the model
-            // needs.
-            animate: setup,
-            // First run (no home folder yet) goes through setup, and so
-            // does adding another companion. The window is rebuilt for each
-            // companion, so nothing of the last one stays on screen.
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 500),
-              child: setup
-                  ? SetupWizard(key: ValueKey(adding), addingAnother: adding)
-                  : HomeShell(
-                      key: ValueKey('companion:${settings.value.companionId}'),
-                    ),
+          // The background under everything, the title bar included, and
+          // the pages under the title bar.
+          builder: (context, navigator) => WindowCorners(
+            child: AuroraBackground(
+              accent: accent,
+              colors: [for (final c in glows) Color(c)],
+              layout:
+                  settings.value.backgroundLayout ??
+                  AuroraBackground.defaultLayout,
+              // Moving only during setup: it costs the graphics card the
+              // model needs.
+              animate: setup,
+              child: WindowFrame(child: navigator!),
             ),
+          ),
+          // First run (no home folder yet) goes through setup, and so does
+          // adding another companion. The window is rebuilt for each
+          // companion, so nothing of the last one stays on screen.
+          home: AnimatedSwitcher(
+            duration: const Duration(milliseconds: 500),
+            child: setup
+                ? SetupWizard(key: ValueKey(adding), addingAnother: adding)
+                : HomeShell(
+                    key: ValueKey('companion:${settings.value.companionId}'),
+                  ),
           ),
         );
       },

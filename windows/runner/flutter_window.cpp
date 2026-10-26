@@ -1,13 +1,17 @@
 #include "flutter_window.h"
 
+#include <commctrl.h>
 #include <flutter/standard_method_codec.h>
+#include <windowsx.h>
 
 #include <optional>
+#include <vector>
 
 #include "flutter/generated_plugin_registrant.h"
 #include "resource.h"
 
 #pragma comment(lib, "shell32.lib")
+#pragma comment(lib, "comctl32.lib")
 
 namespace {
 
@@ -61,6 +65,37 @@ bool FlutterWindow::OnCreate() {
         }
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+
+  view_hwnd_ = flutter_controller_->view()->GetNativeWindow();
+  SetWindowSubclass(view_hwnd_, ViewSubclassProc, 1,
+                    reinterpret_cast<DWORD_PTR>(this));
+  window_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "voxcordis/window",
+          &flutter::StandardMethodCodec::GetInstance());
+  window_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        if (call.method_name() != "maxButton") {
+          result->NotImplemented();
+          return;
+        }
+        // [left, top, right, bottom], or null when VoxCordis' bar is off.
+        max_button_ = {};
+        const auto* rect = std::get_if<std::vector<flutter::EncodableValue>>(
+            call.arguments());
+        if (rect != nullptr && rect->size() == 4) {
+          LONG side[4];
+          for (size_t i = 0; i < 4; i++) {
+            const auto* v = std::get_if<double>(&(*rect)[i]);
+            side[i] = v == nullptr ? 0 : static_cast<LONG>(*v + 0.5);
+          }
+          max_button_ = {side[0], side[1], side[2], side[3]};
+        }
+        if (IsRectEmpty(&max_button_)) SetMaxButtonState(false, false);
+        result->Success();
+      });
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -119,6 +154,47 @@ void FlutterWindow::ShowTrayMenu() {
   }
 }
 
+// The Flutter view lets the pointer through over the maximise button, so
+// the hit test reaches the top-level window (MessageHandler), which answers
+// HTMAXBUTTON.
+LRESULT CALLBACK FlutterWindow::ViewSubclassProc(HWND hwnd, UINT message,
+                                                 WPARAM wparam, LPARAM lparam,
+                                                 UINT_PTR id, DWORD_PTR data) {
+  auto* self = reinterpret_cast<FlutterWindow*>(data);
+  if (message == WM_NCHITTEST && self->OverMaxButton(lparam)) {
+    return HTTRANSPARENT;
+  }
+  if (message == WM_NCDESTROY) {
+    RemoveWindowSubclass(hwnd, ViewSubclassProc, id);
+  }
+  return DefSubclassProc(hwnd, message, wparam, lparam);
+}
+
+bool FlutterWindow::OverMaxButton(LPARAM screen_point) const {
+  if (view_hwnd_ == nullptr || IsRectEmpty(&max_button_)) {
+    return false;
+  }
+  POINT point = {GET_X_LPARAM(screen_point), GET_Y_LPARAM(screen_point)};
+  ScreenToClient(view_hwnd_, &point);
+  return PtInRect(&max_button_, point) != FALSE;
+}
+
+// Tells the title bar to light the button up, as Flutter no longer sees the
+// pointer there.
+void FlutterWindow::SetMaxButtonState(bool hover, bool down) {
+  if (hover == max_hover_ && down == max_down_) {
+    return;
+  }
+  max_hover_ = hover;
+  max_down_ = down;
+  if (window_channel_) {
+    window_channel_->InvokeMethod(
+        "maxButtonState",
+        std::make_unique<flutter::EncodableValue>(flutter::EncodableList{
+            flutter::EncodableValue(hover), flutter::EncodableValue(down)}));
+  }
+}
+
 void FlutterWindow::OnDestroy() {
   HideTray();
   if (flutter_controller_) {
@@ -140,6 +216,48 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     if (result) {
       return *result;
     }
+  }
+
+  // VoxCordis' maximise button, as Windows sees it (see ViewSubclassProc).
+  switch (message) {
+    case WM_NCHITTEST:
+      if (OverMaxButton(lparam)) {
+        return HTMAXBUTTON;
+      }
+      break;
+    case WM_NCMOUSEMOVE:
+      if (wparam == HTMAXBUTTON) {
+        if (!max_hover_) {
+          TRACKMOUSEEVENT track = {sizeof(track), TME_LEAVE | TME_NONCLIENT,
+                                   hwnd, 0};
+          TrackMouseEvent(&track);
+        }
+        SetMaxButtonState(true, max_down_);
+        return 0;
+      }
+      SetMaxButtonState(false, false);
+      break;
+    case WM_NCMOUSELEAVE:
+      SetMaxButtonState(false, false);
+      break;
+    case WM_NCLBUTTONDOWN:
+    case WM_NCLBUTTONDBLCLK:
+      if (wparam == HTMAXBUTTON) {
+        // Not DefWindowProc: it would draw the classic button over ours.
+        SetMaxButtonState(true, true);
+        return 0;
+      }
+      break;
+    case WM_NCLBUTTONUP:
+      if (wparam == HTMAXBUTTON) {
+        const bool clicked = max_down_;
+        SetMaxButtonState(true, false);
+        if (clicked) {
+          ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
+        }
+        return 0;
+      }
+      break;
   }
 
   if (message == kTaskbarCreated && tray_shown_) {

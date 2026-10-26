@@ -178,8 +178,9 @@ class StatusNotifierItem extends DBusObject {
     'Title': const DBusString('VoxCordis'),
     'Status': const DBusString('Active'),
     'WindowId': const DBusInt32(0),
-    // A themed icon when the package installed one; the pixels otherwise.
-    'IconName': const DBusString('com.nucume.companion'),
+    // The pixels only: KDE shows an empty spot for an icon name it can't
+    // find in the theme, rather than falling back to them.
+    'IconName': const DBusString(''),
     'IconThemePath': const DBusString(''),
     'IconPixmap': _pixmaps(icon),
     'OverlayIconName': const DBusString(''),

@@ -149,6 +149,7 @@ class GlassSelect<T> extends StatefulWidget {
     required this.onChanged,
     this.label,
     this.width,
+    this.minWidth,
   });
 
   final T value;
@@ -160,6 +161,10 @@ class GlassSelect<T> extends StatefulWidget {
 
   /// The button's width; it fits its widest option when null.
   final double? width;
+
+  /// The least it gets when it fits its option, so pickers stacked in a
+  /// column line up whatever they show.
+  final double? minWidth;
 
   @override
   State<GlassSelect<T>> createState() => _GlassSelectState<T>();
@@ -304,6 +309,9 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
               duration: const Duration(milliseconds: 160),
               width: widget.width,
               height: 36,
+              constraints: widget.minWidth == null
+                  ? null
+                  : BoxConstraints(minWidth: widget.minWidth!),
               padding: const EdgeInsets.only(left: 10, right: 6),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(12),
@@ -318,21 +326,30 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
               ),
               child: Row(
                 mainAxisSize: MainAxisSize.min,
+                // Past [minWidth], the option stays left and the arrow right.
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  if (current?.leading case final leading?) ...[
-                    leading,
-                    const SizedBox(width: 8),
-                  ],
                   Flexible(
                     fit: widget.width == null ? FlexFit.loose : FlexFit.tight,
-                    child: Text(
-                      current?.label ?? '',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 14,
-                        color: enabled ? palette.text : palette.textMuted,
-                      ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (current?.leading case final leading?) ...[
+                          leading,
+                          const SizedBox(width: 8),
+                        ],
+                        Flexible(
+                          child: Text(
+                            current?.label ?? '',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 14,
+                              color: enabled ? palette.text : palette.textMuted,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                   const SizedBox(width: 4),

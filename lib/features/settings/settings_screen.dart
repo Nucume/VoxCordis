@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show listEquals;
@@ -23,6 +24,7 @@ import 'image_settings.dart';
 import 'internet_settings.dart';
 import '../update/whats_new_dialog.dart';
 import 'model_picker.dart';
+import '../../shell/window_frame.dart';
 import '../../shell/runtime_status.dart';
 import 'sight_settings.dart';
 
@@ -327,6 +329,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+      if (TitleBarChoice.supported) ...[
+        const SizedBox(height: 6),
+        ValueListenableBuilder<bool>(
+          valueListenable: TitleBarChoice.system,
+          builder: (context, system, _) => SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: system,
+            onChanged: (on) => TitleBarChoice.set(systemBar: on),
+            title: const Text('Use the system title bar'),
+            subtitle: Text(
+              Platform.isLinux
+                  ? "Your desktop's own bar instead of the VoxCordis one. "
+                        'Looks its best after a restart.'
+                  : 'The Windows bar instead of the VoxCordis one.',
+              style: TextStyle(fontSize: 12, color: context.palette.textMuted),
+            ),
+          ),
+        ),
+      ],
     ];
   }
 
@@ -446,6 +467,7 @@ class _Background extends StatelessWidget {
               ),
             ),
             GlassSelect<int>(
+              minWidth: _Poke.pickerWidth,
               value: _limits.contains(value.automationRunsPerDay)
                   ? value.automationRunsPerDay
                   : 24,
@@ -477,14 +499,20 @@ class _Poke extends StatelessWidget {
 
   static const _hours = [0, 1, 2, 3, 6, 12];
 
+  /// The pickers at the end of the rows here and in [_Background], one width
+  /// so they line up.
+  static const pickerWidth = 150.0;
+
   Widget _dropdown(
     BuildContext context,
     int value,
     List<int> options,
     String Function(int) label,
-    ValueChanged<int> onPicked,
-  ) => GlassSelect<int>(
+    ValueChanged<int> onPicked, {
+    double? minWidth,
+  }) => GlassSelect<int>(
     value: value,
+    minWidth: minWidth,
     options: [for (final o in options) GlassOption(o, label(o))],
     onChanged: onPicked,
   );
@@ -501,6 +529,8 @@ class _Poke extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        // Apart from the picker above it, so the two don't touch.
+        const SizedBox(height: 10),
         Row(
           children: [
             Expanded(
@@ -516,6 +546,7 @@ class _Poke extends StatelessWidget {
                 _ => 'After $h hours',
               },
               (h) => onChanged(value.copyWith(pokeAfterHours: h)),
+              minWidth: pickerWidth,
             ),
             const SizedBox(width: 8),
             InfoIcon(
@@ -540,6 +571,7 @@ class _Poke extends StatelessWidget {
               style: muted,
             ),
           ),
+          const SizedBox(height: 4),
           Row(
             children: [
               Expanded(child: Text('No pokes from', style: text)),
@@ -871,18 +903,33 @@ class _Colorways extends StatelessWidget {
 class _Orb extends StatelessWidget {
   const _Orb({required this.base, required this.glows});
 
-  _Orb.of(BuildContext context, Look look)
-    : base = _baseOf(context, look),
-      glows = look.colorsIn(light: _light(context));
+  /// [look] in the current theme. While the theme fades between dark and
+  /// light the orb fades with it, rather than switching all at once.
+  factory _Orb.of(BuildContext context, Look look) {
+    final t = context.palette.lightness;
+    final dark = look.colorsIn(light: false);
+    final light = look.colorsIn(light: true);
+    return _Orb(
+      base: Color.lerp(
+        _baseOf(look, light: false),
+        _baseOf(look, light: true),
+        t,
+      )!,
+      glows: [
+        for (var i = 0; i < math.max(dark.length, light.length); i++)
+          Color.lerp(
+            Color(dark[math.min(i, dark.length - 1)]),
+            Color(light[math.min(i, light.length - 1)]),
+            t,
+          )!.toARGB32(),
+      ],
+    );
+  }
 
   final Color base;
   final List<int> glows;
 
-  static bool _light(BuildContext context) =>
-      Theme.of(context).brightness == Brightness.light;
-
-  static Color _baseOf(BuildContext context, Look look) {
-    final light = _light(context);
+  static Color _baseOf(Look look, {required bool light}) {
     final own = light ? look.lightBase : look.base;
     if (own != null) return Color(own);
     return (light ? AppPalette.light : AppPalette.dark).background;

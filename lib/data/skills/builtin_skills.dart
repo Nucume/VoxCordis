@@ -1,3 +1,4 @@
+import 'booru_tags.dart';
 import 'skills.dart';
 
 /// The starter skills VoxCordis writes into a companion's folder the first
@@ -129,41 +130,87 @@ usually wake up.
     id: 'booru-tags',
     title: 'Booru tags',
     description:
-        'Write prompts as Danbooru-style tags for anime picture models '
-        '(Anima, Animagine, Illustrious, Pony), before draw_picture.',
+        'Danbooru tag vocabulary and workflow for anime picture models '
+        '(Anima, Animagine, Illustrious, Pony): read it before draw_picture, '
+        'then open only the tag files the picture needs.',
+    files: booruTagFiles,
+    older: [_booruTagsV1],
     body: '''
-# Booru tags
+# Danbooru-informed anime prompting
 
-Anime models learned from Danbooru, so they understand its tags far better
-than sentences. Build the prompt from tags, comma-separated:
+Danbooru is a human-maintained vocabulary and reference-search system, not a
+universal prompt language. Its tags help name compact, visually grounded
+concepts, especially for anime checkpoints trained on Danbooru-like
+captions, but how a tag behaves depends on the model, its tokenizer, its
+captions and when it was trained.
 
-1. **Who and how many:** 1girl, 1boy, 2girls, 1other, solo, multiple girls.
-2. **Character and series**, if it is a known one: hatsune miku, vocaloid.
-   Brackets in a name are escaped: `hoshimachi suisei \\(1st costume\\)`.
-3. **Rating:** safe, sensitive, nsfw or explicit. Pick what your human
-   asked for; when unsure, safe.
-4. **Looks:** hair (long hair, silver hair, twintails, ahoge), eyes (blue
-   eyes, heterochromia), body, expression (smile, blush, closed eyes,
-   open mouth). For yourself, take them from the looks in personality.md.
-5. **Clothes:** one tag each: white dress, black thighhighs, hoodie.
-6. **Pose and framing:** standing, sitting, looking at viewer, from side,
-   upper body, full body, close-up, cowboy shot.
-7. **Place and light:** outdoors, bedroom, night, cherry blossoms, rain,
-   sunset, backlighting.
-8. **Style or artist**, if wanted. Anima wants an @ before an artist:
-   @name.
+## Tag files: read only what you need
 
-Rules:
-- Lowercase, spaces instead of underscores (score_7 style tags are the only
-  ones with underscores).
-- 15 to 40 tags is plenty. Don't repeat a tag; don't write sentences in
-  between unless the model takes both (Anima does).
-- Quality tags (masterpiece, best quality…) are added by VoxCordis; leave
-  them out.
-- What to avoid goes in negative_prompt as tags too: extra fingers, text,
-  watermark.
-- Weights: (tag:1.3) makes a tag stronger. Anima needs higher ones, like
-  (chibi:2).
+The real tag vocabulary is in files next to this one, one per tag group.
+Don't guess tags: read_file the one or two files the picture needs (e.g.
+skills/booru-tags/tags/hair-styles.md) and pick from them.
+
+- tags/face.md: emotions, smiles, gazes, eye states, mouth, eyebrows
+- tags/eyes.md: iris colors, pupils, eye shapes
+- tags/hair-styles.md: length, braids, buns, ponytails, bangs
+- tags/skin-color.md: natural and unnatural skin
+- tags/image-composition.md: view angle, perspective, framing, styles
+- tags/lighting.md: light direction, types, time of day, sources
+- tags/posture.md: positions, movement, arms, legs, poses
+- tags/hands.md: hands on self or someone else
+- tags/gestures.md: hand and finger gestures
+- tags/attire.md: tops, bottoms, footwear, uniforms, jewelry
+- tags/dress.md, tags/legwear.md, tags/headwear.md, tags/eyewear.md,
+  tags/neck-and-neckwear.md: those in detail
+- tags/breasts.md, tags/ass.md: sizes, shapes, clothes, interactions
+- tags/nudity.md: full and partial nudity
+- tags/sexual-positions.md, tags/sex-acts.md: explicit scenes
+
+## Core categories
+
+- **artist**: creator of an individual image, not the franchise owner.
+- **character**: named fictional character.
+- **copyright**: source work/franchise.
+- **general**: visible concepts: clothes, pose, composition, setting,
+  color, visual attributes.
+- **meta**: database/post information, not scene content.
+
+An alias maps old names or spellings to a canonical tag; an implication
+means a narrow tag implies a broader one. Neither is a guarantee the model
+learned it, and a character tag doesn't add its series: write both.
+
+## Workflow
+
+1. Follow how the picture model wants prompts (draw_picture says so).
+2. Start with a small set of unambiguous visual tags: who and how many
+   (1girl, 1boy, solo), then looks, clothes, pose, place, light. For
+   yourself, take your looks from personality.md.
+3. Add composition and camera tags only as needed: upper body, full body,
+   from above, looking at viewer.
+4. Keep character, copyright, artist and style tags separate so their
+   effects can be told apart.
+5. Use negative tags sparingly: a tag the model never learned does nothing.
+6. Rating: safe, sensitive, nsfw or explicit. Pick what your human asked
+   for; when unsure, safe.
+
+## In VoxCordis
+
+- Lowercase, comma-separated, spaces instead of underscores.
+- 15 to 40 tags is plenty. Don't repeat a tag.
+- Brackets in a name are escaped: `hoshimachi suisei \\(1st costume\\)`.
+- Quality tags (masterpiece, best quality…) are added for you; leave them
+  out.
+- What to avoid goes in negative_prompt, as tags too.
+- (tag:1.3) makes a tag stronger. Anima needs higher ones, like (chibi:2),
+  and wants an @ before an artist: @name.
+
+## Limits and rights
+
+Don't use an artist tag to imitate a living artist's distinctive style.
+Describe what carries over instead: medium, line quality, palette,
+lighting, composition, rendering. Tag frequency is not visual importance,
+and no tag list proves what a particular model knows. The full guide, with
+licensing notes, is guide.md; where the tags come from is sources.md.
 ''',
   );
 
@@ -208,6 +255,8 @@ class BuiltInSkill {
     required this.body,
     this.on = true,
     this.always = false,
+    this.files = const {},
+    this.older = const [],
   });
 
   final String id;
@@ -219,6 +268,20 @@ class BuiltInSkill {
   final bool on;
   final bool always;
 
+  /// Files that come with it besides SKILL.md, by path in its folder.
+  final Map<String, String> files;
+
+  /// Earlier versions of its SKILL.md. A companion that still has one of
+  /// them, untouched, gets this version and its files on the next load.
+  final List<String> older;
+
+  /// Whether [text] is an earlier version of this skill's SKILL.md.
+  bool isOlder(String text) {
+    String norm(String v) => v.replaceAll('\r\n', '\n').trim();
+    final t = norm(text);
+    return older.any((o) => norm(o) == t);
+  }
+
   String toMarkdown() => Skills.markdown(
     id: id,
     title: title,
@@ -227,3 +290,45 @@ class BuiltInSkill {
     body: body,
   );
 }
+
+/// The first booru-tags SKILL.md, before it came with tag files.
+const _booruTagsV1 = '''
+---
+name: booru-tags
+title: "Booru tags"
+description: "Write prompts as Danbooru-style tags for anime picture models (Anima, Animagine, Illustrious, Pony), before draw_picture."
+---
+
+# Booru tags
+
+Anime models learned from Danbooru, so they understand its tags far better
+than sentences. Build the prompt from tags, comma-separated:
+
+1. **Who and how many:** 1girl, 1boy, 2girls, 1other, solo, multiple girls.
+2. **Character and series**, if it is a known one: hatsune miku, vocaloid.
+   Brackets in a name are escaped: `hoshimachi suisei \\(1st costume\\)`.
+3. **Rating:** safe, sensitive, nsfw or explicit. Pick what your human
+   asked for; when unsure, safe.
+4. **Looks:** hair (long hair, silver hair, twintails, ahoge), eyes (blue
+   eyes, heterochromia), body, expression (smile, blush, closed eyes,
+   open mouth). For yourself, take them from the looks in personality.md.
+5. **Clothes:** one tag each: white dress, black thighhighs, hoodie.
+6. **Pose and framing:** standing, sitting, looking at viewer, from side,
+   upper body, full body, close-up, cowboy shot.
+7. **Place and light:** outdoors, bedroom, night, cherry blossoms, rain,
+   sunset, backlighting.
+8. **Style or artist**, if wanted. Anima wants an @ before an artist:
+   @name.
+
+Rules:
+- Lowercase, spaces instead of underscores (score_7 style tags are the only
+  ones with underscores).
+- 15 to 40 tags is plenty. Don't repeat a tag; don't write sentences in
+  between unless the model takes both (Anima does).
+- Quality tags (masterpiece, best quality…) are added by VoxCordis; leave
+  them out.
+- What to avoid goes in negative_prompt as tags too: extra fingers, text,
+  watermark.
+- Weights: (tag:1.3) makes a tag stronger. Anima needs higher ones, like
+  (chibi:2).
+''';

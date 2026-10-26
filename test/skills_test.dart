@@ -46,6 +46,42 @@ void main() {
     expect(byId(await Skills.load(folder), 'weather').on, isTrue);
   });
 
+  test('booru tags come with tag files, and replace the old version', () async {
+    var booru = byId(await Skills.load(folder), 'booru-tags');
+    expect(booru.on, isTrue);
+    expect(booru.problem, isNull);
+    expect(booru.files, containsAll(['guide.md', 'tags/lighting.md']));
+    expect(booru.files.length, BuiltInSkills.booruTags.files.length);
+    // The instructions fit a small memory span whole.
+    expect(booru.body.length, lessThanOrEqualTo(Skills.bodyCharsFor(4096)));
+    for (final f in booru.files) {
+      expect(booru.body, contains(f.replaceAll('tags/', '')));
+    }
+    final used = Skills.forTool(booru, contextSize: 4096);
+    expect(used['instructions'], isNot(contains('cut short')));
+    expect(used['files'], contains('skills/booru-tags/tags/hair-styles.md'));
+
+    // A companion from before: the old SKILL.md, untouched, gets replaced.
+    final dir = Directory(p.join(folder, 'skills', 'booru-tags'));
+    await dir.delete(recursive: true);
+    await dir.create(recursive: true);
+    final md = File(p.join(dir.path, 'SKILL.md'));
+    await md.writeAsString(BuiltInSkills.booruTags.older.first);
+    booru = byId(await Skills.load(folder), 'booru-tags');
+    expect(booru.description, BuiltInSkills.booruTags.description);
+    expect(booru.files, contains('tags/sex-acts.md'));
+
+    // One its human changed is theirs and stays.
+    await dir.delete(recursive: true);
+    await dir.create(recursive: true);
+    await md.writeAsString(
+      '${BuiltInSkills.booruTags.older.first}\n- My own rule.\n',
+    );
+    booru = byId(await Skills.load(folder), 'booru-tags');
+    expect(booru.body, contains('My own rule.'));
+    expect(booru.files, isEmpty);
+  });
+
   test('parses Claude-style headers, quoted and folded', () {
     final parsed = Skills.parse(
       '---\n'

@@ -41,6 +41,22 @@ class FlutterWindow : public Win32Window {
       tray_channel_;
   NOTIFYICONDATA tray_icon_{};
   bool tray_shown_ = false;
+
+  // VoxCordis' own title bar draws its maximise button in Flutter. Windows 11
+  // only offers Snap Layouts over a real one, so the spot of that button
+  // (from Dart over "voxcordis/window", in the Flutter view's physical
+  // pixels) is reported to Windows as the maximise button.
+  static LRESULT CALLBACK ViewSubclassProc(HWND hwnd, UINT message,
+                                           WPARAM wparam, LPARAM lparam,
+                                           UINT_PTR id, DWORD_PTR data);
+  bool OverMaxButton(LPARAM screen_point) const;
+  void SetMaxButtonState(bool hover, bool down);
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      window_channel_;
+  HWND view_hwnd_ = nullptr;
+  RECT max_button_{};
+  bool max_hover_ = false;
+  bool max_down_ = false;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

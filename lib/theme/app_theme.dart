@@ -21,6 +21,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     required this.bubble,
     required this.codeFill,
     required this.glowAlpha,
+    this.lightness = 0,
     this.highlight,
     this.rim = defaultRim,
   });
@@ -49,6 +50,11 @@ class AppPalette extends ThemeExtension<AppPalette> {
 
   /// How strong the background glows are at their centre.
   final double glowAlpha;
+
+  /// 0 dark, 1 light, and in between while the theme fades from one to the
+  /// other. Theme brightness flips halfway instead, so anything drawn
+  /// differently per theme (the colorway orbs) blends by this to keep pace.
+  final double lightness;
 
   /// A colorway's sharp accent for the few places that stand out (send,
   /// the chosen tab, the portrait's rim), where the rest of the app uses a
@@ -96,6 +102,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     bubble: bubble,
     codeFill: codeFill,
     glowAlpha: glowAlpha,
+    lightness: lightness,
     highlight: highlight,
     rim: rim,
   );
@@ -113,6 +120,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     bubble: bubble,
     codeFill: codeFill,
     glowAlpha: glowAlpha,
+    lightness: lightness,
     highlight: highlight,
     rim: rim ?? this.rim,
   );
@@ -143,6 +151,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     bubble: Color(0x0F000000),
     codeFill: Color(0x14000000),
     glowAlpha: 0.28,
+    lightness: 1,
   );
 
   static AppPalette of(BuildContext context) =>
@@ -168,6 +177,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
       bubble: Color.lerp(bubble, other.bubble, t)!,
       codeFill: Color.lerp(codeFill, other.codeFill, t)!,
       glowAlpha: lerpDouble(glowAlpha, other.glowAlpha, t)!,
+      lightness: lerpDouble(lightness, other.lightness, t)!,
       highlight: Color.lerp(highlight, other.highlight, t),
       rim: [
         for (var i = 0; i < rim.length && i < other.rim.length; i++)
