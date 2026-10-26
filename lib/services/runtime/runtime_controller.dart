@@ -81,6 +81,10 @@ class RuntimeController extends ChangeNotifier {
     if (modelPath == null) {
       return Future.error(StateError('Choose a model in Settings first.'));
     }
+    // A picture is being drawn with the graphics card to itself.
+    if (_drawing case final drawing?) {
+      return drawing.then((_) => ensureReady(s));
+    }
     final config = (
       model: modelPath,
       ctx: s.contextSize,
@@ -176,7 +180,7 @@ class RuntimeController extends ChangeNotifier {
     _idleTimer?.cancel();
     _idleTimer = null;
     if (s.llmMode != LlmMode.builtIn || !s.freeGpuWhenIdle) return;
-    if (warm && _server == null && s.modelPath != null) {
+    if (warm && _server == null && s.modelPath != null && _drawing == null) {
       ensureReady(s).ignore();
     }
     if (_holds > 0) return;
@@ -192,6 +196,20 @@ class RuntimeController extends ChangeNotifier {
     _holds++;
     _idleTimer?.cancel();
     _idleTimer = null;
+  }
+
+  /// A reply or rewrite is running.
+  bool get busy => _holds > 0;
+
+  Future<void>? _drawing;
+
+  /// Unloads the chat model and Eyes, and keeps them unloaded until [done]
+  /// completes: a picture is drawn meanwhile.
+  Future<void> freeForDrawing(Future<void> done) async {
+    final drawing = done.whenComplete(() => _drawing = null);
+    _drawing = drawing;
+    drawing.ignore();
+    await stopAll();
   }
 
   /// Whether the models are set to unload when nothing happens.

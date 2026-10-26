@@ -14,6 +14,7 @@ import '../../services/runtime/gpu_info.dart';
 import '../../services/runtime/model_catalog.dart';
 import '../../services/sight.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/glass_popover.dart';
 
 /// Chooses the companion's brain: a model for the built-in runtime (download
 /// one or attach a .gguf), or a server-hosted OpenAI-compatible API: a
@@ -509,26 +510,28 @@ class _ModelPickerState extends State<ModelPicker> {
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                DropdownMenu<int>(
-                  // Rebuilt when the span is picked for the user.
-                  key: ValueKey(_v.contextSize),
-                  initialSelection: _v.contextSize,
-                  label: const Text('Memory span'),
-                  helperText: _spanPicked ? 'Fits your graphics card' : null,
-                  width: 190,
-                  onSelected: (c) {
-                    if (c != null) {
-                      _spanTouched = true;
-                      _spanPicked = false;
-                      widget.onChanged(_v.copyWith(contextSize: c));
-                    }
-                  },
-                  dropdownMenuEntries: const [
-                    DropdownMenuEntry(value: 4096, label: 'Short (4k)'),
-                    DropdownMenuEntry(value: 8192, label: 'Normal (8k)'),
-                    DropdownMenuEntry(value: 16384, label: 'Long (16k)'),
-                    DropdownMenuEntry(value: 32768, label: 'Very long (32k)'),
+                GlassSelect<int>(
+                  label: _spanPicked
+                      ? 'Memory span · fits your graphics card'
+                      : 'Memory span',
+                  value: _v.contextSize,
+                  options: [
+                    for (final (size, name) in [
+                      (4096, 'Short (4k)'),
+                      (8192, 'Normal (8k)'),
+                      (16384, 'Long (16k)'),
+                      (32768, 'Very long (32k)'),
+                      // A size set some other way still shows.
+                      if (![4096, 8192, 16384, 32768].contains(_v.contextSize))
+                        (_v.contextSize, '${_v.contextSize ~/ 1024}k'),
+                    ])
+                      GlassOption(size, name),
                   ],
+                  onChanged: (c) {
+                    _spanTouched = true;
+                    _spanPicked = false;
+                    widget.onChanged(_v.copyWith(contextSize: c));
+                  },
                 ),
                 const SizedBox(width: 8),
                 const InfoIcon(
@@ -1142,21 +1145,19 @@ class _BrainAdvancedState extends State<BrainAdvanced> {
                   ', set for ${catalog.name}',
                 )
               else
-                DropdownMenu<String>(
-                  key: ValueKey(_v.chatFormat),
-                  initialSelection: _v.chatFormat ?? '',
-                  label: const Text('Chat format'),
-                  width: 260,
-                  onSelected: (f) => widget.onChanged(
-                    f == null || f.isEmpty
+                GlassSelect<String>(
+                  label: 'Chat format',
+                  value: _v.chatFormat ?? '',
+                  options: [
+                    const GlassOption('', 'Automatic'),
+                    for (final f in ChatFormat.values)
+                      GlassOption(f.name, f.label),
+                  ],
+                  onChanged: (f) => widget.onChanged(
+                    f.isEmpty
                         ? _v.copyWith(clearChatFormat: true)
                         : _v.copyWith(chatFormat: f),
                   ),
-                  dropdownMenuEntries: [
-                    const DropdownMenuEntry(value: '', label: 'Automatic'),
-                    for (final f in ChatFormat.values)
-                      DropdownMenuEntry(value: f.name, label: f.label),
-                  ],
                 ),
               const SizedBox(width: 8),
               InfoIcon(

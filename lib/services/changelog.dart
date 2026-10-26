@@ -27,23 +27,33 @@ class ChangelogEntry {
 final _heading = RegExp(r'^##\s+v?(\d+\.\d+\.\d+\S*)');
 final _action = RegExp(r'^\s*\{\{action:([a-z0-9-]+)\}\}\s*$');
 
+final _unreleased = RegExp(r'^##\s+unreleased\b', caseSensitive: false);
+
 /// Reads CHANGELOG.md: each `## x.y.z` heading starts a version (anything
-/// after the number, like a date, is ignored); other `##` headings, such as
-/// "Unreleased", are skipped. Newest first, whatever order the file has.
-List<ChangelogEntry> parseChangelog(String markdown) {
+/// after the number, like a date, is ignored); other `##` headings are
+/// skipped. Newest first, whatever order the file has.
+///
+/// "Unreleased" is skipped too, unless [unreleasedAs] names a version the
+/// file has no section for: then those notes count as that version's. A
+/// release tagged before its heading was renamed still gets its notes.
+List<ChangelogEntry> parseChangelog(String markdown, {String? unreleasedAs}) {
   final entries = <ChangelogEntry>[];
+  ChangelogEntry? unreleased;
   String? version;
   var lines = <String>[];
   var actions = <String>[];
   void flush() {
     if (version != null) {
-      entries.add(
-        ChangelogEntry(
-          version: version,
-          notes: lines.join('\n').trim(),
-          actions: actions,
-        ),
+      final entry = ChangelogEntry(
+        version: version,
+        notes: lines.join('\n').trim(),
+        actions: actions,
       );
+      if (identical(version, _unreleasedMark)) {
+        unreleased = entry;
+      } else {
+        entries.add(entry);
+      }
     }
     lines = [];
     actions = [];
@@ -52,7 +62,9 @@ List<ChangelogEntry> parseChangelog(String markdown) {
   for (final line in markdown.split('\n')) {
     if (line.startsWith('## ')) {
       flush();
-      version = _heading.firstMatch(line)?.group(1);
+      version =
+          _heading.firstMatch(line)?.group(1) ??
+          (_unreleased.hasMatch(line) ? _unreleasedMark : null);
     } else if (version != null) {
       final a = _action.firstMatch(line);
       if (a != null) {
@@ -63,9 +75,20 @@ List<ChangelogEntry> parseChangelog(String markdown) {
     }
   }
   flush();
+  final u = unreleased;
+  if (unreleasedAs != null &&
+      u != null &&
+      u.notes.isNotEmpty &&
+      !entries.any((e) => compareVersions(e.version, unreleasedAs) == 0)) {
+    entries.add(
+      ChangelogEntry(version: unreleasedAs, notes: u.notes, actions: u.actions),
+    );
+  }
   entries.sort((a, b) => compareVersions(b.version, a.version));
   return entries;
 }
+
+const _unreleasedMark = 'unreleased';
 
 /// The versions after [from] up to and including [to], newest first: what
 /// someone who updated from [from] hasn't seen yet.
@@ -95,6 +118,11 @@ class WhatsNew {
   /// Builds before this one didn't record their version. An install that
   /// was already set up came from one of them; 0.2.0 is the newest.
   static const untrackedBefore = '0.2.0';
+
+  /// Releases that went out with their notes still under "Unreleased", so
+  /// they showed nothing after updating. Someone who updated to one of
+  /// them gets its notes with the next update too.
+  static const shippedWithoutNotes = {'0.2.4'};
 
   /// The version this install ran before, and the notes to show at this
   /// start, newest first. The notes are empty when there is nothing new (a
@@ -126,8 +154,11 @@ class WhatsNew {
       return (
         from: last,
         notes: changesSince(
-          parseChangelog(await (readChangelog ?? bundledChangelog)()),
-          last,
+          parseChangelog(
+            await (readChangelog ?? bundledChangelog)(),
+            unreleasedAs: _release(current),
+          ),
+          shippedWithoutNotes.contains(last) ? _before(last) : last,
           current,
         ),
       );
@@ -141,13 +172,24 @@ class WhatsNew {
   static Future<ChangelogEntry?> latest({
     Future<String> Function()? readChangelog,
   }) async {
-    final all = parseChangelog(await (readChangelog ?? bundledChangelog)());
+    final all = parseChangelog(
+      await (readChangelog ?? bundledChangelog)(),
+      unreleasedAs: _release(appVersion),
+    );
     for (final e in all) {
       if (compareVersions(e.version, appVersion) <= 0) return e;
     }
     // A test build of the next version shows the newest notes there are.
     return all.firstOrNull;
   }
+
+  /// [version] when it is a release; a test build (`0.2.4-dev.12`) may not
+  /// be what Unreleased ends up as.
+  static String? _release(String version) =>
+      version.contains('-') || version.contains('+') ? null : version;
+
+  /// Just below [version], so a range starting there includes it.
+  static String _before(String version) => '$version-0';
 
   static Future<String> bundledChangelog() =>
       rootBundle.loadString('CHANGELOG.md');

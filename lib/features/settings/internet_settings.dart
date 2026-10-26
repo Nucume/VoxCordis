@@ -7,6 +7,7 @@ import '../../app_scope.dart';
 import '../../data/settings.dart';
 import '../../services/web/web_guard.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/glass_popover.dart';
 import 'model_picker.dart' show InfoIcon;
 
 /// Settings → Internet: whether the companion may search and read the
@@ -168,36 +169,29 @@ class _InternetSettingsState extends State<InternetSettings> {
                 Row(
                   children: [
                     Expanded(
-                      child: DropdownButtonFormField<SearchProvider>(
-                        dropdownColor: context.popupColor,
-                        borderRadius: BorderRadius.circular(14),
-                        initialValue: _v.searchProvider,
-                        decoration: const InputDecoration(
-                          labelText: 'Search with',
-                        ),
-                        items: const [
-                          DropdownMenuItem(
-                            value: SearchProvider.duckDuckGo,
-                            child: Text('DuckDuckGo (no account needed)'),
+                      child: GlassSelect<SearchProvider>(
+                        label: 'Search with',
+                        value: _v.searchProvider,
+                        options: const [
+                          GlassOption(
+                            SearchProvider.duckDuckGo,
+                            'DuckDuckGo (no account needed)',
                           ),
-                          DropdownMenuItem(
-                            value: SearchProvider.brave,
-                            child: Text('Brave Search (API key)'),
+                          GlassOption(
+                            SearchProvider.brave,
+                            'Brave Search (API key)',
                           ),
-                          DropdownMenuItem(
-                            value: SearchProvider.tavily,
-                            child: Text('Tavily (API key)'),
+                          GlassOption(
+                            SearchProvider.tavily,
+                            'Tavily (API key)',
                           ),
-                          DropdownMenuItem(
-                            value: SearchProvider.searxng,
-                            child: Text('SearXNG (your own address)'),
+                          GlassOption(
+                            SearchProvider.searxng,
+                            'SearXNG (your own address)',
                           ),
                         ],
-                        onChanged: (v) {
-                          if (v != null) {
-                            widget.onChanged(_v.copyWith(searchProvider: v));
-                          }
-                        },
+                        onChanged: (v) =>
+                            widget.onChanged(_v.copyWith(searchProvider: v)),
                       ),
                     ),
                     const SizedBox(width: 8),

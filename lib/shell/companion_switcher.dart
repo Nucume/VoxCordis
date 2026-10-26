@@ -8,7 +8,9 @@ import '../app_scope.dart';
 import '../data/desk/pictures.dart';
 import '../data/settings.dart';
 import '../features/chat/chat_controller.dart';
+import '../features/export/export_dialog.dart';
 import '../theme/app_theme.dart';
+import '../theme/glass_popover.dart';
 
 /// Wraps the portrait and name on the companion card: a tap drops a glass
 /// panel of every companion, to switch to, and "Add another companion".
@@ -110,6 +112,15 @@ class _CompanionSwitcherState extends State<CompanionSwitcher>
     }
   }
 
+  /// The current companion to a ZIP, after it finishes replying (the
+  /// reply would be missing).
+  Future<void> _export() async {
+    if (_waitForReply()) return;
+    await _close();
+    if (!mounted) return;
+    await showExportDialog(context);
+  }
+
   /// Every companion as cards, when the menu has no room for them all.
   Future<void> _more() async {
     await _close();
@@ -166,6 +177,7 @@ class _CompanionSwitcherState extends State<CompanionSwitcher>
                         settings: s,
                         onSwitch: _switchTo,
                         onAdd: _add,
+                        onExport: _export,
                         onMore: _more,
                       ),
                     ),
@@ -202,6 +214,7 @@ class _Popover extends StatelessWidget {
     required this.settings,
     required this.onSwitch,
     required this.onAdd,
+    required this.onExport,
     required this.onMore,
   });
 
@@ -213,11 +226,12 @@ class _Popover extends StatelessWidget {
   final AppSettings settings;
   final ValueChanged<CompanionProfile> onSwitch;
   final VoidCallback onAdd;
+  final VoidCallback onExport;
   final VoidCallback onMore;
 
   /// Heights of the parts, for working out how many rows fit.
   static const rowHeight = 60.0;
-  static const fixedHeight = 128.0; // header, divider, add row, padding
+  static const fixedHeight = 184.0; // header, divider, two action rows
 
   /// How many companions to list when [count] exist, the rest behind
   /// "More…". The current companion is always listed.
@@ -230,7 +244,6 @@ class _Popover extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
-    final accent = Theme.of(context).colorScheme.primary;
     final all = settings.companions;
     final shown = fitting(all.length, maxHeight);
     final companions = all.take(shown).toList();
@@ -260,128 +273,72 @@ class _Popover extends StatelessWidget {
       );
     }
 
-    final unfold = CurvedAnimation(
-      parent: animation,
-      curve: Curves.easeOutBack,
-      reverseCurve: Curves.easeInCubic,
-    );
-    return FadeTransition(
-      opacity: CurvedAnimation(
-        parent: animation,
-        curve: const Interval(0, 0.5),
-      ),
-      child: ScaleTransition(
-        alignment: Alignment.topCenter,
-        scale: Tween(begin: 0.92, end: 1.0).animate(unfold),
-        child: Container(
-          width: width,
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(20),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withValues(
-                  alpha: Theme.of(context).brightness == Brightness.dark
-                      ? 0.35
-                      : 0.1,
-                ),
-                blurRadius: 30,
-                offset: const Offset(0, 14),
-              ),
-              BoxShadow(
-                color: accent.withValues(alpha: 0.18),
-                blurRadius: 40,
-                spreadRadius: -6,
-              ),
-            ],
-          ),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(20),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(20),
-                  color: palette.glass,
-                  border: Border.all(color: palette.glassBorder),
-                  gradient: LinearGradient(
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                    colors: [
-                      accent.withValues(alpha: 0.14),
-                      ...palette.glassSheen,
-                    ],
-                  ),
-                ),
-                child: Material(
-                  type: MaterialType.transparency,
-                  // The panel grows downwards out of the name.
-                  child: SizeTransition(
-                    sizeFactor: CurvedAnimation(
-                      parent: animation,
-                      curve: const Interval(0, 0.7, curve: Curves.easeOutCubic),
-                      reverseCurve: Curves.easeInCubic,
-                    ),
-                    alignment: Alignment.topCenter,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          staggered(
-                            0,
-                            Padding(
-                              padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
-                              child: Text(
-                                all.length == 1
-                                    ? 'YOUR COMPANION'
-                                    : 'YOUR COMPANIONS',
-                                style: TextStyle(
-                                  fontSize: 11,
-                                  letterSpacing: 1.4,
-                                  color: palette.textMuted,
-                                ),
-                              ),
-                            ),
-                          ),
-                          for (var i = 0; i < companions.length; i++)
-                            staggered(
-                              i + 1,
-                              _CompanionRow(
-                                companion: companions[i],
-                                current: i == 0,
-                                onTap: i == 0
-                                    ? null
-                                    : () => onSwitch(companions[i]),
-                              ),
-                            ),
-                          if (hidden > 0)
-                            staggered(
-                              companions.length + 1,
-                              _MoreRow(hidden: hidden, onTap: onMore),
-                            ),
-                          staggered(
-                            rows,
-                            Padding(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 10,
-                                vertical: 6,
-                              ),
-                              child: Divider(
-                                height: 1,
-                                color: palette.glassBorder,
-                              ),
-                            ),
-                          ),
-                          staggered(rows, _AddRow(onTap: onAdd)),
-                        ],
-                      ),
-                    ),
+    return GlassPopoverPanel(
+      animation: animation,
+      width: width,
+      // The panel grows downwards out of the name.
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            staggered(
+              0,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(10, 0, 10, 8),
+                child: Text(
+                  all.length == 1 ? 'YOUR COMPANION' : 'YOUR COMPANIONS',
+                  style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 1.4,
+                    color: palette.textMuted,
                   ),
                 ),
               ),
             ),
-          ),
+            for (var i = 0; i < companions.length; i++)
+              staggered(
+                i + 1,
+                _CompanionRow(
+                  companion: companions[i],
+                  current: i == 0,
+                  onTap: i == 0 ? null : () => onSwitch(companions[i]),
+                ),
+              ),
+            if (hidden > 0)
+              staggered(
+                companions.length + 1,
+                _MoreRow(hidden: hidden, onTap: onMore),
+              ),
+            staggered(
+              rows,
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 6,
+                ),
+                child: Divider(height: 1, color: palette.glassBorder),
+              ),
+            ),
+            staggered(
+              rows,
+              _ActionRow(
+                icon: Icons.add_rounded,
+                label: 'Add another companion',
+                turns: 0.25,
+                onTap: onAdd,
+              ),
+            ),
+            staggered(
+              rows + 1,
+              _ActionRow(
+                icon: Icons.ios_share_rounded,
+                label: 'Export ${settings.companionName}…',
+                onTap: onExport,
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -521,10 +478,21 @@ class _CompanionRow extends StatelessWidget {
   }
 }
 
-class _AddRow extends StatelessWidget {
-  const _AddRow({required this.onTap});
+/// "Add another companion" and "Export …": an icon tile and a label.
+class _ActionRow extends StatelessWidget {
+  const _ActionRow({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+    this.turns = 0,
+  });
 
+  final IconData icon;
+  final String label;
   final VoidCallback onTap;
+
+  /// How far the icon turns under the pointer.
+  final double turns;
 
   @override
   Widget build(BuildContext context) {
@@ -553,16 +521,23 @@ class _AddRow extends StatelessWidget {
                 ),
               ),
               child: AnimatedRotation(
-                turns: hover ? 0.25 : 0,
+                turns: hover ? turns : 0,
                 duration: const Duration(milliseconds: 260),
                 curve: Curves.easeOutBack,
-                child: Icon(Icons.add_rounded, color: palette.text, size: 22),
+                child: AnimatedScale(
+                  scale: hover && turns == 0 ? 1.1 : 1,
+                  duration: const Duration(milliseconds: 260),
+                  curve: Curves.easeOutBack,
+                  child: Icon(icon, color: palette.text, size: 22),
+                ),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
               child: Text(
-                'Add another companion',
+                label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
                 style: TextStyle(
                   fontWeight: FontWeight.w600,
                   color: palette.text,

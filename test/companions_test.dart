@@ -142,7 +142,7 @@ void main() {
     // Plenty of room: everyone.
     expect(CompanionSwitcher.fitting(3, 800), 3);
     // Room for four rows: three companions and "More…".
-    expect(CompanionSwitcher.fitting(9, 128 + 4 * 60.0), 3);
+    expect(CompanionSwitcher.fitting(9, 184 + 4 * 60.0), 3);
     // A tiny window still lists the current companion.
     expect(CompanionSwitcher.fitting(9, 100), 1);
   });

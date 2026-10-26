@@ -3,7 +3,8 @@
 VoxCordis shows these notes the first time it starts after an update,
 including every version that was skipped on the way. Each `## x.y.z` heading
 is one version. While a version is being worked on its notes go under
-`## Unreleased`; rename that heading to the version when tagging it.
+`## Unreleased`. Tagging a release files them under its version on its own
+(the Release workflow), so there is nothing to rename by hand.
 
 A line of its own like `{{action:open-settings}}` becomes a button under
 that version's notes (see `lib/features/update/whats_new_dialog.dart` for
@@ -12,10 +13,35 @@ the ids); it is left out of the release page.
 ## Unreleased
 
 ### New
+- **Your companion can draw.** Turn on *Let your companion draw* in **Settings → Images** and download a picture model: Stable Diffusion XL, Anima Turbo or Anima Aesthetic (anime), Animagine XL 4.0 (anime) or RealVisXL 5.0 (photos). Or add your own .safetensors model, as Civitai offers them. Everything is drawn on your computer with stable-diffusion.cpp, and nothing leaves it. Your companion picks the model and LoRAs for each picture itself, and the picture shows up in the chat a little after its reply. You can draw by hand in the Images tab too, with an Advanced switch for the model, size, steps, guidance, seed and LoRA weights.
+- **LoRAs.** Add LoRA files in Settings → Images, with a .txt note beside each for its trigger words, and your companion uses them when they suit.
+- **A Booru tags skill** teaches your companion to write Danbooru-style tags for the anime models.
+- **A bigger look at pictures.** Click a picture in the gallery or the chat to see it whole, zoom in, or open it in your own picture viewer with *Show file*.
+- **Tabs in a new order:** Chat, Images, Memory, Skills, Plans, Settings.
+- **Draw through Invoke.** If you run InvokeAI, choose *Draw with: Invoke* in Settings → Images. Your companion sees the models and LoRAs installed in Invoke (Stable Diffusion 1.5, 2 and SDXL) and picks from them, and the pictures come back into the chat like any other. The Images tab no longer warns when Invoke isn't running.
+- **Export a companion.** Open the companion menu (tap the name) and choose **Export**: one ZIP with the personality, lessons, privacy rules, memories, plans, chat and folder files, laid out like a Nemini export. It is locked with a password by default, since the ZIP leaves the encrypted database behind; settings and API keys never go in. Bring it back with **Import a character** (Nemini or VoxCordis) when adding a companion, here or on another computer. Reminders and automations come back paused.
+
+### Fixed
+- **What's new shows again after updating.** 0.2.4 went out with its notes still filed as unreleased, so it showed nothing. If you are on 0.2.4, you will see its notes together with this version's.
+- **The day you're on stays highlighted in the right place.** Scrolling the Days list no longer leaves the highlight stuck over the top of the list.
+- **Open-source parts in About** opens on a solid page instead of turning the whole window see-through.
+- **A bigger smallest window.** The window can't get smaller than 1140×720 any more. On short windows the portrait shrinks so the days and the folder button stay in view, and on narrow ones the tabs show only their icons instead of being cut off.
+- **Haru works in the light theme**, with dark ink instead of a pale grey that vanished on white.
+
+### Changed
+- **Glassy pickers.** Colorway, ready light, pokes, tasks, search service, memory span, chat format and Repeat open the same frosted menu as the companion switcher, a little more compact, with the chosen option ticked.
+- **The background picture sits in the big panel on the right** only, behind the chat and the other tabs. The companion card and the window around it keep the colorway.
+- **Close to the system tray.** "Keep running when I close the window" is now **Close to the system tray**: closing the window leaves a VoxCordis icon in the tray. Click it to come back, or right-click for Open and Quit. On Linux it shows on KDE, Cinnamon, XFCE and GNOME with the AppIndicator extension; where there is no tray, the window goes to the taskbar as before.
+- **Appearance has its own Settings tab**, right after General: colorway, background picture, theme and the ready light. The separate Accent picker is gone, since the colorway sets the accent.
+
+## 0.2.4
+
+### New
 - **Skills.** Skills teach your companion how to do particular things, in the new **Skills** tab. It comes with proofreading, weather, price watch and a morning briefing, plus an ADHD support mode you can switch on. While a skill is on, your companion uses it whenever it fits. Type `/` in the chat to call one up yourself, like `/weather Bern` or `/proofreading` followed by your text. A task in the Plans tab can call one too, such as a daily `/morning-briefing`.
 - **Your own skills.** Write a new skill in the Skills tab, or import one: a SKILL.md, a Markdown file, or a Claude skill (.zip or .skill) works as it is. Your companion can also write a skill when you ask it to learn something for good. Those wait for you to read them and turn them on.
 - **Looks.** Settings → General has ready-made looks (Twilight, Rose, Ocean, Forest, Ember, Moonlight) that change the accent and the colour glows together. Your companion can pick one too.
 - **Colorways.** One Colorway list, each with a glossy colour orb. The six standard looks change the accent and glows; the three special ones below the line recolour the whole window and panels too: Haru (monochrome, with red kept to accents like the send button and the selected tab), Vibecoder's (indigo) and Sakura (soft pink on deep plum).
+- **Poke.** After three hours with nobody writing, your companion does something on its own: sends you a message, potters about with its notes, or falls into a web rabbit hole when Internet is on. It pokes once and then waits for you, or keeps poking while you're away if you switch that on, and never in your quiet hours (11 pm to 8 am unless you change them). Set it up under Settings → General, below In the background.
 - **A background picture.** Choose any picture to sit behind the whole app, darkened so everything stays readable, with a Darkness slider. Each companion keeps its own, and can set one from its folder itself.
 
 ### Fixed

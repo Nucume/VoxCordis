@@ -34,11 +34,8 @@ class Portrait extends StatelessWidget {
             gradient: LinearGradient(
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
-              colors: [
-                context.highlight,
-                const Color(0xFFFF7AB6),
-                const Color(0xFF4F7CFF),
-              ],
+              // Twilight's pink and blue, or the colorway's own.
+              colors: [context.highlight, ...context.palette.rim],
             ),
             boxShadow: [
               BoxShadow(

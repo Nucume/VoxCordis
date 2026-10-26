@@ -10,6 +10,7 @@ import '../../data/desk/desk_files.dart';
 import '../../data/desk/desk_tools.dart';
 import '../../data/desk/pictures.dart';
 import '../../data/memory/memory.dart';
+import '../export/companion_export.dart';
 import 'import_temp.dart';
 import 'imported_character.dart';
 import 'nemini_clock.dart';
@@ -17,7 +18,8 @@ import 'untrusted_text.dart';
 
 /// A Nemini.ai export ZIP: `companion.json`, `desk/` (personality.md,
 /// lessons.md, privacy.md and the companion's other files),
-/// `memory/facts.json` and `turns.jsonl`.
+/// `memory/facts.json` and `turns.jsonl`. VoxCordis's own exports
+/// ([CompanionExport]) have the same layout, maybe with a password.
 ///
 /// `providers.json`, `keys.json` and `google.json` hold credentials and are
 /// never opened. Nor are prefs, achievements or pet, which have no
@@ -28,12 +30,15 @@ class NeminiExport {
 
   /// Reads the character from [zip]. Memories, chat and desk files are
   /// counted here and copied by [NeminiExtras.apply] once setup finishes.
-  static Future<ImportedCharacter> read(File zip) async {
+  ///
+  /// Throws [ZipPasswordException] when the ZIP is locked and [password]
+  /// is missing or wrong.
+  static Future<ImportedCharacter> read(File zip, {String? password}) async {
     final input = InputFileStream(zip.path);
     try {
       final Archive archive;
       try {
-        archive = ZipDecoder().decodeStream(input);
+        archive = ZipDecoder().decodeStream(input, password: password);
       } catch (_) {
         throw const ImportException('This is not a ZIP file.');
       }
@@ -48,10 +53,11 @@ class NeminiExport {
       String? text(String name) {
         final f = entry(name);
         if (f == null || !f.isFile) return null;
-        return utf8.decode(f.content, allowMalformed: true);
+        return utf8.decode(_content(f, password), allowMalformed: true);
       }
 
       final companion = _jsonMap(text('companion.json'));
+      final ours = companion['format'] == CompanionExport.format;
       final persona = _first(companion, const ['companion', 'persona']);
       String pick(List<String> keys) {
         for (final m in [companion, persona]) {
@@ -102,9 +108,13 @@ class NeminiExport {
       if (personalityText != null) {
         sections.add(
           ImportSection(
-            'From my Nemini personality file',
+            ours
+                ? 'From my personality file'
+                : 'From my Nemini personality file',
             UntrustedText.clean(
-              _withoutFrontmatter(personalityText),
+              ours
+                  ? withoutAboutSection(_withoutFrontmatter(personalityText))
+                  : _withoutFrontmatter(personalityText),
               maxChars: 16000,
               charName: name,
               demoteHeadings: true,
@@ -142,7 +152,9 @@ class NeminiExport {
       final messageCount = turns == null || !turns.isFile
           ? 0
           : '\n'
-                .allMatches(utf8.decode(turns.content, allowMalformed: true))
+                .allMatches(
+                  utf8.decode(_content(turns, password), allowMalformed: true),
+                )
                 .length;
       final desk = [
         for (final f in archive.files)
@@ -153,7 +165,7 @@ class NeminiExport {
       for (final ext in Pictures.extensions) {
         final f = entry('desk/avatar.$ext') ?? entry('avatar.$ext');
         if (f == null || !f.isFile) continue;
-        final bytes = f.content;
+        final bytes = _content(f, password);
         final real = Pictures.imageExtensionOf(bytes);
         if (real == null) continue;
         final dir = await ImportTemp.create();
@@ -163,7 +175,7 @@ class NeminiExport {
       }
 
       return ImportedCharacter(
-        source: 'Nemini',
+        source: ours ? 'VoxCordis' : 'Nemini',
         name: name,
         pronouns: pronouns,
         traits: traits,
@@ -184,14 +196,21 @@ class NeminiExport {
                 charName: name,
               ),
         userName: userName.isEmpty ? null : userName,
-        notes: [
-          'API keys and account links (providers, keys, Google) were not '
-              'read.',
-          'Achievements and the pet stay behind for now.',
-        ],
+        notes: ours
+            ? const [
+                'Reminders and automations come back paused, for you to '
+                    'check in Plans first.',
+              ]
+            : const [
+                'API keys and account links (providers, keys, Google) were '
+                    'not read.',
+                'Achievements and the pet stay behind for now.',
+              ],
         nemini: NeminiExtras(
           zipPath: zip.path,
           root: root,
+          password: password,
+          fromVoxCordis: ours,
           factCount: facts.length,
           messageCount: messageCount,
           taskCount: tasks.length,
@@ -201,6 +220,20 @@ class NeminiExport {
       );
     } finally {
       await input.close();
+    }
+  }
+
+  /// A file's bytes. A locked ZIP read without its password, or with the
+  /// wrong one, throws [ZipPasswordException].
+  static List<int> _content(ArchiveFile f, String? password) {
+    try {
+      return f.content;
+    } on ArchiveException catch (e) {
+      final m = e.message.toLowerCase();
+      if (m.contains('password')) {
+        throw ZipPasswordException(wrong: password != null);
+      }
+      rethrow;
     }
   }
 
@@ -261,6 +294,15 @@ class NeminiExport {
         Pictures.hasImageExtension(lower);
   }
 
+  /// A VoxCordis personality.md without the app's own "About this file"
+  /// opening, which setup writes afresh on every import.
+  static String withoutAboutSection(String text) {
+    final t = text.replaceAll('\r\n', '\n').trimLeft();
+    if (!t.startsWith('# About this file')) return t;
+    final next = RegExp(r'^# ', multiLine: true).firstMatch(t.substring(2));
+    return next == null ? '' : t.substring(next.start + 2);
+  }
+
   static String _withoutFrontmatter(String text) {
     final t = text.replaceAll('\r\n', '\n');
     if (!t.startsWith('---')) return t;
@@ -300,12 +342,26 @@ class NeminiExport {
   }
 }
 
+/// A locked ZIP, read without its password or with the wrong one.
+class ZipPasswordException extends ImportException {
+  const ZipPasswordException({required this.wrong})
+    : super(
+        wrong
+            ? 'That password does not open this ZIP.'
+            : 'This ZIP is locked with a password.',
+      );
+
+  final bool wrong;
+}
+
 /// What a Nemini export brings besides the character, and the human's
 /// choice for each.
 class NeminiExtras {
   NeminiExtras({
     required this.zipPath,
     required this.root,
+    this.password,
+    this.fromVoxCordis = false,
     required this.factCount,
     required this.messageCount,
     this.taskCount = 0,
@@ -315,6 +371,13 @@ class NeminiExtras {
 
   final String zipPath;
   final String root;
+
+  /// What opens a locked VoxCordis export.
+  final String? password;
+
+  /// A VoxCordis export rather than Nemini's: messages and memories keep
+  /// where they came from.
+  final bool fromVoxCordis;
   final int factCount;
   final int messageCount;
 
@@ -344,17 +407,20 @@ class NeminiExtras {
     var memoryCount = 0, messageCount = 0, fileCount = 0, taskCount = 0;
     final input = InputFileStream(zipPath);
     try {
-      final archive = ZipDecoder().decodeStream(input);
+      final archive = ZipDecoder().decodeStream(input, password: password);
       String? text(String name) {
         final f = archive.findFile('$root$name');
         if (f == null || !f.isFile) return null;
-        return utf8.decode(f.content, allowMalformed: true);
+        return utf8.decode(
+          NeminiExport._content(f, password),
+          allowMalformed: true,
+        );
       }
 
       if (memories) {
         final batch = db.batch();
         for (final f in NeminiExport._jsonList(text('memory/facts.json'))) {
-          final m = _memory(f);
+          final m = _memory(f, fromVoxCordis);
           if (m == null) continue;
           batch.insert(
             'memories',
@@ -376,7 +442,7 @@ class NeminiExtras {
           final parsed =
               [
                 for (final line in const LineSplitter().convert(turns))
-                  if (_message(line) case final m?) m,
+                  if (_message(line, fromVoxCordis) case final m?) m,
               ]..sort((a, b) {
                 final byTime = a.$1.$1.compareTo(b.$1.$1);
                 return byTime != 0 ? byTime : a.$1.$2.compareTo(b.$1.$2);
@@ -400,14 +466,17 @@ class NeminiExtras {
         final now = DateTime.now().toUtc().toIso8601String();
         for (final t in NeminiClock.parse(text('clock/tasks.json'))) {
           batch.insert('schedules', {
-            'id': const Uuid().v5(Namespace.url.value, 'nemini-task:${t.id}'),
+            'id': const Uuid().v5(
+              Namespace.url.value,
+              '${fromVoxCordis ? 'voxcordis' : 'nemini'}-task:${t.id}',
+            ),
             'kind': t.kind.name,
             'text': t.text,
             'next_at': t.at.toUtc().toIso8601String(),
             'repeat': t.repeat.code,
             'active': 0,
             'created_at': now,
-            'origin': 'nemini',
+            'origin': fromVoxCordis ? 'import' : 'nemini',
           }, conflictAlgorithm: ConflictAlgorithm.ignore);
           taskCount++;
         }
@@ -442,7 +511,7 @@ class NeminiExtras {
     );
   }
 
-  static Memory? _memory(Object? f) {
+  static Memory? _memory(Object? f, bool ours) {
     if (f is! Map) return null;
     final text = UntrustedText.line(_s(f['text']), maxChars: 2000);
     if (text.isEmpty) return null;
@@ -471,7 +540,9 @@ class NeminiExtras {
       reinforcedCount: f['reinforced_count'] is num
           ? (f['reinforced_count'] as num).round()
           : 0,
-      origin: 'nemini',
+      origin: ours && _s(f['origin']).isNotEmpty
+          ? UntrustedText.line(_s(f['origin']), maxChars: 40)
+          : 'nemini',
       sourceIds: [
         if (f['source_content_uuids'] is List)
           for (final s in f['source_content_uuids'] as List)
@@ -482,7 +553,10 @@ class NeminiExtras {
 
   /// A chat line as a messages row (without sort_order), with the order
   /// to put it in: by time, then Nemini's own order.
-  static ((String, num), Map<String, Object?>)? _message(String line) {
+  static ((String, num), Map<String, Object?>)? _message(
+    String line,
+    bool ours,
+  ) {
     if (line.trim().isEmpty) return null;
     final Object? m;
     try {
@@ -506,7 +580,13 @@ class NeminiExtras {
         'ts': utc,
         'role': role,
         'content': content,
-        'via': _s(m['via']).isEmpty ? 'nemini' : 'nemini-${_s(m['via'])}',
+        'via': ours
+            ? (_s(m['via']).isEmpty
+                  ? 'app'
+                  : UntrustedText.line(_s(m['via']), maxChars: 40))
+            : _s(m['via']).isEmpty
+            ? 'nemini'
+            : 'nemini-${_s(m['via'])}',
         'reasoning': reasoning.isEmpty ? null : reasoning,
       },
     );

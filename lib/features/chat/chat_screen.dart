@@ -10,6 +10,7 @@ import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_scope.dart';
+import '../images/images_screen.dart' show showPicture;
 import '../../data/desk/pictures.dart';
 import '../../data/desk/shared_files.dart';
 import '../../data/message_repository.dart';
@@ -503,6 +504,7 @@ class _ChatScreenState extends State<ChatScreen> {
                       },
                     ),
             ),
+            _DrawingLine(name: settings.companionName),
             if (_chat.busy && _chat.phase != ChatPhase.idle)
               _StatusLine(
                 phase: _chat.phase,
@@ -680,6 +682,60 @@ class _ChatScreenState extends State<ChatScreen> {
               ),
             ),
           ],
+        );
+      },
+    );
+  }
+}
+
+/// While a picture is drawn for the chat: how far along, and Stop.
+class _DrawingLine extends StatelessWidget {
+  const _DrawingLine({required this.name});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final engine = AppScope.of(context).imageEngine;
+    return ListenableBuilder(
+      listenable: engine,
+      builder: (context, _) {
+        final job = engine.current;
+        if (job == null || !job.forChat) return const SizedBox.shrink();
+        final progress = engine.progress;
+        final more = engine.waiting == 0
+            ? ''
+            : ' (${engine.waiting} more waiting)';
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 12, 0),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 14,
+                height: 14,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2,
+                  value: progress == null || progress == 0 ? null : progress,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  engine.status == 'Drawing'
+                      ? '$name is drawing${progress == null ? '' : ' · ${(progress * 100).round()}%'}$more'
+                      : '${engine.status ?? 'Drawing'}…$more',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: context.palette.textMuted,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: engine.cancelAll,
+                child: const Text('Stop'),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -901,6 +957,7 @@ class _BubbleState extends State<_Bubble> {
                                 file: widget.folder == null
                                     ? null
                                     : Pictures.fileIn(widget.folder!, rel),
+                                drawn: message.via == 'picture',
                               ),
                           ],
                         ),
@@ -951,9 +1008,33 @@ class _BubbleState extends State<_Bubble> {
 
 /// A picture the human shared, from the companion's folder.
 class _SharedPicture extends StatelessWidget {
-  const _SharedPicture({required this.file});
+  const _SharedPicture({required this.file, this.drawn = false});
 
   final File? file;
+
+  /// One the companion drew: shown larger, in its own shape.
+  final bool drawn;
+
+  /// Width over height of a PNG, from its header; 1 when unreadable.
+  static double _aspect(File f) {
+    try {
+      final raf = f.openSync();
+      try {
+        final b = raf.readSync(24);
+        if (b.length < 24 || b[1] != 0x50 || b[2] != 0x4E || b[3] != 0x47) {
+          return 1;
+        }
+        int at(int i) =>
+            (b[i] << 24) | (b[i + 1] << 16) | (b[i + 2] << 8) | b[i + 3];
+        final w = at(16), h = at(20);
+        return w > 0 && h > 0 ? (w / h).clamp(0.5, 2.0) : 1;
+      } finally {
+        raf.closeSync();
+      }
+    } on FileSystemException {
+      return 1;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -971,10 +1052,18 @@ class _SharedPicture extends StatelessWidget {
       child: MouseRegion(
         cursor: SystemMouseCursors.click,
         child: GestureDetector(
-          onTap: () => launchUrl(Uri.file(f.path)),
+          onTap: () => showPicture(context, f),
           child: ClipRRect(
             borderRadius: BorderRadius.circular(12),
-            child: Image.file(f, width: 220, height: 220, fit: BoxFit.cover),
+            child: drawn
+                ? Image.file(
+                    f,
+                    width: 340 * _aspect(f),
+                    height: 340,
+                    fit: BoxFit.cover,
+                    cacheHeight: 680,
+                  )
+                : Image.file(f, width: 220, height: 220, fit: BoxFit.cover),
           ),
         ),
       ),

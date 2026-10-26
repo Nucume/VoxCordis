@@ -35,7 +35,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Nemini'), findsOneWidget);
+    expect(find.text('Nemini or VoxCordis'), findsOneWidget);
     expect(find.text('Soulkyn'), findsOneWidget);
     expect(find.text('Character card'), findsOneWidget);
 
@@ -55,7 +55,7 @@ void main() {
     expect(got?.name, 'Mira');
 
     pick = broken;
-    await tester.tap(find.text('Nemini'));
+    await tester.tap(find.text('Nemini or VoxCordis'));
     await settle(
       () => find.textContaining('not a Nemini export').evaluate().isNotEmpty,
     );

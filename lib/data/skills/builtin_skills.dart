@@ -9,6 +9,7 @@ class BuiltInSkills {
     priceWatch,
     morningBriefing,
     adhdSupport,
+    booruTags,
   ];
 
   static final ids = {for (final s in all) s.id};
@@ -121,6 +122,48 @@ glance: a greeting, then a few small parts with a line or two each.
 If they want this every morning, call schedule_task with text
 "/morning-briefing" and repeat "daily" (or "weekdays") at the time they
 usually wake up.
+''',
+  );
+
+  static const booruTags = BuiltInSkill(
+    id: 'booru-tags',
+    title: 'Booru tags',
+    description:
+        'Write prompts as Danbooru-style tags for anime picture models '
+        '(Anima, Animagine, Illustrious, Pony), before draw_picture.',
+    body: '''
+# Booru tags
+
+Anime models learned from Danbooru, so they understand its tags far better
+than sentences. Build the prompt from tags, comma-separated:
+
+1. **Who and how many:** 1girl, 1boy, 2girls, 1other, solo, multiple girls.
+2. **Character and series**, if it is a known one: hatsune miku, vocaloid.
+   Brackets in a name are escaped: `hoshimachi suisei \\(1st costume\\)`.
+3. **Rating:** safe, sensitive, nsfw or explicit. Pick what your human
+   asked for; when unsure, safe.
+4. **Looks:** hair (long hair, silver hair, twintails, ahoge), eyes (blue
+   eyes, heterochromia), body, expression (smile, blush, closed eyes,
+   open mouth). For yourself, take them from the looks in personality.md.
+5. **Clothes:** one tag each: white dress, black thighhighs, hoodie.
+6. **Pose and framing:** standing, sitting, looking at viewer, from side,
+   upper body, full body, close-up, cowboy shot.
+7. **Place and light:** outdoors, bedroom, night, cherry blossoms, rain,
+   sunset, backlighting.
+8. **Style or artist**, if wanted. Anima wants an @ before an artist:
+   @name.
+
+Rules:
+- Lowercase, spaces instead of underscores (score_7 style tags are the only
+  ones with underscores).
+- 15 to 40 tags is plenty. Don't repeat a tag; don't write sentences in
+  between unless the model takes both (Anima does).
+- Quality tags (masterpiece, best quality…) are added by VoxCordis; leave
+  them out.
+- What to avoid goes in negative_prompt as tags too: extra fingers, text,
+  watermark.
+- Weights: (tag:1.3) makes a tag stronger. Anima needs higher ones, like
+  (chibi:2).
 ''',
   );
 

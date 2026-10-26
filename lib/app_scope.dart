@@ -23,6 +23,8 @@ import 'features/chat/prompt_history.dart';
 import 'services/changelog.dart';
 import 'services/import/import_temp.dart';
 import 'services/import/personality_rewrite.dart';
+import 'services/images/draw_tools.dart';
+import 'services/images/image_engine.dart';
 import 'services/llm_client.dart';
 import 'services/runtime/model_catalog.dart';
 import 'services/runtime/runtime_controller.dart';
@@ -218,6 +220,19 @@ class AppServices {
       await FileImage(avatar).evict();
       await settings.update(settings.value.copyWith(portraitPath: avatar.path));
     },
+  );
+
+  /// Draws the companion's pictures with stable-diffusion.cpp.
+  late final imageEngine = ImageEngine(
+    supportDir: runtime.supportDir,
+    runtime: runtime,
+    settings: () => settings.value,
+  );
+
+  /// draw_picture, which queues a picture on [imageEngine].
+  late final drawTools = DrawTools(
+    settings: () => settings.value,
+    engine: imageEngine,
   );
 
   /// use_skill, for the companion's skills folder.

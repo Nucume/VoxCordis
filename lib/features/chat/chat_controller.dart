@@ -1,9 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/material.dart' show ChangeNotifier, DateUtils;
 import 'package:http/http.dart' as http;
+import 'package:path/path.dart' as p;
 
 import '../../app_scope.dart';
 import '../../data/core_rules.dart';
@@ -18,8 +20,11 @@ import '../../data/schedule/schedule_tools.dart';
 import '../../data/settings.dart';
 import '../../data/skills/skill_tools.dart';
 import '../../data/skills/skills.dart';
+import '../../services/images/draw_tools.dart';
+import '../../services/images/image_engine.dart';
 import '../../services/llm_client.dart';
 import '../../services/runtime/model_catalog.dart';
+import '../../services/schedule/poke.dart';
 import '../../services/schedule/scheduler.dart';
 import '../../services/sight.dart';
 import '../../services/system/system_tools.dart';
@@ -57,6 +62,7 @@ class ChatController extends ChangeNotifier {
     ...DeskTools.definitions,
     ...ScheduleTools.definitions,
     ...SkillTools.definitions,
+    ...DrawTools.definitionsFor(s),
     ...WebTools.definitionsFor(s),
     if (s.systemAccess && !unattended) ...SystemTools.definitions,
   ];
@@ -214,7 +220,12 @@ class ChatController extends ChangeNotifier {
   Future<void> regenerate() async {
     if (busy || viewingDay != null || messages.isEmpty) return;
     // A reminder or task reply answered no message of the human's.
-    if (messages.last.via == 'reminder' || messages.last.via == 'automation') {
+    if (const {
+      'reminder',
+      'automation',
+      'picture',
+      Poke.via,
+    }.contains(messages.last.via)) {
       return;
     }
     if (messages.last.role == 'assistant') {
@@ -352,12 +363,14 @@ class ChatController extends ChangeNotifier {
     required ({String personality, String lessons}) desk,
     required String recalled,
     required String skills,
+    required String drawing,
   }) =>
       '${howYouTalk(settings)}\n\n'
       '$core\n\n'
       '## Your human\n'
       '${aboutHuman(settings)}\n\n'
       '${aboutPictures(mode)}\n\n'
+      '$drawing\n\n'
       '# Your personality file (personality.md)\n\n'
       '${desk.personality}\n\n'
       '${desk.lessons}\n\n'
@@ -415,6 +428,8 @@ class ChatController extends ChangeNotifier {
           ? await _services.scheduleTools.call(c.name, c.parsedArguments)
           : SkillTools.names.contains(c.name)
           ? await _services.skillTools.call(c.name, c.parsedArguments)
+          : DrawTools.names.contains(c.name)
+          ? await _services.drawTools.call(c.name, c.parsedArguments)
           : DeskTools.names.contains(c.name)
           ? await _services.deskTools.call(c.name, c.parsedArguments)
           : await _services.memoryTools.call(
@@ -445,6 +460,7 @@ class ChatController extends ChangeNotifier {
           'schedule_task' => 'Planned a task',
           'cancel_schedule' => 'Cancelled a reminder',
           SkillTools.useTool => 'Used the ${c.parsedArguments['name']} skill',
+          DrawTools.drawTool => 'Drawing a picture',
           _ => WebTools.noteFor(c.name, c.parsedArguments),
         };
         // Several changes in one reply are listed together.
@@ -454,6 +470,61 @@ class ChatController extends ChangeNotifier {
         if (MemoryTools.names.contains(c.name)) _services.memoryChanged();
       }
     }
+  }
+
+  /// Puts a picture the companion drew into the chat, once no reply is
+  /// being written.
+  Future<void> addPicture(DrawJob job, File picture) async {
+    while (busy) {
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    final rel = p.posix.joinAll(
+      p.split(p.relative(picture.path, from: job.folder)),
+    );
+    final r = job.request;
+    await _services.pictureNotes.put(
+      rel,
+      'You drew this with ${DrawTools.nameFor(r.model)}'
+      '${r.loras.isEmpty ? '' : ' and ${r.loras.map((l) => l.name).join(', ')}'}. '
+      'What you asked for: ${r.prompt}',
+      seenBy: 'drawn',
+    );
+    // Drawn for another companion, which is no longer the one talked to.
+    if (job.folder != _services.settings.value.companionFolder) return;
+    if (viewingDay != null) await load();
+    final m = await _services.messages.add(
+      'assistant',
+      Pictures.marker(rel),
+      via: 'picture',
+    );
+    messages.add(m);
+    if (toolNote == 'Drawing a picture') toolNote = null;
+    days = await _services.messages.days();
+    notifyListeners();
+  }
+
+  /// A picture that couldn't be drawn, said under the chat.
+  void pictureFailed(Object error) {
+    toolNote = 'The picture couldn\'t be drawn: $error';
+    notifyListeners();
+  }
+
+  /// Pictures the companion drew, as it remembers them: what it asked for,
+  /// which the picture's message doesn't say.
+  Future<List<ChatMessage>> _withDrawnNotes(Iterable<ChatMessage> list) async {
+    final out = <ChatMessage>[];
+    for (final m in list) {
+      if (m.via != 'picture') {
+        out.add(m);
+        continue;
+      }
+      final rel = Pictures.inText(m.content).firstOrNull;
+      final note = rel == null ? null : await _services.pictureNotes.get(rel);
+      out.add(
+        m.withContent('[A picture you drew: ${rel ?? 'gone'}. ${note ?? ''}]'),
+      );
+    }
+    return out;
   }
 
   /// Whether this reply read the web, which holds back computer requests
@@ -496,6 +567,55 @@ class ChatController extends ChangeNotifier {
     return ScheduledOutcome(ok: false, text: error ?? 'Nothing was written.');
   }
 
+  /// When the last poke was tried, so one that fails isn't retried every
+  /// half minute.
+  DateTime? _pokeTried;
+
+  /// After a long quiet the companion does something on its own (see
+  /// [Poke]). Null when it isn't time, or it didn't work out; a poke that
+  /// failed leaves no error in the chat and waits for the next quiet spell.
+  Future<ScheduledOutcome?> poke({DateTime? now, Random? random}) async {
+    final s = _services.settings.value;
+    final hours = s.pokeAfterHours;
+    now ??= DateTime.now();
+    if (busy || hours <= 0) return null;
+    if (_pokeTried case final t? when now.difference(t).inHours < hours) {
+      return null;
+    }
+    final recent = await _services.messages.recent(limit: 200);
+    if (!Poke.due(
+      recent,
+      now,
+      hours,
+      quietFrom: s.pokeQuietFrom,
+      quietUntil: s.pokeQuietUntil,
+      repeat: s.pokeRepeat,
+    )) {
+      return null;
+    }
+    _pokeTried = now;
+    if (viewingDay != null) await load();
+    final tools = {
+      for (final t in toolsFor(s, unattended: true))
+        (t['function'] as Map)['name'] as String,
+    };
+    final idea = Poke.pick(tools, random);
+    await _respond(
+      null,
+      poke: Poke.note(idea, humanName(s), now.difference(recent.last.ts)),
+    );
+    final last = messages.lastOrNull;
+    if (error == null &&
+        last != null &&
+        last.via == Poke.via &&
+        last.content.trim().isNotEmpty) {
+      return ScheduledOutcome(ok: true, text: last.content);
+    }
+    error = null;
+    notifyListeners();
+    return null;
+  }
+
   /// The note that starts a scheduled turn, in place of a human message.
   String _scheduledNote(Schedule item, AppSettings s, {required bool late}) {
     final human = humanName(s);
@@ -518,12 +638,18 @@ class ChatController extends ChangeNotifier {
     ChatMessage? userMsg, {
     Schedule? scheduled,
     bool late = false,
+    String? poke,
   }) async {
     final settings = _services.settings.value;
-    final query = scheduled?.text ?? userMsg!.content;
+    final query =
+        scheduled?.text ??
+        userMsg?.content ??
+        // A poke recalls what the last talk was about.
+        messages.lastOrNull?.content ??
+        '';
     final sourceIds = [?userMsg?.id];
     _readWeb = false;
-    _unattended = scheduled?.kind == ScheduleKind.task;
+    _unattended = scheduled?.kind == ScheduleKind.task || poke != null;
     error = null;
     toolNote = null;
     stopped = false;
@@ -574,11 +700,27 @@ class ChatController extends ChangeNotifier {
         called: called,
         contextSize: settings.contextSize,
       );
-      final history = alternatingHistory(
-        messages.skip(max(0, messages.length - _historyTurns)),
+      final images = _services.imageEngine;
+      if (settings.imageEngine == ImageEngineChoice.invoke) {
+        // Asked once per address up front, then again in the background
+        // so models added in Invoke show up by the next message.
+        final ask = images.refreshInvoke(settings);
+        if (images.invokeUrl != settings.invokeUrl) await ask;
+      }
+      final drawing = aboutDrawing(
+        settings,
+        images.available(settings),
+        images.lorasFor(settings),
       );
-      if (scheduled != null) {
-        final note = _scheduledNote(scheduled, settings, late: late);
+      final history = alternatingHistory(
+        await _withDrawnNotes(
+          messages.skip(max(0, messages.length - _historyTurns)),
+        ),
+      );
+      final note = scheduled != null
+          ? _scheduledNote(scheduled, settings, late: late)
+          : poke;
+      if (note != null) {
         // Templates want turns to alternate: after the human's own last
         // message the note joins it.
         if (history.isNotEmpty && history.last['role'] == 'user') {
@@ -603,6 +745,7 @@ class ChatController extends ChangeNotifier {
             desk: desk,
             recalled: recalled,
             skills: skills,
+            drawing: drawing,
           ),
         },
         ...(await attachments?.expand(history) ?? history),
@@ -618,6 +761,7 @@ class ChatController extends ChangeNotifier {
         'assistant',
         '',
         via: switch (scheduled?.kind) {
+          null when poke != null => Poke.via,
           null => 'app',
           ScheduleKind.reminder => 'reminder',
           ScheduleKind.task => 'automation',
@@ -751,6 +895,7 @@ class ChatController extends ChangeNotifier {
                 desk: desk,
                 recalled: recalled,
                 skills: skills,
+                drawing: drawing,
               ),
             },
             ...await attachments.expand(history),

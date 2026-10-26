@@ -8,6 +8,7 @@ import 'package:companion/data/schedule/schedule_repository.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/features/chat/chat_controller.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
+import 'package:companion/services/schedule/poke.dart';
 import 'package:companion/services/system/system_tools.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -188,5 +189,75 @@ void main() {
     final second = requests[1]['messages'] as List;
     final read = jsonDecode((second.last as Map)['content'] as String) as Map;
     expect(read['error'], contains('home network'));
+  });
+
+  group('poke', () {
+    // Midday, long after the messages the test writes now.
+    final later = DateTime(2100, 1, 1, 14);
+
+    test('after a quiet spell the companion writes on its own', () async {
+      final (server, requests) = await _scripted(['Guess what I just read!']);
+      final services = await _services(
+        server,
+        tweak: (s) => s.copyWith(systemAccess: true, internetAccess: true),
+      );
+      final chat = ChatController(services);
+      await services.messages.add('user', 'Night!');
+      await chat.load();
+      final outcome = await chat.poke(now: later);
+      expect(outcome!.text, 'Guess what I just read!');
+      expect(chat.messages.last.via, Poke.via);
+      final sent = requests.single['messages'] as List;
+      expect((sent.last as Map)['content'], contains('it has been quiet'));
+      final tools = [
+        for (final t in requests.single['tools'] as List) t['function']['name'],
+      ];
+      expect(tools, contains('web_search'));
+      expect(tools, isNot(contains('run_command')));
+      // It doesn't poke again straight away.
+      expect(await chat.poke(now: later), isNull);
+      expect(requests, hasLength(1));
+    });
+
+    test('no poke before the human wrote, or when it is off', () async {
+      final (server, requests) = await _scripted(['Hi?']);
+      final services = await _services(server);
+      final chat = ChatController(services);
+      expect(await chat.poke(now: later), isNull);
+      await services.messages.add('user', 'Hello');
+      await services.settings.update(
+        services.settings.value.copyWith(pokeAfterHours: 0),
+      );
+      expect(await chat.poke(now: later), isNull);
+      expect(requests, isEmpty);
+    });
+
+    test('a poke that fails leaves no error and waits', () async {
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      var calls = 0;
+      server.listen((req) async {
+        calls++;
+        req.response.statusCode = 500;
+        await req.response.close();
+      });
+      final services = await _services(server);
+      final chat = ChatController(services);
+      await services.messages.add('user', 'Hello');
+      await chat.load();
+      expect(await chat.poke(now: later), isNull);
+      expect(chat.error, isNull);
+      expect(chat.messages.single.role, 'user');
+      expect(
+        await chat.poke(now: later.add(const Duration(minutes: 1))),
+        isNull,
+      );
+      expect(calls, greaterThan(0));
+      final before = calls;
+      expect(
+        await chat.poke(now: later.add(const Duration(minutes: 2))),
+        isNull,
+      );
+      expect(calls, before);
+    });
   });
 }

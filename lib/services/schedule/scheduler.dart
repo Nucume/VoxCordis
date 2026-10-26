@@ -30,6 +30,7 @@ class Scheduler {
     required this.notify,
     required this.focused,
     this.onChanged,
+    this.idle,
     DateTime Function()? clock,
   }) : _clock = clock ?? DateTime.now;
 
@@ -44,6 +45,10 @@ class Scheduler {
   final Future<void> Function(String title, String body) notify;
   final Future<bool> Function() focused;
   final VoidCallback? onChanged;
+
+  /// Asked when nothing was due: the companion may do something on its own
+  /// after a long quiet (a poke). Non-null when it wrote something.
+  final Future<ScheduledOutcome?> Function()? idle;
   final DateTime Function() _clock;
 
   static const every = Duration(seconds: 30);
@@ -72,7 +77,14 @@ class Scheduler {
     try {
       final r = repo();
       final now = _clock();
-      for (final s in await r.due(now)) {
+      final due = await r.due(now);
+      if (due.isEmpty && idle != null) {
+        final outcome = await idle!();
+        if (outcome != null && !await focused()) {
+          await notify('New message', outcome.text);
+        }
+      }
+      for (final s in due) {
         if (s.kind == ScheduleKind.task &&
             await r.runsToday(now) >= runsPerDay()) {
           await r.logRun(

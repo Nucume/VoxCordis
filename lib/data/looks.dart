@@ -11,7 +11,9 @@ class Look {
     this.panel,
     this.lightBase,
     this.lightPanel,
-    this.orb,
+    this.lightAccent,
+    this.lightColors,
+    this.rim,
     this.highlight,
   });
 
@@ -28,12 +30,23 @@ class Look {
   final int? lightBase;
   final int? lightPanel;
 
+  /// The accent and glows in the light theme, when the dark ones would
+  /// vanish into a pale window (Haru's pale grey and white).
+  final int? lightAccent;
+  final List<int>? lightColors;
+
+  /// The portrait rim after the accent; from the glows when null.
+  final List<int>? rim;
+
+  /// The accent to show in the [light] or dark theme.
+  int accentIn({required bool light}) => light ? lightAccent ?? accent : accent;
+
+  /// The glow colours to show in the [light] or dark theme.
+  List<int> colorsIn({required bool light}) =>
+      light ? lightColors ?? colors : colors;
+
   /// A sharp accent for a few spots only, when [accent] is kept quiet.
   final int? highlight;
-
-  /// The colours shown in its orb; the glow colours when null.
-  final List<int>? orb;
-  List<int> get orbColors => orb ?? colors;
 
   /// Colorways that recolour everything, not just the glows and accent.
   static const special = [
@@ -49,7 +62,10 @@ class Look {
       panel: 0xD9161616,
       lightBase: 0xFFF2F2F2,
       lightPanel: 0xE6FFFFFF,
-      orb: [0xFFFFFFFF, 0xFF0A0A0A, 0xFFE5383B],
+      // On white the grey turns to ink and the glows to soft greys.
+      lightAccent: 0xFF2E2E2E,
+      lightColors: [0xFFBDBDBD, 0xFFE0E0E0, 0xFFE5383B],
+      rim: [0xFF8A8A8A, 0xFF2E2E2E],
       highlight: 0xFFE5383B,
     ),
     Look(
@@ -62,7 +78,6 @@ class Look {
       panel: 0xD914143A,
       lightBase: 0xFFECEEFF,
       lightPanel: 0xE6FFFFFF,
-      orb: [0xFF818CF8, 0xFF0A0A1F, 0xFF4F46E5],
     ),
     Look(
       'sakura',
@@ -74,7 +89,6 @@ class Look {
       panel: 0xD9231621,
       lightBase: 0xFFFFF2F6,
       lightPanel: 0xE6FFFFFF,
-      orb: [0xFFFFFFFF, 0xFF160C12, 0xFFFF8FB1],
     ),
   ];
 

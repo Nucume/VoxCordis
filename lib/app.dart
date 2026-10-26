@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 
 import 'app_scope.dart';
-import 'data/desk/pictures.dart';
 import 'data/looks.dart';
 import 'data/settings.dart';
 import 'features/setup/setup_wizard.dart';
@@ -67,34 +66,41 @@ class _CompanionAppState extends State<CompanionApp>
       builder: (context, _) {
         final adding = services.addingCompanion.value;
         final setup = settings.value.companionFolder == null || adding;
-        final accent = Color(settings.value.accentColor);
-        final folder = settings.value.companionFolder;
-        // The picture belongs to the companion, in its folder; setup keeps
-        // the moving glows.
-        final picture = setup || folder == null
-            ? null
-            : Pictures.backgroundIn(folder);
+        final brightness = _brightness(settings.value.themeChoice);
+        final colorway = Look.byId(settings.value.colorway);
+        // A special colorway brings its own accent and glows for the light
+        // theme; the stored ones are its dark-theme colours.
+        final lightColorway =
+            brightness == Brightness.light &&
+            colorway != null &&
+            colorway.isSpecial;
+        final accent = Color(
+          lightColorway
+              ? colorway.accentIn(light: true)
+              : settings.value.accentColor,
+        );
+        final glows = lightColorway
+            ? colorway.colorsIn(light: true)
+            : settings.value.backgroundColors;
         return MaterialApp(
           title: settings.value.companionName,
           debugShowCheckedModeBanner: false,
           theme: AppTheme.build(
             accent,
-            _brightness(settings.value.themeChoice),
-            picture: picture != null,
-            colorway: Look.byId(settings.value.colorway),
+            brightness,
+            colorway: colorway,
+            glows: [for (final c in glows) Color(c)],
           ),
           color: Colors.transparent,
           home: AuroraBackground(
             accent: accent,
-            colors: [for (final c in settings.value.backgroundColors) Color(c)],
+            colors: [for (final c in glows) Color(c)],
             layout:
                 settings.value.backgroundLayout ??
                 AuroraBackground.defaultLayout,
             // Moving only during setup: it costs the graphics card the model
             // needs.
             animate: setup,
-            picture: picture,
-            dim: settings.value.backgroundDim,
             // First run (no home folder yet) goes through setup, and so
             // does adding another companion. The window is rebuilt for each
             // companion, so nothing of the last one stays on screen.

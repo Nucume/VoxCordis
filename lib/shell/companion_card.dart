@@ -17,6 +17,11 @@ import 'wordmark.dart';
 /// Trait tags shown on the card; the rest sit behind a "+n" tag.
 const _shownTraits = 8;
 
+/// Height the card needs besides the portrait: name, tags, a few days, the
+/// wordmark and the button.
+const _belowPortrait = 470.0;
+const _minPortrait = 120.0;
+
 class CompanionCard extends StatelessWidget {
   const CompanionCard({super.key, required this.chat, required this.onOpenDay});
 
@@ -34,139 +39,153 @@ class CompanionCard extends StatelessWidget {
         return GlassPanel(
           blur: GlassPanel.still,
           padding: const EdgeInsets.all(18),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              // Large portrait across the top of the card: avatar.png in
-              // the companion's folder, which it picks itself. Without one
-              // it wears the VoxCordis heart. A tap on it or the name opens
-              // the companion menu.
-              CompanionSwitcher(
-                chat: chat,
-                builder: (context, open) => Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
-                  child: Column(
-                    children: [
-                      Stack(
-                        children: [
-                          Portrait(
-                            path: s.companionFolder == null
-                                ? s.portraitPath
-                                : Pictures.avatarIn(s.companionFolder!)?.path ??
-                                      s.portraitPath,
-                          ),
-                          if (s.statusLight == StatusLight.portrait)
-                            // Discord-style: a large light with a ring in
-                            // the card's colour, on the bottom-right corner.
-                            const Positioned(
-                              right: 0,
-                              bottom: 0,
-                              child: RuntimeStatus(dot: true, size: 26),
-                            ),
-                        ],
-                      ),
-                      const SizedBox(height: 14),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Flexible(
-                            child: Text(
-                              s.companionName,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.headlineSmall
-                                  ?.copyWith(fontWeight: FontWeight.w600),
-                            ),
-                          ),
-                          if (s.statusLight == StatusLight.name) ...[
-                            const SizedBox(width: 8),
-                            const RuntimeStatus(dot: true),
-                          ],
-                          const SizedBox(width: 6),
-                          AnimatedRotation(
-                            turns: open ? 0.5 : 0,
-                            duration: const Duration(milliseconds: 300),
-                            curve: Curves.easeOutBack,
-                            child: Icon(
-                              Icons.expand_more_rounded,
-                              size: 22,
-                              color: context.palette.textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              const SizedBox(height: 12),
-              Wrap(
-                alignment: WrapAlignment.center,
-                spacing: 6,
-                runSpacing: 6,
-                children: [
-                  for (final t in s.traits.take(_shownTraits))
-                    Container(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 10,
-                        vertical: 4,
-                      ),
-                      decoration: BoxDecoration(
-                        color: accent.withValues(alpha: 0.18),
-                        borderRadius: BorderRadius.circular(20),
-                      ),
-                      child: Text(t, style: const TextStyle(fontSize: 12)),
-                    ),
-                  if (s.traits.length > _shownTraits)
-                    Tooltip(
-                      message: s.traits.skip(_shownTraits).join(', '),
-                      child: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 10,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          border: Border.all(
-                            color: accent.withValues(alpha: 0.3),
-                          ),
-                          borderRadius: BorderRadius.circular(20),
-                        ),
-                        child: Text(
-                          '+${s.traits.length - _shownTraits}',
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 20),
-              Text(
-                'DAYS',
-                style: TextStyle(
-                  fontSize: 11,
-                  letterSpacing: 1.4,
-                  color: context.palette.textMuted,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Expanded(
-                child: _DayList(chat: chat, onOpenDay: onOpenDay),
-              ),
-              const SizedBox(height: 12),
-              const Center(child: Wordmark()),
-              const SizedBox(height: 12),
-              FilledButton.tonalIcon(
-                onPressed: s.companionFolder == null
-                    ? null
-                    : () => CompanionFolder(
-                        s.companionFolder!,
-                      ).openInFileManager(),
-                icon: const Icon(Icons.folder_open_rounded),
-                label: const Text('Open folder'),
-              ),
-            ],
+          child: LayoutBuilder(
+            builder: (context, box) => _column(context, s, accent, box),
           ),
         );
       },
+    );
+  }
+
+  /// The portrait gives way first when the window is short, so the days
+  /// and the folder button below it always fit.
+  Widget _column(
+    BuildContext context,
+    AppSettings s,
+    Color accent,
+    BoxConstraints box,
+  ) {
+    final portrait = (box.maxHeight - _belowPortrait).clamp(
+      _minPortrait,
+      box.maxWidth,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        // Large portrait across the top of the card: avatar.png in
+        // the companion's folder, which it picks itself. Without one
+        // it wears the VoxCordis heart. A tap on it or the name opens
+        // the companion menu.
+        CompanionSwitcher(
+          chat: chat,
+          builder: (context, open) => Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Column(
+              children: [
+                Stack(
+                  children: [
+                    Portrait(
+                      size: portrait,
+                      path: s.companionFolder == null
+                          ? s.portraitPath
+                          : Pictures.avatarIn(s.companionFolder!)?.path ??
+                                s.portraitPath,
+                    ),
+                    if (s.statusLight == StatusLight.portrait)
+                      // Discord-style: a large light with a ring in
+                      // the card's colour, on the bottom-right corner.
+                      const Positioned(
+                        right: 0,
+                        bottom: 0,
+                        child: RuntimeStatus(dot: true, size: 26),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: 14),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Flexible(
+                      child: Text(
+                        s.companionName,
+                        textAlign: TextAlign.center,
+                        style: Theme.of(context).textTheme.headlineSmall
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                    ),
+                    if (s.statusLight == StatusLight.name) ...[
+                      const SizedBox(width: 8),
+                      const RuntimeStatus(dot: true),
+                    ],
+                    const SizedBox(width: 6),
+                    AnimatedRotation(
+                      turns: open ? 0.5 : 0,
+                      duration: const Duration(milliseconds: 300),
+                      curve: Curves.easeOutBack,
+                      child: Icon(
+                        Icons.expand_more_rounded,
+                        size: 22,
+                        color: context.palette.textMuted,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          alignment: WrapAlignment.center,
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            for (final t in s.traits.take(_shownTraits))
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 4,
+                ),
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: 0.18),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(t, style: const TextStyle(fontSize: 12)),
+              ),
+            if (s.traits.length > _shownTraits)
+              Tooltip(
+                message: s.traits.skip(_shownTraits).join(', '),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 4,
+                  ),
+                  decoration: BoxDecoration(
+                    border: Border.all(color: accent.withValues(alpha: 0.3)),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    '+${s.traits.length - _shownTraits}',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+        Text(
+          'DAYS',
+          style: TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.4,
+            color: context.palette.textMuted,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Expanded(
+          child: _DayList(chat: chat, onOpenDay: onOpenDay),
+        ),
+        const SizedBox(height: 12),
+        const Center(child: Wordmark()),
+        const SizedBox(height: 12),
+        FilledButton.tonalIcon(
+          onPressed: s.companionFolder == null
+              ? null
+              : () => CompanionFolder(s.companionFolder!).openInFileManager(),
+          icon: const Icon(Icons.folder_open_rounded),
+          label: const Text('Open folder'),
+        ),
+      ],
     );
   }
 }
@@ -192,25 +211,32 @@ class _DayList extends StatelessWidget {
         }
         final now = DateTime.now();
         final fmt = DateFormat('EEE d MMM');
+        // Each tile gets its own Material: a tile paints its highlight on
+        // the nearest Material, and the card's one sits outside the list's
+        // clip, so the highlight stayed put over the heading while the
+        // days scrolled under it.
         return ListView(
           padding: EdgeInsets.zero,
           children: [
             for (final d in days)
-              ListTile(
-                dense: true,
-                selected: chat.viewingDay == null
-                    ? DateUtils.isSameDay(d, now)
-                    : DateUtils.isSameDay(d, chat.viewingDay),
-                selectedTileColor: accent.withValues(alpha: 0.18),
-                selectedColor: context.palette.text,
-                contentPadding: const EdgeInsets.symmetric(horizontal: 10),
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(10),
+              Material(
+                type: MaterialType.transparency,
+                child: ListTile(
+                  dense: true,
+                  selected: chat.viewingDay == null
+                      ? DateUtils.isSameDay(d, now)
+                      : DateUtils.isSameDay(d, chat.viewingDay),
+                  selectedTileColor: accent.withValues(alpha: 0.18),
+                  selectedColor: context.palette.text,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 10),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  title: Text(
+                    DateUtils.isSameDay(d, now) ? 'Today' : fmt.format(d),
+                  ),
+                  onTap: () => onOpenDay(d),
                 ),
-                title: Text(
-                  DateUtils.isSameDay(d, now) ? 'Today' : fmt.format(d),
-                ),
-                onTap: () => onOpenDay(d),
               ),
           ],
         );

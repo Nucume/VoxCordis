@@ -18,11 +18,12 @@ import '../../theme/app_theme.dart';
 
 enum ImportSource {
   nemini(
-    'Nemini',
-    'The export ZIP from Nemini.ai: personality, lessons, memories, chat '
-        'and desk files. API keys and account links are never read.',
+    'Nemini or VoxCordis',
+    'An export ZIP from Nemini.ai or from VoxCordis itself: personality, '
+        'lessons, memories, chat and desk files. API keys and account links '
+        'are never read.',
     Icons.folder_zip_outlined,
-    XTypeGroup(label: 'Nemini export', extensions: ['zip']),
+    XTypeGroup(label: 'Companion export', extensions: ['zip']),
   ),
   soulkyn(
     'Soulkyn',
@@ -48,10 +49,11 @@ enum ImportSource {
 
   /// Reads [file]. Cards and Soulkyn files are told apart by what is in
   /// them, so picking the wrong one of those two still works.
-  Future<ImportedCharacter> read(File file) => switch (this) {
-    nemini => NeminiExport.read(file),
-    _ => CharacterCard.read(file),
-  };
+  Future<ImportedCharacter> read(File file, {String? password}) =>
+      switch (this) {
+        nemini => NeminiExport.read(file, password: password),
+        _ => CharacterCard.read(file),
+      };
 }
 
 /// The choice of where a character comes from; picking one opens a file.
@@ -110,8 +112,21 @@ class _ImportSourcesState extends State<ImportSources> {
       _error = null;
     });
     try {
-      final character = await source.read(file);
-      if (mounted) widget.onImported(character);
+      String? password;
+      while (true) {
+        try {
+          final character = await source.read(file, password: password);
+          if (mounted) widget.onImported(character);
+          break;
+        } on ZipPasswordException catch (e) {
+          if (!mounted) return;
+          password = await showDialog<String>(
+            context: context,
+            builder: (_) => ZipPasswordDialog(wrong: e.wrong),
+          );
+          if (password == null || password.isEmpty) return;
+        }
+      }
     } on ImportException catch (e) {
       if (mounted) setState(() => _error = e.message);
     } catch (e) {
@@ -163,6 +178,79 @@ class _ImportSourcesState extends State<ImportSources> {
         ],
         if (_error != null)
           Text(_error!, style: const TextStyle(color: Colors.redAccent)),
+      ],
+    );
+  }
+}
+
+/// Asks for the password of a locked export ZIP.
+class ZipPasswordDialog extends StatefulWidget {
+  const ZipPasswordDialog({super.key, this.wrong = false});
+
+  /// The last try did not open it.
+  final bool wrong;
+
+  @override
+  State<ZipPasswordDialog> createState() => _ZipPasswordDialogState();
+}
+
+class _ZipPasswordDialogState extends State<ZipPasswordDialog> {
+  final _field = TextEditingController();
+  bool _hidden = true;
+
+  @override
+  void dispose() {
+    _field.dispose();
+    super.dispose();
+  }
+
+  void _done() => Navigator.pop(context, _field.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('This export is locked'),
+      content: SizedBox(
+        width: 380,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              widget.wrong
+                  ? 'That password did not open it. Try again?'
+                  : 'Type the password it was exported with.',
+              style: TextStyle(color: context.palette.textMuted, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            TextField(
+              controller: _field,
+              autofocus: true,
+              obscureText: _hidden,
+              onSubmitted: (_) => _done(),
+              decoration: InputDecoration(
+                labelText: 'Password',
+                errorText: widget.wrong ? 'Wrong password' : null,
+                suffixIcon: IconButton(
+                  tooltip: _hidden ? 'Show' : 'Hide',
+                  icon: Icon(
+                    _hidden
+                        ? Icons.visibility_outlined
+                        : Icons.visibility_off_outlined,
+                  ),
+                  onPressed: () => setState(() => _hidden = !_hidden),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(onPressed: _done, child: const Text('Open')),
       ],
     );
   }

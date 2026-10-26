@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../app_scope.dart';
 import '../../data/schedule/schedule_repository.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/glass_popover.dart';
 
 /// The companion's reminders and planned tasks, and what the tasks did:
 /// see them, pause or delete them, or add one by hand.
@@ -133,7 +134,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         Text(
           'Ask $name in the chat ("remind me at 6 to call Mum", "every '
           'morning, check the weather for me"), or add one here. They '
-          'happen while VoxCordis runs${services.settings.value.keepRunning ? '' : '; turn on Settings → General → Keep running so they also happen with the window closed'}.',
+          'happen while VoxCordis runs${services.settings.value.keepRunning ? '' : '; turn on Settings → General → Close to the system tray so they also happen with the window closed'}.',
           style: TextStyle(fontSize: 12.5, color: palette.textMuted),
         ),
         const SizedBox(height: 16),
@@ -245,6 +246,8 @@ class _ScheduleTile extends StatelessWidget {
     final status = !item.active
         ? (item.origin == 'nemini' && item.lastRunAt == null
               ? 'Imported from Nemini · paused until you check it'
+              : item.origin == 'import' && item.lastRunAt == null
+              ? 'Imported · paused until you check it'
               : item.lastRunAt != null && item.repeat.isOnce
               ? 'Done'
               : 'Paused')
@@ -446,16 +449,13 @@ class _ScheduleDialogState extends State<_ScheduleDialog> {
               ],
             ),
             const SizedBox(height: 14),
-            DropdownButtonFormField<Repeat>(
-              dropdownColor: context.popupColor,
-              borderRadius: BorderRadius.circular(14),
-              initialValue: _repeats.contains(_repeat) ? _repeat : null,
-              decoration: const InputDecoration(labelText: 'Repeat'),
-              items: [
-                for (final r in {..._repeats, _repeat})
-                  DropdownMenuItem(value: r, child: Text(r.label)),
+            GlassSelect<Repeat>(
+              label: 'Repeat',
+              value: _repeat,
+              options: [
+                for (final r in {..._repeats, _repeat}) GlassOption(r, r.label),
               ],
-              onChanged: (r) => setState(() => _repeat = r ?? Repeat.once),
+              onChanged: (r) => setState(() => _repeat = r),
             ),
             if (_kind == ScheduleKind.task) ...[
               const SizedBox(height: 12),

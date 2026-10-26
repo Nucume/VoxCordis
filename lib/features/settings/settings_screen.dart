@@ -13,11 +13,13 @@ import '../../data/looks.dart';
 import '../../data/settings.dart';
 import '../../services/folder_service.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/glass_popover.dart';
 import '../../services/changelog.dart';
 import '../../services/updater.dart';
 import '../setup/character_pickers.dart';
 import '../update/update_dialog.dart';
 import 'encryption_settings.dart';
+import 'image_settings.dart';
 import 'internet_settings.dart';
 import '../update/whats_new_dialog.dart';
 import 'model_picker.dart';
@@ -33,9 +35,11 @@ class SettingsScreen extends StatefulWidget {
   final int initialTab;
 
   /// Privacy: the encryption key ([EncryptionSettings]).
-  static const brainTab = 2;
-  static const internetTab = 4;
-  static const privacyTab = 5;
+  static const appearanceTab = 1;
+  static const imagesTab = 2;
+  static const brainTab = 3;
+  static const internetTab = 5;
+  static const privacyTab = 6;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -44,16 +48,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   late AppSettings _draft;
   late final _userName = TextEditingController();
-  late final _invoke = TextEditingController();
   bool _loaded = false;
-
-  static const _accents = [
-    0xFFB18CFF,
-    0xFFFF7AB6,
-    0xFF6FA8FF,
-    0xFF5EE6C0,
-    0xFFFFB86B,
-  ];
 
   @override
   void didChangeDependencies() {
@@ -62,14 +57,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _loaded = true;
     _draft = AppScope.of(context).settings.value;
     _userName.text = _draft.userName;
-    _invoke.text = _draft.invokeUrl;
   }
 
   @override
   void dispose() {
-    for (final c in [_userName, _invoke]) {
-      c.dispose();
-    }
+    _userName.dispose();
     super.dispose();
   }
 
@@ -106,7 +98,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       clearBackground:
           current.backgroundColors.isEmpty && current.backgroundLayout == null,
       userName: _userName.text.trim(),
-      invokeUrl: _invoke.text.trim(),
     );
     if (!await confirmModelFits(context, next)) return;
     final folder = next.companionFolder;
@@ -143,7 +134,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 7,
+      length: 8,
       initialIndex: widget.initialTab,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -156,6 +147,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               dividerColor: Colors.transparent,
               tabs: [
                 Tab(text: 'General'),
+                Tab(text: 'Appearance'),
                 Tab(text: 'Images'),
                 Tab(text: 'Brain'),
                 Tab(text: 'Computer'),
@@ -169,11 +161,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
             child: TabBarView(
               children: [
                 _page(_general()),
+                _page(_appearance()),
                 _page([
-                  _field(
-                    _invoke,
-                    'InvokeAI URL',
-                    hint: 'http://localhost:9090',
+                  ImageSettings(
+                    value: _draft,
+                    onChanged: (v) => setState(() => _draft = v),
                   ),
                 ]),
                 _page([
@@ -227,55 +219,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     children: children,
   );
 
-  List<Widget> _general() {
-    final folder = _draft.companionFolder;
+  /// Colorway, background picture, theme and the ready light. The accent
+  /// comes with the colorway, so it has no picker of its own.
+  List<Widget> _appearance() {
     final name = _draft.companionName;
     return [
-      const _Section('Appearance'),
-      const SizedBox(height: 8),
-      Row(
-        children: [
-          Text('Accent', style: TextStyle(color: context.palette.textMuted)),
-          const SizedBox(width: 12),
-          for (final c in _accents)
-            GestureDetector(
-              // Applies (and saves) at once, so the change is visible.
-              onTap: () {
-                setState(() => _draft = _draft.copyWith(accentColor: c));
-                final store = AppScope.of(context).settings;
-                store.update(store.value.copyWith(accentColor: c));
-              },
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.only(right: 8),
-                width: 26,
-                height: 26,
-                decoration: BoxDecoration(
-                  color: Color(c),
-                  shape: BoxShape.circle,
-                  border: Border.all(
-                    color: _draft.accentColor == c
-                        ? context.palette.text
-                        : Colors.transparent,
-                    width: 2,
-                  ),
-                ),
-              ),
-            ),
-          const Spacer(),
-          // The companion may have restyled the background; this undoes it.
-          if (_draft.backgroundColors.isNotEmpty ||
-              _draft.backgroundLayout != null)
-            TextButton(
-              onPressed: () {
-                setState(() => _draft = _draft.copyWith(clearBackground: true));
-                final store = AppScope.of(context).settings;
-                store.update(store.value.copyWith(clearBackground: true));
-              },
-              child: const Text('Reset the look'),
-            ),
-        ],
-      ),
       const SizedBox(height: 14),
       _Colorways(
         onPicked: (look) => setState(
@@ -287,6 +235,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ),
       ),
+      // The companion may have restyled the background into something no
+      // colorway matches; this undoes it.
+      if (_Colorways.current(_draft) == null)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            onPressed: () {
+              setState(() => _draft = _draft.copyWith(clearBackground: true));
+              final store = AppScope.of(context).settings;
+              store.update(store.value.copyWith(clearBackground: true));
+            },
+            child: const Text('Reset the look'),
+          ),
+        ),
       const SizedBox(height: 14),
       const _BackgroundPicture(),
       const SizedBox(height: 14),
@@ -346,22 +308,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
             listenable: AppScope.of(context).settings,
             builder: (context, _) {
               final store = AppScope.of(context).settings;
-              return DropdownButton<StatusLight>(
+              return GlassSelect<StatusLight>(
                 value: store.value.statusLight,
-                dropdownColor: context.popupColor,
-                borderRadius: BorderRadius.circular(14),
-                items: [
+                options: [
                   for (final p in StatusLight.values)
-                    DropdownMenuItem(
-                      value: p,
-                      child: Text(RuntimeStatus.placeLabel(p)),
-                    ),
+                    GlassOption(p, RuntimeStatus.placeLabel(p)),
                 ],
-                onChanged: (v) {
-                  if (v != null) {
-                    store.update(store.value.copyWith(statusLight: v));
-                  }
-                },
+                onChanged: (v) =>
+                    store.update(store.value.copyWith(statusLight: v)),
               );
             },
           ),
@@ -373,6 +327,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+    ];
+  }
+
+  List<Widget> _general() {
+    final folder = _draft.companionFolder;
+    final name = _draft.companionName;
+    return [
       const _Section('You'),
       _field(
         _userName,
@@ -388,6 +349,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       ),
       _Section('In the background'),
       _Background(value: _draft, onChanged: (v) => setState(() => _draft = v)),
+      _Poke(value: _draft, onChanged: (v) => setState(() => _draft = v)),
       _Section(name),
       _CompanionFiles(
         name: name,
@@ -430,7 +392,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   );
 }
 
-/// Keep running with the window closed, start with the computer, the
+/// Close to the system tray, start with the computer, the
 /// daily limit for tasks, and Quit.
 class _Background extends StatelessWidget {
   const _Background({required this.value, required this.onChanged});
@@ -451,11 +413,13 @@ class _Background extends StatelessWidget {
           contentPadding: EdgeInsets.zero,
           value: value.keepRunning,
           onChanged: (on) => onChanged(value.copyWith(keepRunning: on)),
-          title: const Text('Keep running when I close the window'),
+          title: const Text('Close to the system tray'),
           subtitle: Text(
-            'The window goes to the taskbar instead, so $name\'s reminders '
-            'and tasks still happen. Quit, at the bottom of this page, closes '
-            'VoxCordis for real.',
+            'Closing the window leaves VoxCordis in the system tray, so '
+            '$name\'s reminders and tasks still happen. Click the tray icon '
+            'to come back, or choose Quit there or at the bottom of this '
+            'page. Where the desktop has no tray (plain GNOME), the window '
+            'goes to the taskbar instead.',
             style: muted,
           ),
         ),
@@ -467,7 +431,7 @@ class _Background extends StatelessWidget {
             title: const Text('Start with my computer'),
             subtitle: Text(
               value.keepRunning
-                  ? 'Starts in the taskbar when you log in.'
+                  ? 'Starts in the system tray when you log in.'
                   : 'Starts when you log in.',
               style: muted,
             ),
@@ -481,21 +445,13 @@ class _Background extends StatelessWidget {
                 style: TextStyle(color: context.palette.text),
               ),
             ),
-            DropdownButton<int>(
-              dropdownColor: context.popupColor,
-              borderRadius: BorderRadius.circular(14),
+            GlassSelect<int>(
               value: _limits.contains(value.automationRunsPerDay)
                   ? value.automationRunsPerDay
                   : 24,
-              items: [
-                for (final n in _limits)
-                  DropdownMenuItem(value: n, child: Text('$n')),
-              ],
-              onChanged: (n) {
-                if (n != null) {
-                  onChanged(value.copyWith(automationRunsPerDay: n));
-                }
-              },
+              options: [for (final n in _limits) GlassOption(n, '$n')],
+              onChanged: (n) =>
+                  onChanged(value.copyWith(automationRunsPerDay: n)),
             ),
             const SizedBox(width: 8),
             const InfoIcon(
@@ -506,6 +462,113 @@ class _Background extends StatelessWidget {
             ),
           ],
         ),
+      ],
+    );
+  }
+}
+
+/// How long a quiet spell lasts before the companion does something on
+/// its own.
+class _Poke extends StatelessWidget {
+  const _Poke({required this.value, required this.onChanged});
+
+  final AppSettings value;
+  final ValueChanged<AppSettings> onChanged;
+
+  static const _hours = [0, 1, 2, 3, 6, 12];
+
+  Widget _dropdown(
+    BuildContext context,
+    int value,
+    List<int> options,
+    String Function(int) label,
+    ValueChanged<int> onPicked,
+  ) => GlassSelect<int>(
+    value: value,
+    options: [for (final o in options) GlassOption(o, label(o))],
+    onChanged: onPicked,
+  );
+
+  static String _clock(int h) => '${h.toString().padLeft(2, '0')}:00';
+
+  @override
+  Widget build(BuildContext context) {
+    final name = value.companionName;
+    final on = value.pokeAfterHours > 0;
+    final text = TextStyle(color: context.palette.text);
+    final muted = TextStyle(fontSize: 12, color: context.palette.textMuted);
+    final allDay = [for (var h = 0; h < 24; h++) h];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: Text('When it\'s been quiet, $name pokes', style: text),
+            ),
+            _dropdown(
+              context,
+              _hours.contains(value.pokeAfterHours) ? value.pokeAfterHours : 3,
+              _hours,
+              (h) => switch (h) {
+                0 => 'Never',
+                1 => 'After 1 hour',
+                _ => 'After $h hours',
+              },
+              (h) => onChanged(value.copyWith(pokeAfterHours: h)),
+            ),
+            const SizedBox(width: 8),
+            InfoIcon(
+              message:
+                  'After this long with nobody writing, $name does '
+                  'something unasked: writes you a message, potters about '
+                  'with the notes, or falls into a web rabbit hole when '
+                  'Internet is on. Each poke is a reply from the brain.',
+            ),
+          ],
+        ),
+        if (on) ...[
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: value.pokeRepeat,
+            onChanged: (v) => onChanged(value.copyWith(pokeRepeat: v)),
+            title: const Text('Keep poking while I\'m away'),
+            subtitle: Text(
+              value.pokeRepeat
+                  ? 'Again after every quiet spell, until you write.'
+                  : 'Once, then $name waits for you to write.',
+              style: muted,
+            ),
+          ),
+          Row(
+            children: [
+              Expanded(child: Text('No pokes from', style: text)),
+              _dropdown(
+                context,
+                value.pokeQuietFrom.clamp(0, 23),
+                allDay,
+                _clock,
+                (h) => onChanged(value.copyWith(pokeQuietFrom: h)),
+              ),
+              const SizedBox(width: 8),
+              Text('until', style: text),
+              const SizedBox(width: 8),
+              _dropdown(
+                context,
+                value.pokeQuietUntil.clamp(0, 23),
+                allDay,
+                _clock,
+                (h) => onChanged(value.copyWith(pokeQuietUntil: h)),
+              ),
+              const SizedBox(width: 8),
+              const InfoIcon(
+                message:
+                    'Quiet hours, like the night. Pick the same time twice '
+                    'to allow pokes at any hour.',
+              ),
+            ],
+          ),
+        ],
       ],
     );
   }
@@ -740,17 +803,8 @@ class _Colorways extends StatelessWidget {
     return null;
   }
 
-  DropdownMenuItem<String> _item(Look look) => DropdownMenuItem(
-    value: look.id,
-    child: Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        _Orb(look.orbColors),
-        const SizedBox(width: 10),
-        Text(look.label),
-      ],
-    ),
-  );
+  GlassOption<String> _item(BuildContext context, Look look) =>
+      GlassOption(look.id, look.label, leading: _Orb.of(context, look));
 
   @override
   Widget build(BuildContext context) {
@@ -767,36 +821,22 @@ class _Colorways extends StatelessWidget {
               style: TextStyle(color: context.palette.textMuted),
             ),
             const SizedBox(width: 12),
-            DropdownButton<String>(
+            GlassSelect<String>(
               value: now?.id ?? '',
-              dropdownColor: context.popupColor,
-              borderRadius: BorderRadius.circular(14),
-              menuMaxHeight: 460,
-              items: [
+              options: [
                 if (now == null)
-                  DropdownMenuItem(
-                    value: '',
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        _Orb([
-                          s.accentColor,
-                          ...s.backgroundColors.take(2),
-                          if (s.backgroundColors.length < 2) s.accentColor,
-                        ]),
-                        const SizedBox(width: 10),
-                        const Text('Custom'),
-                      ],
+                  GlassOption(
+                    '',
+                    'Custom',
+                    leading: _Orb(
+                      base: context.palette.background,
+                      glows: s.backgroundColors.isEmpty
+                          ? [s.accentColor]
+                          : s.backgroundColors,
                     ),
                   ),
-                for (final look in Look.all) _item(look),
-                // The special ones, set apart by a thin rule.
-                const DropdownMenuItem(
-                  enabled: false,
-                  value: '-',
-                  child: SizedBox(width: 160, child: Divider()),
-                ),
-                for (final look in Look.special) _item(look),
+                for (final look in [...Look.all, ...Look.special])
+                  _item(context, look),
               ],
               onChanged: (id) {
                 final look = Look.byId(id);
@@ -815,9 +855,9 @@ class _Colorways extends StatelessWidget {
             const SizedBox(width: 8),
             const InfoIcon(
               message:
-                  'The first six change the accent and the soft glows. The '
-                  'ones below the line, like Haru, recolour the window and '
-                  'panels too.',
+                  'Each orb shows its colours on the window. Most change the '
+                  'accent and the soft glows; Haru, Vibecoder\'s and Sakura '
+                  'recolour the window and panels too.',
             ),
           ],
         );
@@ -826,33 +866,53 @@ class _Colorways extends StatelessWidget {
   }
 }
 
-/// A small glossy orb of a look's colours, lit from the top left.
+/// A small glossy orb that shows a look as it will be: its glows on the
+/// window colour of the current theme, lit from the top left.
 class _Orb extends StatelessWidget {
-  const _Orb(this.colors);
-  final List<int> colors;
+  const _Orb({required this.base, required this.glows});
+
+  _Orb.of(BuildContext context, Look look)
+    : base = _baseOf(context, look),
+      glows = look.colorsIn(light: _light(context));
+
+  final Color base;
+  final List<int> glows;
+
+  static bool _light(BuildContext context) =>
+      Theme.of(context).brightness == Brightness.light;
+
+  static Color _baseOf(BuildContext context, Look look) {
+    final light = _light(context);
+    final own = light ? look.lightBase : look.base;
+    if (own != null) return Color(own);
+    return (light ? AppPalette.light : AppPalette.dark).background;
+  }
+
+  /// Where the glows sit, like the soft lights behind the panels.
+  static const _spots = [
+    Alignment(-0.7, -0.7),
+    Alignment(0.75, -0.1),
+    Alignment(-0.15, 0.8),
+  ];
 
   @override
   Widget build(BuildContext context) {
-    final c = [for (final x in colors) Color(x)];
     return Container(
-      width: 22,
-      height: 22,
+      width: 24,
+      height: 24,
       decoration: BoxDecoration(
         shape: BoxShape.circle,
+        color: base,
         border: Border.all(color: context.palette.glassBorder),
         boxShadow: [
           BoxShadow(
-            color: c.last.withValues(alpha: 0.45),
+            color: (glows.isEmpty ? base : Color(glows.first)).withValues(
+              alpha: 0.4,
+            ),
             blurRadius: 6,
             offset: const Offset(0, 2),
           ),
         ],
-        // The colours melt into each other from the lit side to the shade.
-        gradient: RadialGradient(
-          center: const Alignment(-0.45, -0.5),
-          radius: 1.15,
-          colors: c.length == 1 ? [c.first, c.first] : c,
-        ),
       ),
       // A soft shine, so it reads as a sphere rather than a flat dot.
       foregroundDecoration: const BoxDecoration(
@@ -860,15 +920,35 @@ class _Orb extends StatelessWidget {
         gradient: RadialGradient(
           center: Alignment(-0.4, -0.5),
           radius: 0.55,
-          colors: [Color(0x99FFFFFF), Color(0x00FFFFFF)],
+          colors: [Color(0x80FFFFFF), Color(0x00FFFFFF)],
+        ),
+      ),
+      child: ClipOval(
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            for (var i = 0; i < glows.length && i < _spots.length; i++)
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: _spots[i],
+                    radius: 0.6,
+                    colors: [
+                      Color(glows[i]).withValues(alpha: 0.95),
+                      Color(glows[i]).withValues(alpha: 0),
+                    ],
+                  ),
+                ),
+              ),
+          ],
         ),
       ),
     );
   }
 }
 
-/// A picture of the human's (or one the companion picked) behind the
-/// whole app, darkened so the panels stay readable.
+/// A picture of the human's (or one the companion picked) in the main
+/// panel, darkened so the chat stays readable.
 class _BackgroundPicture extends StatelessWidget {
   const _BackgroundPicture();
 
@@ -950,8 +1030,9 @@ class _BackgroundPicture extends StatelessWidget {
             ],
             InfoIcon(
               message:
-                  'Shown darkened behind everything, with the panels a little '
-                  "see-through. Each companion has its own; ${s.companionName} "
+                  'Shown darkened in the big panel on the right, behind the '
+                  'chat and the other tabs; the rest keeps the colorway. '
+                  "Each companion has its own; ${s.companionName} "
                   'can pick one from its folder too.',
             ),
           ],
@@ -1059,12 +1140,7 @@ class _About extends StatelessWidget {
                 label: const Text('Source code'),
               ),
             TextButton.icon(
-              onPressed: () => showLicensePage(
-                context: context,
-                applicationName: 'VoxCordis',
-                applicationVersion: appVersion,
-                applicationLegalese: 'Copyright © 2026 Nucume · GPL-3.0',
-              ),
+              onPressed: () => _openLicenses(context),
               icon: const Icon(Icons.library_books_outlined),
               label: const Text('Open-source parts'),
             ),
@@ -1073,6 +1149,30 @@ class _About extends StatelessWidget {
       ],
     );
   }
+}
+
+/// Flutter's licence page on a solid background. The app's pages are
+/// see-through and the glows sit under the first page only, so a full page
+/// pushed on top would leave the whole window transparent.
+void _openLicenses(BuildContext context) {
+  final theme = Theme.of(context);
+  final solid = context.palette.background.withValues(alpha: 1);
+  Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => Theme(
+        data: theme.copyWith(
+          scaffoldBackgroundColor: solid,
+          canvasColor: solid,
+          appBarTheme: theme.appBarTheme.copyWith(backgroundColor: solid),
+        ),
+        child: const LicensePage(
+          applicationName: 'VoxCordis',
+          applicationVersion: appVersion,
+          applicationLegalese: 'Copyright © 2026 Nucume · GPL-3.0',
+        ),
+      ),
+    ),
+  );
 }
 
 /// Already in Settings, so an action there just closes the notes.

@@ -51,7 +51,7 @@ is installed.
 
 ### Not there yet
 
-- **Images:** InvokeAI is only a connection check for now.
+- **Images:** drawn on this computer with stable-diffusion.cpp, or through an InvokeAI you run (Settings → Images; SD 1.5, 2 and SDXL models).
 - **Long-term memory search** is keyword based; search by meaning is planned.
 - **Not yet:** connectors (calendar, MCP), voice.
 - **macOS** builds from source but has no installer or updates yet.

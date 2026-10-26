@@ -21,6 +21,10 @@ enum StatusLight { portrait, name, header }
 /// want a key, SearXNG is an instance the human names.
 enum SearchProvider { duckDuckGo, brave, tavily, searxng }
 
+/// What draws the companion's pictures: nothing yet, VoxCordis itself
+/// (stable-diffusion.cpp on this computer), or an InvokeAI the human runs.
+enum ImageEngineChoice { off, builtIn, invoke }
+
 /// Everything the minimal v1 Settings page edits.
 @immutable
 class AppSettings {
@@ -67,6 +71,13 @@ class AppSettings {
     this.keepRunning = false,
     this.startWithComputer = false,
     this.automationRunsPerDay = 24,
+    this.imageEngine = ImageEngineChoice.off,
+    this.imageModel,
+    this.freeGpuForDrawing = true,
+    this.pokeAfterHours = 3,
+    this.pokeQuietFrom = 23,
+    this.pokeQuietUntil = 8,
+    this.pokeRepeat = false,
   });
 
   final String companionName;
@@ -192,6 +203,30 @@ class AppSettings {
   /// server-hosted brain.
   final int automationRunsPerDay;
 
+  /// Whether the companion can draw, and with what.
+  final ImageEngineChoice imageEngine;
+
+  /// The picture model used when the companion doesn't pick one: a
+  /// catalog id, or the file name of one of the human's own.
+  final String? imageModel;
+
+  /// Unloads the built-in chat model while a picture is drawn, so the
+  /// picture model has the graphics card to itself.
+  final bool freeGpuForDrawing;
+
+  /// Hours of silence before the companion does something on its own (a
+  /// poke), or 0 for never.
+  final int pokeAfterHours;
+
+  /// No pokes from this hour until [pokeQuietUntil]; the same hour for
+  /// both means no quiet hours.
+  final int pokeQuietFrom;
+  final int pokeQuietUntil;
+
+  /// Keep poking every [pokeAfterHours] while the human is away, instead
+  /// of once until they write again.
+  final bool pokeRepeat;
+
   /// The current companion, as it would be stored while another is talked
   /// to.
   CompanionProfile get currentCompanion => CompanionProfile(
@@ -265,6 +300,13 @@ class AppSettings {
       keepRunning: keepRunning,
       startWithComputer: startWithComputer,
       automationRunsPerDay: automationRunsPerDay,
+      imageEngine: imageEngine,
+      imageModel: imageModel,
+      freeGpuForDrawing: freeGpuForDrawing,
+      pokeAfterHours: pokeAfterHours,
+      pokeQuietFrom: pokeQuietFrom,
+      pokeQuietUntil: pokeQuietUntil,
+      pokeRepeat: pokeRepeat,
     );
   }
 
@@ -317,6 +359,13 @@ class AppSettings {
     bool? keepRunning,
     bool? startWithComputer,
     int? automationRunsPerDay,
+    ImageEngineChoice? imageEngine,
+    String? imageModel,
+    bool? freeGpuForDrawing,
+    int? pokeAfterHours,
+    int? pokeQuietFrom,
+    int? pokeQuietUntil,
+    bool? pokeRepeat,
     bool clearPortrait = false,
     bool clearChatFormat = false,
     bool clearMmproj = false,
@@ -374,6 +423,13 @@ class AppSettings {
       keepRunning: keepRunning ?? this.keepRunning,
       startWithComputer: startWithComputer ?? this.startWithComputer,
       automationRunsPerDay: automationRunsPerDay ?? this.automationRunsPerDay,
+      imageEngine: imageEngine ?? this.imageEngine,
+      imageModel: imageModel ?? this.imageModel,
+      freeGpuForDrawing: freeGpuForDrawing ?? this.freeGpuForDrawing,
+      pokeAfterHours: pokeAfterHours ?? this.pokeAfterHours,
+      pokeQuietFrom: pokeQuietFrom ?? this.pokeQuietFrom,
+      pokeQuietUntil: pokeQuietUntil ?? this.pokeQuietUntil,
+      pokeRepeat: pokeRepeat ?? this.pokeRepeat,
     );
   }
 
@@ -418,6 +474,13 @@ class AppSettings {
     'keepRunning': keepRunning,
     'startWithComputer': startWithComputer,
     'automationRunsPerDay': automationRunsPerDay,
+    'imageEngine': imageEngine.name,
+    'imageModel': imageModel,
+    'freeGpuForDrawing': freeGpuForDrawing,
+    'pokeAfterHours': pokeAfterHours,
+    'pokeQuietFrom': pokeQuietFrom,
+    'pokeQuietUntil': pokeQuietUntil,
+    'pokeRepeat': pokeRepeat,
   };
 
   factory AppSettings.fromJson(Map<String, Object?> json) {
@@ -487,6 +550,16 @@ class AppSettings {
       startWithComputer: json['startWithComputer'] as bool? ?? false,
       automationRunsPerDay:
           json['automationRunsPerDay'] as int? ?? d.automationRunsPerDay,
+      imageEngine:
+          ImageEngineChoice.values.asNameMap()[json['imageEngine']] ??
+          d.imageEngine,
+      imageModel: json['imageModel'] as String?,
+      freeGpuForDrawing:
+          json['freeGpuForDrawing'] as bool? ?? d.freeGpuForDrawing,
+      pokeAfterHours: json['pokeAfterHours'] as int? ?? d.pokeAfterHours,
+      pokeQuietFrom: json['pokeQuietFrom'] as int? ?? d.pokeQuietFrom,
+      pokeQuietUntil: json['pokeQuietUntil'] as int? ?? d.pokeQuietUntil,
+      pokeRepeat: json['pokeRepeat'] as bool? ?? d.pokeRepeat,
     );
   }
 }

@@ -42,7 +42,7 @@ Future<void> _start(
       return AppExitResponse.exit;
     },
   );
-  // With "Keep running" on, closing the window only minimizes it.
+  // With "Close to the system tray" on, closing the window only hides it.
   services.background = Background(
     settings: services.settings,
     beforeQuit: beforeQuit,

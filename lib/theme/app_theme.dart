@@ -1,4 +1,3 @@
-import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
 
@@ -23,6 +22,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     required this.codeFill,
     required this.glowAlpha,
     this.highlight,
+    this.rim = defaultRim,
   });
 
   final Color background;
@@ -55,6 +55,28 @@ class AppPalette extends ThemeExtension<AppPalette> {
   /// quieter primary colour. Null: the primary colour everywhere.
   final Color? highlight;
 
+  /// The portrait rim's colours after [highlight]: the colorway's own, or
+  /// its glows, so each one has its own flavour. Twilight's pink and blue
+  /// by default.
+  final List<Color> rim;
+
+  static const defaultRim = [Color(0xFFFF7AB6), Color(0xFF4F7CFF)];
+
+  /// This palette with the rim of [colorway], or of the [glows] in use.
+  AppPalette withRim({Look? colorway, List<Color> glows = const []}) {
+    final List<Color> next;
+    if (colorway?.rim case final own?) {
+      next = [for (final c in own) Color(c)];
+    } else if (glows.length >= 3) {
+      next = [glows[2], glows[1]];
+    } else if (glows.length == 2) {
+      next = [glows[1], glows[0]];
+    } else {
+      next = defaultRim;
+    }
+    return listEquals(next, rim) ? this : _copy(rim: next);
+  }
+
   /// With a background picture the panels let more of it through; the
   /// picture is darkened (or lightened) itself, so text stays readable.
   /// The same palette on another window colour and panel fill, for a
@@ -75,11 +97,14 @@ class AppPalette extends ThemeExtension<AppPalette> {
     codeFill: codeFill,
     glowAlpha: glowAlpha,
     highlight: highlight,
+    rim: rim,
   );
 
-  AppPalette seeThrough() => AppPalette(
+  AppPalette seeThrough() => _copy(glass: glass.withValues(alpha: 0.55));
+
+  AppPalette _copy({Color? glass, List<Color>? rim}) => AppPalette(
     background: background,
-    glass: glass.withValues(alpha: 0.55),
+    glass: glass ?? this.glass,
     glassBorder: glassBorder,
     glassSheen: glassSheen,
     text: text,
@@ -89,6 +114,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     codeFill: codeFill,
     glowAlpha: glowAlpha,
     highlight: highlight,
+    rim: rim ?? this.rim,
   );
 
   static const dark = AppPalette(
@@ -143,6 +169,10 @@ class AppPalette extends ThemeExtension<AppPalette> {
       codeFill: Color.lerp(codeFill, other.codeFill, t)!,
       glowAlpha: lerpDouble(glowAlpha, other.glowAlpha, t)!,
       highlight: Color.lerp(highlight, other.highlight, t),
+      rim: [
+        for (var i = 0; i < rim.length && i < other.rim.length; i++)
+          Color.lerp(rim[i], other.rim[i], t)!,
+      ],
     );
   }
 }
@@ -177,6 +207,7 @@ class AppTheme {
     Brightness brightness, {
     bool picture = false,
     Look? colorway,
+    List<Color> glows = const [],
   }) {
     final light = brightness == Brightness.light;
     var base = light ? AppPalette.light : AppPalette.dark;
@@ -189,6 +220,12 @@ class AppTheme {
             : Color(colorway.highlight!),
       );
     }
+    base = base.withRim(
+      colorway: colorway,
+      glows: glows.isEmpty
+          ? [accent, ...AuroraBackground.defaultColors]
+          : glows,
+    );
     final palette = picture ? base.seeThrough() : base;
     final special = colorway != null && colorway.isSpecial;
     final scheme = ColorScheme.fromSeed(
@@ -364,17 +401,10 @@ class AuroraBackground extends StatefulWidget {
     this.colors = const [],
     this.layout = defaultLayout,
     this.animate = false,
-    this.picture,
-    this.dim = 0.6,
   });
 
   final Color accent;
   final Widget child;
-
-  /// Shown behind everything instead of the glows, covered by the
-  /// background colour at [dim] so the panels stay readable.
-  final File? picture;
-  final double dim;
 
   /// Up to three glow colours; empty means the accent, blue and pink.
   final List<Color> colors;
@@ -431,30 +461,6 @@ class _AuroraBackgroundState extends State<AuroraBackground>
         ...AuroraBackground.defaultColors,
       ],
     ];
-    final picture = widget.picture;
-    if (picture != null) {
-      return Stack(
-        children: [
-          Positioned.fill(
-            child: RepaintBoundary(
-              child: ColoredBox(
-                color: palette.background,
-                child: Image.file(
-                  picture,
-                  fit: BoxFit.cover,
-                  // Decoded once at about screen size, not at full size.
-                  cacheWidth: 2560,
-                  color: palette.background.withValues(alpha: widget.dim),
-                  colorBlendMode: BlendMode.srcATop,
-                  errorBuilder: (_, _, _) => const SizedBox.expand(),
-                ),
-              ),
-            ),
-          ),
-          widget.child,
-        ],
-      );
-    }
     return Stack(
       children: [
         Positioned.fill(
