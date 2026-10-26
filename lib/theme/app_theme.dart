@@ -1,8 +1,11 @@
+import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui';
 
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+
+import '../data/looks.dart';
 
 /// The app's colours for one brightness: frosted, mostly solid panels over
 /// soft colour glows on a solid base.
@@ -19,6 +22,7 @@ class AppPalette extends ThemeExtension<AppPalette> {
     required this.bubble,
     required this.codeFill,
     required this.glowAlpha,
+    this.highlight,
   });
 
   final Color background;
@@ -45,6 +49,47 @@ class AppPalette extends ThemeExtension<AppPalette> {
 
   /// How strong the background glows are at their centre.
   final double glowAlpha;
+
+  /// A colorway's sharp accent for the few places that stand out (send,
+  /// the chosen tab, the portrait's rim), where the rest of the app uses a
+  /// quieter primary colour. Null: the primary colour everywhere.
+  final Color? highlight;
+
+  /// With a background picture the panels let more of it through; the
+  /// picture is darkened (or lightened) itself, so text stays readable.
+  /// The same palette on another window colour and panel fill, for a
+  /// special colorway.
+  AppPalette tinted({
+    required Color background,
+    required Color glass,
+    Color? highlight,
+  }) => AppPalette(
+    background: background,
+    glass: glass,
+    glassBorder: glassBorder,
+    glassSheen: glassSheen,
+    text: text,
+    textMuted: textMuted,
+    tile: tile,
+    bubble: bubble,
+    codeFill: codeFill,
+    glowAlpha: glowAlpha,
+    highlight: highlight,
+  );
+
+  AppPalette seeThrough() => AppPalette(
+    background: background,
+    glass: glass.withValues(alpha: 0.55),
+    glassBorder: glassBorder,
+    glassSheen: glassSheen,
+    text: text,
+    textMuted: textMuted,
+    tile: tile,
+    bubble: bubble,
+    codeFill: codeFill,
+    glowAlpha: glowAlpha,
+    highlight: highlight,
+  );
 
   static const dark = AppPalette(
     background: Color(0xFF0E0B16),
@@ -97,12 +142,22 @@ class AppPalette extends ThemeExtension<AppPalette> {
       bubble: Color.lerp(bubble, other.bubble, t)!,
       codeFill: Color.lerp(codeFill, other.codeFill, t)!,
       glowAlpha: lerpDouble(glowAlpha, other.glowAlpha, t)!,
+      highlight: Color.lerp(highlight, other.highlight, t),
     );
   }
 }
 
 extension AppPaletteContext on BuildContext {
   AppPalette get palette => AppPalette.of(this);
+
+  /// The solid fill of menus, tooltips and toasts. The canvas is see-through
+  /// (the glows show behind the panels), so a dropdown needs this.
+  /// See [AppPalette.highlight].
+  Color get highlight =>
+      palette.highlight ?? Theme.of(this).colorScheme.primary;
+
+  Color get popupColor =>
+      AppTheme.popupFill(Theme.of(this).colorScheme.primary, palette);
 }
 
 class AppTheme {
@@ -112,23 +167,48 @@ class AppTheme {
   static ThemeData dark(Color accent) => build(accent, Brightness.dark);
   static ThemeData light(Color accent) => build(accent, Brightness.light);
 
-  static ThemeData build(Color accent, Brightness brightness) {
-    final palette = brightness == Brightness.light
-        ? AppPalette.light
-        : AppPalette.dark;
+  static Color popupFill(Color accent, AppPalette palette) => Color.alphaBlend(
+    accent.withValues(alpha: 0.10),
+    Color.alphaBlend(palette.glass, palette.background),
+  );
+
+  static ThemeData build(
+    Color accent,
+    Brightness brightness, {
+    bool picture = false,
+    Look? colorway,
+  }) {
+    final light = brightness == Brightness.light;
+    var base = light ? AppPalette.light : AppPalette.dark;
+    if (colorway != null && colorway.isSpecial) {
+      base = base.tinted(
+        background: Color(light ? colorway.lightBase! : colorway.base!),
+        glass: Color(light ? colorway.lightPanel! : colorway.panel!),
+        highlight: colorway.highlight == null
+            ? null
+            : Color(colorway.highlight!),
+      );
+    }
+    final palette = picture ? base.seeThrough() : base;
+    final special = colorway != null && colorway.isSpecial;
     final scheme = ColorScheme.fromSeed(
       seedColor: accent,
       // Keep the chosen colour recognisable instead of a muted tone of it.
       dynamicSchemeVariant: DynamicSchemeVariant.fidelity,
       brightness: brightness,
       surface: Colors.transparent,
+      // A colorway shows its accent as it is, e.g. Haru's red, not the
+      // softer tone a dark scheme would pick.
+      primary: special ? accent : null,
+      onPrimary: special
+          ? (accent.computeLuminance() > 0.4
+                ? const Color(0xFF15121F)
+                : Colors.white)
+          : null,
     );
     // Tooltips and toasts float over anything, so they get a solid panel
     // tinted with the accent instead of Material's plain black or white.
-    final popup = Color.alphaBlend(
-      scheme.primary.withValues(alpha: 0.10),
-      Color.alphaBlend(palette.glass, palette.background),
-    );
+    final popup = popupFill(scheme.primary, palette);
     final popupBorder = Border.all(
       color: Color.alphaBlend(
         scheme.primary.withValues(alpha: 0.25),
@@ -169,6 +249,27 @@ class AppTheme {
           side: popupBorder.top,
         ),
       ),
+      // Menus would take the see-through canvas colour otherwise.
+      popupMenuTheme: PopupMenuThemeData(
+        color: popup,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(14),
+          side: popupBorder.top,
+        ),
+      ),
+      menuTheme: MenuThemeData(
+        style: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(popup),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        ),
+      ),
+      dropdownMenuTheme: DropdownMenuThemeData(
+        menuStyle: MenuStyle(
+          backgroundColor: WidgetStatePropertyAll(popup),
+          surfaceTintColor: const WidgetStatePropertyAll(Colors.transparent),
+        ),
+      ),
       scaffoldBackgroundColor: Colors.transparent,
       canvasColor: Colors.transparent,
       splashFactory: InkSparkle.splashFactory,
@@ -207,6 +308,13 @@ class GlassPanel extends StatelessWidget {
     this.blur = 12,
   });
 
+  /// Behind the panels that stay on screen the glows hold still, and a
+  /// blur over them looks the same as none. Blurring still costs the
+  /// graphics card a pass over the whole panel on every frame (each
+  /// keystroke, each caret blink, each streamed word), so those panels
+  /// pass this.
+  static const still = 0.0;
+
   final Widget child;
   final EdgeInsetsGeometry padding;
   final double radius;
@@ -216,24 +324,27 @@ class GlassPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final r = BorderRadius.circular(radius);
     final palette = context.palette;
-    return ClipRRect(
-      borderRadius: r,
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-        child: DecoratedBox(
-          decoration: BoxDecoration(
-            borderRadius: r,
-            color: palette.glass,
-            border: Border.all(color: palette.glassBorder, width: 1),
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: palette.glassSheen,
-            ),
-          ),
-          child: Padding(padding: padding, child: child),
+    final panel = DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: r,
+        color: palette.glass,
+        border: Border.all(color: palette.glassBorder, width: 1),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: palette.glassSheen,
         ),
       ),
+      child: Padding(padding: padding, child: child),
+    );
+    return ClipRRect(
+      borderRadius: r,
+      child: blur <= 0
+          ? panel
+          : BackdropFilter(
+              filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+              child: panel,
+            ),
     );
   }
 }
@@ -253,10 +364,17 @@ class AuroraBackground extends StatefulWidget {
     this.colors = const [],
     this.layout = defaultLayout,
     this.animate = false,
+    this.picture,
+    this.dim = 0.6,
   });
 
   final Color accent;
   final Widget child;
+
+  /// Shown behind everything instead of the glows, covered by the
+  /// background colour at [dim] so the panels stay readable.
+  final File? picture;
+  final double dim;
 
   /// Up to three glow colours; empty means the accent, blue and pink.
   final List<Color> colors;
@@ -313,6 +431,30 @@ class _AuroraBackgroundState extends State<AuroraBackground>
         ...AuroraBackground.defaultColors,
       ],
     ];
+    final picture = widget.picture;
+    if (picture != null) {
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: RepaintBoundary(
+              child: ColoredBox(
+                color: palette.background,
+                child: Image.file(
+                  picture,
+                  fit: BoxFit.cover,
+                  // Decoded once at about screen size, not at full size.
+                  cacheWidth: 2560,
+                  color: palette.background.withValues(alpha: widget.dim),
+                  colorBlendMode: BlendMode.srcATop,
+                  errorBuilder: (_, _, _) => const SizedBox.expand(),
+                ),
+              ),
+            ),
+          ),
+          widget.child,
+        ],
+      );
+    }
     return Stack(
       children: [
         Positioned.fill(

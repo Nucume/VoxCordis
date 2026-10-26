@@ -8,20 +8,23 @@ import '../features/memory/memory_screen.dart';
 import '../features/schedule/schedule_screen.dart';
 import '../features/settings/keep_key_dialog.dart';
 import '../features/settings/settings_screen.dart';
+import '../features/skills/skills_screen.dart';
 import '../features/system/system_approval.dart';
 import '../features/system/web_approval.dart';
 import '../features/update/update_dialog.dart';
 import '../features/update/whats_new_dialog.dart';
-import '../services/runtime/runtime_controller.dart';
+import '../data/settings.dart';
 import '../services/schedule/scheduler.dart';
 import '../services/system/system_tools.dart';
 import '../theme/app_theme.dart';
 import 'companion_card.dart';
+import 'runtime_status.dart';
 
 enum AppTab {
   chat('Chat', Icons.chat_bubble_outline_rounded),
   memory('Memory', Icons.auto_awesome_outlined),
   plans('Plans', Icons.alarm_rounded),
+  skills('Skills', Icons.school_outlined),
   images('Images', Icons.image_outlined),
   settings('Settings', Icons.tune_rounded);
 
@@ -129,6 +132,7 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
     AppTab.chat => ChatScreen(chat: _chat!),
     AppTab.memory => const MemoryScreen(),
     AppTab.plans => const ScheduleScreen(),
+    AppTab.skills => const SkillsScreen(),
     AppTab.images => const ImagesScreen(),
     AppTab.settings => SettingsScreen(
       key: ValueKey(_settingsTab),
@@ -151,6 +155,7 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
             const SizedBox(width: 14),
             Expanded(
               child: GlassPanel(
+                blur: GlassPanel.still,
                 padding: EdgeInsets.zero,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -165,18 +170,25 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
                           ),
                           const SizedBox(width: 12),
                           // Shrinks instead of overflowing on narrow windows.
-                          const Expanded(
+                          // The rest of the bar is kept free for what comes.
+                          Expanded(
                             child: Align(
                               alignment: Alignment.centerRight,
                               child: FittedBox(
                                 fit: BoxFit.scaleDown,
-                                child: Row(
-                                  children: [
-                                    UpdatePill(),
-                                    _RuntimeChip(),
-                                    SizedBox(width: 18),
-                                    _Wordmark(),
-                                  ],
+                                child: ListenableBuilder(
+                                  listenable: AppScope.of(context).settings,
+                                  builder: (context, _) => Row(
+                                    children: [
+                                      const UpdatePill(),
+                                      if (_tab == AppTab.chat &&
+                                          AppScope.of(
+                                                context,
+                                              ).settings.value.statusLight ==
+                                              StatusLight.header)
+                                        const RuntimeStatus(),
+                                    ],
+                                  ),
                                 ),
                               ),
                             ),
@@ -216,118 +228,6 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
   }
 }
 
-/// Shows whether the companion's model is loaded; tap to retry after an error.
-class _RuntimeChip extends StatelessWidget {
-  const _RuntimeChip();
-
-  @override
-  Widget build(BuildContext context) {
-    final services = AppScope.of(context);
-    final runtime = services.runtime;
-    return ListenableBuilder(
-      listenable: Listenable.merge([runtime, services.rewriting]),
-      builder: (context, _) {
-        final rewrite = services.rewriting.value;
-        final failed = rewrite?.problem != null;
-        final rewriting =
-            rewrite != null &&
-            !failed &&
-            (runtime.state == RuntimeState.ready ||
-                runtime.state == RuntimeState.external);
-        final color = failed
-            ? Colors.amberAccent
-            : switch (runtime.state) {
-                RuntimeState.ready ||
-                RuntimeState.external => Colors.greenAccent,
-                RuntimeState.error => Colors.redAccent,
-                RuntimeState.idle => context.palette.textMuted,
-                _ => Colors.amberAccent,
-              };
-        final busy =
-            runtime.state == RuntimeState.installing ||
-            runtime.state == RuntimeState.loading ||
-            rewriting;
-        return Tooltip(
-          message: rewriting
-              ? 'Rewriting the imported character in '
-                    '${services.settings.value.companionName}\'s own words. '
-                    'Replies may be slower until it is done.'
-              : failed
-              ? '${rewrite!.problem}\nThe original is kept. Tap to try again.'
-              : runtime.error ?? 'Tap to load the model',
-          child: InkWell(
-            borderRadius: BorderRadius.circular(20),
-            onTap: busy
-                ? null
-                : failed
-                ? () => services.rewriteIfAsked().ignore()
-                : () => runtime.ensureReady(services.settings.value).ignore(),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (busy)
-                    SizedBox(
-                      width: 10,
-                      height: 10,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        value: runtime.progress,
-                        color: color,
-                      ),
-                    )
-                  else
-                    Icon(Icons.circle, size: 9, color: color),
-                  const SizedBox(width: 8),
-                  Text(
-                    rewriting || failed ? rewrite!.label : runtime.statusText,
-                    style: TextStyle(
-                      fontSize: 12,
-                      color: context.palette.textMuted,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-}
-
-/// The heart mark and "VOX CORDIS" in the top right corner.
-class _Wordmark extends StatelessWidget {
-  const _Wordmark();
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Image.asset(AppTheme.heartMark, height: 26),
-        const SizedBox(width: 10),
-        const Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: 'VOX ',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              TextSpan(
-                text: 'CORDIS',
-                style: TextStyle(fontWeight: FontWeight.w300),
-              ),
-            ],
-          ),
-          style: TextStyle(fontSize: 15, letterSpacing: 2.4),
-        ),
-      ],
-    );
-  }
-}
-
 /// Pill tabs with a sliding highlight.
 class _TabBar extends StatelessWidget {
   const _TabBar({required this.current, required this.onSelect});
@@ -359,7 +259,9 @@ class _TabBar extends StatelessWidget {
               decoration: BoxDecoration(
                 color: accent.withValues(alpha: 0.28),
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: accent.withValues(alpha: 0.5)),
+                border: Border.all(
+                  color: context.highlight.withValues(alpha: 0.6),
+                ),
               ),
             ),
           ),

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:companion/data/desk/desk_files.dart';
 import 'package:companion/data/desk/desk_tools.dart';
 import 'package:companion/data/desk/pictures.dart';
+import 'package:companion/data/looks.dart';
 import 'package:companion/data/settings.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -15,7 +16,8 @@ void main() {
   String? savedPronouns;
   String? savedName;
   File? savedAvatar;
-  ({List<int>? colors, double? layout, int? accent})? savedLook;
+  ({List<int>? colors, double? layout, int? accent, String? colorway})?
+  savedLook;
   ThemeChoice? savedTheme;
   late DeskTools tools;
 
@@ -335,6 +337,61 @@ void main() {
       await run('set_background', {'accent': '#B18CFF'});
       expect(savedLook!.accent, 0xFFB18CFF);
       expect(savedLook!.colors, isNull);
+    });
+
+    test('set_background takes a ready-made look', () async {
+      final r = await run('set_background', {'look': 'ocean'});
+      expect(r['ok'], true, reason: '$r');
+      final ocean = Look.byId('ocean')!;
+      expect(savedLook!.colors, ocean.colors);
+      expect(savedLook!.accent, ocean.accent);
+      expect(
+        savedLook!.colorway,
+        '',
+        reason: 'a standard look clears the tint',
+      );
+      await run('set_background', {'look': 'haru'});
+      expect(savedLook!.colorway, 'haru');
+      expect(savedLook!.accent, Look.byId('haru')!.accent);
+      final bad = await run('set_background', {'look': 'disco'});
+      expect(bad['error'], contains('unknown look'));
+    });
+
+    test('every look is offered to the companion', () {
+      final def = DeskTools.definitions.firstWhere(
+        (d) => (d['function'] as Map)['name'] == 'set_background',
+      );
+      final props =
+          ((def['function'] as Map)['parameters'] as Map)['properties'] as Map;
+      expect((props['look'] as Map)['enum'], [
+        for (final l in [...Look.all, ...Look.special]) l.id,
+      ]);
+    });
+
+    test('set_background sets and removes a picture from the folder', () async {
+      final folder = settings.companionFolder!;
+      await Directory(p.join(folder, 'images')).create(recursive: true);
+      await File(p.join(folder, 'images', 'sea.png')).writeAsBytes([
+        0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 0, //
+      ]);
+      var pictureChanged = 0;
+      tools = DeskTools(
+        settings: () => settings,
+        onBackgroundPicture: () async => pictureChanged++,
+      );
+      var r = await run('set_background', {'picture': 'images/sea.png'});
+      expect(r['ok'], true, reason: '$r');
+      final first = Pictures.backgroundIn(folder)!;
+      expect(p.basename(first.path), startsWith('background-'));
+      r = await run('set_background', {'picture': 'images/sea.png'});
+      final second = Pictures.backgroundIn(folder)!;
+      expect(first.existsSync(), isFalse, reason: 'only one is kept');
+      expect(second.existsSync(), isTrue);
+      r = await run('set_background', {'picture': ''});
+      expect(Pictures.backgroundIn(folder), isNull);
+      expect(pictureChanged, 3);
+      r = await run('set_background', {'picture': 'personality.md'});
+      expect(r['error'], contains('not a PNG'));
     });
 
     test('set_background refuses what is not a colour', () async {

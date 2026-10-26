@@ -14,6 +14,7 @@ import '../../data/desk/pictures.dart';
 import '../../data/desk/shared_files.dart';
 import '../../data/message_repository.dart';
 import '../../data/settings.dart';
+import '../../data/skills/skills.dart';
 import '../../services/llm_providers.dart';
 import '../../services/sight.dart';
 import '../../theme/app_theme.dart';
@@ -34,13 +35,17 @@ class _ChatScreenState extends State<ChatScreen> {
   final _scroll = ScrollController();
 
   /// Pictures picked to go with the next message.
-  final _pending = <String>[];
+  List<String> get _pending => _chat.draftPictures;
 
   /// Text files picked to go with the next message.
-  final _pendingFiles = <String>[];
+  List<String> get _pendingFiles => _chat.draftFiles;
 
   /// Files are being dragged over the chat.
   bool _dropping = false;
+
+  /// Skills whose command matches what is typed, while it starts with "/".
+  List<Skill> _commands = const [];
+  List<Skill>? _skills;
 
   ChatController get _chat => widget.chat;
 
@@ -48,13 +53,21 @@ class _ChatScreenState extends State<ChatScreen> {
   void initState() {
     super.initState();
     _chat.addListener(_onChat);
+    // Back from another tab: the message being written is still there.
+    _lastText = _chat.draft;
+    _input.value = TextEditingValue(
+      text: _chat.draft,
+      selection: TextSelection.collapsed(offset: _chat.draft.length),
+    );
     _input.addListener(_onTyping);
+    _input.addListener(_onCommand);
     _jumpToEnd();
   }
 
   @override
   void dispose() {
     _chat.removeListener(_onChat);
+    _chat.draft = _input.text;
     _input.dispose();
     _scroll.dispose();
     super.dispose();
@@ -62,9 +75,52 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// Typing keeps the model loaded, and loads it again when it was let go
   /// to free the graphics card, so it's ready by the time they send.
+  ///
+  /// Only real edits count, and at most once a second: a held Backspace
+  /// fires this for every character.
   void _onTyping() {
+    final text = _input.text;
+    if (text == _lastText) return;
+    _lastText = text;
+    final now = DateTime.now();
+    if (now.difference(_lastTouch) < const Duration(seconds: 1)) return;
+    _lastTouch = now;
     final services = AppScope.of(context);
     services.runtime.touch(services.settings.value, warm: true);
+  }
+
+  String _lastText = '';
+  DateTime _lastTouch = DateTime(0);
+
+  /// Typing "/" at the start offers the skills to call up.
+  Future<void> _onCommand() async {
+    final text = _input.text;
+    final m = text.startsWith('/') ? _commandPattern.firstMatch(text) : null;
+    if (m == null) {
+      if (_commands.isNotEmpty) setState(() => _commands = const []);
+      if (!text.startsWith('/')) _skills = null;
+      return;
+    }
+    final folder = AppScope.of(context).settings.value.companionFolder;
+    if (folder == null) return;
+    final skills = _skills ??= await Skills.load(folder);
+    if (!mounted) return;
+    final typed = m[1]!;
+    setState(
+      () => _commands = [
+        for (final s in skills)
+          if (s.problem == null && s.id.startsWith(typed)) s,
+      ],
+    );
+  }
+
+  static final _commandPattern = RegExp(r'^/([a-z0-9-]*)$');
+
+  void _useCommand(Skill s) {
+    _input.value = TextEditingValue(
+      text: '${s.command} ',
+      selection: TextSelection.collapsed(offset: s.command.length + 1),
+    );
   }
 
   void _onChat() {
@@ -88,11 +144,14 @@ class _ChatScreenState extends State<ChatScreen> {
       if (_chat.busy) {
         _scroll.jumpTo(end);
       } else {
-        _scroll.animateTo(
-          end,
-          duration: const Duration(milliseconds: 220),
-          curve: Curves.easeOut,
-        );
+        _scroll
+            .animateTo(
+              end,
+              duration: const Duration(milliseconds: 220),
+              curve: Curves.easeOut,
+            )
+            // The end may have moved once the last bubbles were laid out.
+            .then((_) => _jumpToEnd());
       }
     });
   }
@@ -100,11 +159,26 @@ class _ChatScreenState extends State<ChatScreen> {
   /// How far from the bottom still counts as reading the newest message.
   static const _followSlack = 120.0;
 
-  void _jumpToEnd() {
+  /// Opens at the newest message. The list only knows its full length once
+  /// the bubbles near the end are laid out, so the first jump can land
+  /// short: keep jumping, a frame at a time, until the end holds still.
+  void _jumpToEnd([int tries = 12]) {
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_scroll.hasClients) {
-        _scroll.jumpTo(_scroll.position.maxScrollExtent);
-      }
+      if (!mounted || !_scroll.hasClients) return;
+      final pos = _scroll.position;
+      if (pos.pixels >= pos.maxScrollExtent) return;
+      pos.jumpTo(pos.maxScrollExtent);
+      if (tries > 1) _jumpToEnd(tries - 1);
+    });
+  }
+
+  /// Enter comes in as a key press, but the letters typed just before it
+  /// can still be on their way from the system's input method (on Linux
+  /// they arrive later, on another channel). A short wait keeps the last
+  /// letter in this message instead of starting the next one with it.
+  void _sendFromKeyboard() {
+    Future.delayed(const Duration(milliseconds: 60), () {
+      if (mounted) _send();
     });
   }
 
@@ -518,59 +592,86 @@ class _ChatScreenState extends State<ChatScreen> {
                   ],
                 ),
               ),
-            Padding(
-              padding: const EdgeInsets.all(16),
-              child: CallbackShortcuts(
-                bindings: {
-                  // Enter sends; Shift+Enter makes a new line.
-                  const SingleActivator(LogicalKeyboardKey.enter): _send,
-                  const SingleActivator(LogicalKeyboardKey.keyV, control: true):
-                      _paste,
-                  const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
-                      _paste,
-                },
-                child: TextField(
-                  controller: _input,
-                  minLines: 1,
-                  maxLines: 6,
-                  enabled: settings.isSetUp,
-                  decoration: InputDecoration(
-                    hintText: _chat.viewingDay != null
-                        ? 'Write to return to today…'
-                        : 'Message ${settings.companionName}…',
-                    prefixIcon: Padding(
-                      padding: const EdgeInsets.only(left: 6),
-                      child: IconButton(
-                        onPressed: settings.isSetUp && !_chat.busy
-                            ? _pickFiles
-                            : null,
-                        tooltip: 'Share a picture or file',
-                        icon: const Icon(Icons.attach_file_rounded),
-                      ),
-                    ),
-                    suffixIcon: Padding(
-                      padding: const EdgeInsets.only(right: 6),
-                      // While a reply is coming, the button stops it.
-                      child: IconButton.filled(
-                        onPressed: _chat.busy
-                            ? (_chat.stopping ? null : _chat.stop)
-                            : _send,
-                        tooltip: _chat.busy ? 'Stop' : 'Send',
-                        // The scheme's onPrimary can sit too close to a
-                        // light accent; pick the arrow colour by contrast.
-                        style: IconButton.styleFrom(
-                          backgroundColor: accent,
-                          foregroundColor: accent.computeLuminance() > 0.35
-                              ? const Color(0xFF15121F)
-                              : Colors.white,
-                          disabledBackgroundColor: accent.withValues(
-                            alpha: 0.3,
-                          ),
+            if (_commands.isNotEmpty)
+              Container(
+                padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    for (final s in _commands)
+                      Tooltip(
+                        message: s.description,
+                        waitDuration: const Duration(milliseconds: 400),
+                        child: ActionChip(
+                          avatar: const Icon(Icons.school_outlined, size: 18),
+                          label: Text('${s.command} · ${s.displayTitle}'),
+                          onPressed: () => _useCommand(s),
                         ),
-                        icon: Icon(
-                          _chat.busy
-                              ? Icons.stop_rounded
-                              : Icons.arrow_upward_rounded,
+                      ),
+                  ],
+                ),
+              ),
+            // Keeps each keystroke's repaint to the box itself.
+            RepaintBoundary(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: CallbackShortcuts(
+                  bindings: {
+                    // Enter sends; Shift+Enter makes a new line.
+                    const SingleActivator(LogicalKeyboardKey.enter):
+                        _sendFromKeyboard,
+                    const SingleActivator(
+                      LogicalKeyboardKey.keyV,
+                      control: true,
+                    ): _paste,
+                    const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+                        _paste,
+                  },
+                  child: TextField(
+                    controller: _input,
+                    minLines: 1,
+                    maxLines: 6,
+                    enabled: settings.isSetUp,
+                    decoration: InputDecoration(
+                      hintText: _chat.viewingDay != null
+                          ? 'Write to return to today…'
+                          : 'Message ${settings.companionName}…',
+                      prefixIcon: Padding(
+                        padding: const EdgeInsets.only(left: 6),
+                        child: IconButton(
+                          onPressed: settings.isSetUp && !_chat.busy
+                              ? _pickFiles
+                              : null,
+                          tooltip: 'Share a picture or file',
+                          icon: const Icon(Icons.attach_file_rounded),
+                        ),
+                      ),
+                      suffixIcon: Padding(
+                        padding: const EdgeInsets.only(right: 6),
+                        // While a reply is coming, the button stops it.
+                        child: IconButton.filled(
+                          onPressed: _chat.busy
+                              ? (_chat.stopping ? null : _chat.stop)
+                              : _send,
+                          tooltip: _chat.busy ? 'Stop' : 'Send',
+                          // The scheme's onPrimary can sit too close to a
+                          // light accent; pick the arrow colour by contrast.
+                          style: IconButton.styleFrom(
+                            backgroundColor: context.highlight,
+                            foregroundColor:
+                                context.highlight.computeLuminance() > 0.35
+                                ? const Color(0xFF15121F)
+                                : Colors.white,
+                            disabledBackgroundColor: context.highlight
+                                .withValues(alpha: 0.3),
+                          ),
+                          icon: Icon(
+                            _chat.busy
+                                ? Icons.stop_rounded
+                                : Icons.arrow_upward_rounded,
+                          ),
                         ),
                       ),
                     ),

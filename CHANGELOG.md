@@ -9,6 +9,29 @@ A line of its own like `{{action:open-settings}}` becomes a button under
 that version's notes (see `lib/features/update/whats_new_dialog.dart` for
 the ids); it is left out of the release page.
 
+## Unreleased
+
+### New
+- **Skills.** Skills teach your companion how to do particular things, in the new **Skills** tab. It comes with proofreading, weather, price watch and a morning briefing, plus an ADHD support mode you can switch on. While a skill is on, your companion uses it whenever it fits. Type `/` in the chat to call one up yourself, like `/weather Bern` or `/proofreading` followed by your text. A task in the Plans tab can call one too, such as a daily `/morning-briefing`.
+- **Your own skills.** Write a new skill in the Skills tab, or import one: a SKILL.md, a Markdown file, or a Claude skill (.zip or .skill) works as it is. Your companion can also write a skill when you ask it to learn something for good. Those wait for you to read them and turn them on.
+- **Looks.** Settings → General has ready-made looks (Twilight, Rose, Ocean, Forest, Ember, Moonlight) that change the accent and the colour glows together. Your companion can pick one too.
+- **Colorways.** One Colorway list, each with a glossy colour orb. The six standard looks change the accent and glows; the three special ones below the line recolour the whole window and panels too: Haru (monochrome, with red kept to accents like the send button and the selected tab), Vibecoder's (indigo) and Sakura (soft pink on deep plum).
+- **A background picture.** Choose any picture to sit behind the whole app, darkened so everything stays readable, with a Darkness slider. Each companion keeps its own, and can set one from its folder itself.
+
+### Fixed
+- **Pressing Enter right after typing keeps your last letter.** Typing fast could push the last letter into the start of the next message.
+- **Typing in the chat box no longer stutters.** Holding Backspace or typing quickly made the box lag behind, because the frosted blur behind the panels was drawn again for every key. The main panels now skip that blur. The background behind them holds still, so they look the same.
+- **The chat opens at your newest message**, every time you come back to it.
+- **A half-written message stays** when you visit another tab and come back, pictures and files included.
+- **The window can't be squeezed too small** any more.
+- **Dropdown menus are solid** instead of see-through.
+- **Settings tidy-up.** Quit VoxCordis sits at the very bottom of General, and the encryption key field in Privacy is a single line.
+
+### Changed
+- **Join the community.** About has a button to the VoxCordis Discord, for help, news and sharing companions.
+- **About** shows what VoxCordis is, its version and updates, its GPL-3.0 licence, a link to the source code and the open-source parts it is built from.
+- **The ready light** is a big Discord-style dot on the portrait's bottom-right corner now, and the VoxCordis logo moved to the companion card, leaving the top bar free. Right-click the light to move it next to the name or back to the chat's top bar, or pick its place in Settings → General.
+
 ## 0.2.3
 
 ### New

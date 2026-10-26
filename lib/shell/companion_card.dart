@@ -3,11 +3,14 @@ import 'package:intl/intl.dart';
 
 import '../app_scope.dart';
 import '../data/desk/pictures.dart';
+import '../data/settings.dart';
 import '../features/chat/chat_controller.dart';
 import '../services/folder_service.dart';
 import '../theme/app_theme.dart';
 import 'companion_switcher.dart';
 import 'portrait.dart';
+import 'runtime_status.dart';
+import 'wordmark.dart';
 
 /// Left-hand card: portrait, name, traits, the days with chats, and
 /// the button that opens the companion folder in the OS file manager.
@@ -29,6 +32,7 @@ class CompanionCard extends StatelessWidget {
       builder: (context, _) {
         final s = services.settings.value;
         return GlassPanel(
+          blur: GlassPanel.still,
           padding: const EdgeInsets.all(18),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -43,11 +47,23 @@ class CompanionCard extends StatelessWidget {
                   padding: const EdgeInsets.only(bottom: 4),
                   child: Column(
                     children: [
-                      Portrait(
-                        path: s.companionFolder == null
-                            ? s.portraitPath
-                            : Pictures.avatarIn(s.companionFolder!)?.path ??
-                                  s.portraitPath,
+                      Stack(
+                        children: [
+                          Portrait(
+                            path: s.companionFolder == null
+                                ? s.portraitPath
+                                : Pictures.avatarIn(s.companionFolder!)?.path ??
+                                      s.portraitPath,
+                          ),
+                          if (s.statusLight == StatusLight.portrait)
+                            // Discord-style: a large light with a ring in
+                            // the card's colour, on the bottom-right corner.
+                            const Positioned(
+                              right: 0,
+                              bottom: 0,
+                              child: RuntimeStatus(dot: true, size: 26),
+                            ),
+                        ],
                       ),
                       const SizedBox(height: 14),
                       Row(
@@ -61,6 +77,10 @@ class CompanionCard extends StatelessWidget {
                                   ?.copyWith(fontWeight: FontWeight.w600),
                             ),
                           ),
+                          if (s.statusLight == StatusLight.name) ...[
+                            const SizedBox(width: 8),
+                            const RuntimeStatus(dot: true),
+                          ],
                           const SizedBox(width: 6),
                           AnimatedRotation(
                             turns: open ? 0.5 : 0,
@@ -131,6 +151,8 @@ class CompanionCard extends StatelessWidget {
               Expanded(
                 child: _DayList(chat: chat, onOpenDay: onOpenDay),
               ),
+              const SizedBox(height: 12),
+              const Center(child: Wordmark()),
               const SizedBox(height: 12),
               FilledButton.tonalIcon(
                 onPressed: s.companionFolder == null

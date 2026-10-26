@@ -35,7 +35,7 @@ class Portrait extends StatelessWidget {
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
               colors: [
-                accent,
+                context.highlight,
                 const Color(0xFFFF7AB6),
                 const Color(0xFF4F7CFF),
               ],

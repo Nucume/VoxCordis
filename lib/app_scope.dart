@@ -18,6 +18,7 @@ import 'data/desk/pictures.dart';
 import 'data/schedule/schedule_repository.dart';
 import 'data/schedule/schedule_tools.dart';
 import 'data/settings.dart';
+import 'data/skills/skill_tools.dart';
 import 'features/chat/prompt_history.dart';
 import 'services/changelog.dart';
 import 'services/import/import_temp.dart';
@@ -207,8 +208,10 @@ class AppServices {
         backgroundColors: look.colors,
         backgroundLayout: look.layout,
         accentColor: look.accent,
+        colorway: look.colorway,
       ),
     ),
+    onBackgroundPicture: () async => backgroundChanged(),
     onThemeSet: (theme) =>
         settings.update(settings.value.copyWith(themeChoice: theme)),
     onAvatarSet: (avatar) async {
@@ -216,6 +219,9 @@ class AppServices {
       await settings.update(settings.value.copyWith(portraitPath: avatar.path));
     },
   );
+
+  /// use_skill, for the companion's skills folder.
+  late final skillTools = SkillTools(settings: () => settings.value);
 
   /// Commands and opening things on this computer, while system access is
   /// on. The window supplies the approval dialog ([SystemTools.ask]).
@@ -258,6 +264,11 @@ class AppServices {
   /// Bumped whenever memories change, so open views can reload.
   final memoryRevision = ValueNotifier(0);
   void memoryChanged() => memoryRevision.value++;
+
+  /// Bumped whenever the companion's background picture is set or removed,
+  /// so the window repaints it.
+  final backgroundRevision = ValueNotifier(0);
+  void backgroundChanged() => backgroundRevision.value++;
 
   /// Settings and the database live in the OS app-support directory, e.g.
   /// `~/.local/share/<app id>/` on Linux, `%APPDATA%\Nucume\VoxCordis\` on

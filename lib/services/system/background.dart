@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:ui' show Size;
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -22,6 +23,10 @@ class Background with WindowListener {
   /// The argument the login item starts VoxCordis with.
   static const startHiddenArg = '--background';
 
+  /// The smallest the window may get: room for the companion card, the
+  /// tabs and a readable chat, and still fits a 1366×768 laptop screen.
+  static const minWindowSize = Size(980, 640);
+
   bool _ready = false;
   bool _keepRunning = false;
 
@@ -29,6 +34,8 @@ class Background with WindowListener {
   Future<void> start({bool startHidden = false}) async {
     try {
       await windowManager.ensureInitialized();
+      // Below this the card, the tabs and the chat squeeze into each other.
+      await windowManager.setMinimumSize(minWindowSize);
       windowManager.addListener(this);
       _ready = true;
       await _apply();

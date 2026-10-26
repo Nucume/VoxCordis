@@ -4,7 +4,9 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../core_rules.dart';
+import '../looks.dart';
 import '../settings.dart';
+import '../skills/skills.dart';
 import 'desk_files.dart';
 import 'pictures.dart';
 
@@ -18,6 +20,7 @@ class DeskTools {
     this.onPersonalitySaved,
     this.onAvatarSet,
     this.onBackgroundSet,
+    this.onBackgroundPicture,
     this.onThemeSet,
   });
 
@@ -37,9 +40,12 @@ class DeskTools {
   /// Called when the companion restyles the app: glow colours (ARGB), where
   /// they sit, and the accent. Each is null when left as it was.
   final Future<void> Function(
-    ({List<int>? colors, double? layout, int? accent}) look,
+    ({List<int>? colors, double? layout, int? accent, String? colorway}) look,
   )?
   onBackgroundSet;
+
+  /// Called after the companion sets or removes the picture behind the app.
+  final Future<void> Function()? onBackgroundPicture;
 
   /// Called when the companion switches between light and dark (or back to
   /// following the computer). The human can switch back in Settings.
@@ -169,10 +175,11 @@ class DeskTools {
       'function': {
         'name': 'set_background',
         'description':
-            'Restyle the app you live in: the soft colour glows behind the '
-            'chat, where they sit, and the accent colour of buttons and '
-            'highlights. Your choice, e.g. to suit your mood or a season. '
-            'Leave out what should stay.',
+            'Restyle the app you live in: a ready-made look, the soft '
+            'colour glows behind the chat, where they sit, the accent colour '
+            'of buttons and highlights, or a picture from your folder shown '
+            'darkened behind everything. Your choice, e.g. to suit your mood '
+            'or a season. Leave out what should stay.',
         'parameters': {
           'type': 'object',
           'properties': {
@@ -188,6 +195,30 @@ class DeskTools {
               'description': 'Where the glows sit, from 0 to 1',
             },
             'accent': {'type': 'string', 'description': "e.g. '#B18CFF'"},
+            'look': {
+              'type': 'string',
+              'enum': [
+                'twilight',
+                'rose',
+                'ocean',
+                'forest',
+                'ember',
+                'mono',
+                'haru',
+                'vibecoder',
+                'sakura',
+              ],
+              'description':
+                  'A ready-made look; colours, layout or accent given too '
+                  'change it further',
+            },
+            'picture': {
+              'type': 'string',
+              'description':
+                  "A PNG, JPEG or WebP in your folder, e.g. "
+                  "'images/2026-10-23_231200-sea.jpg', or '' to remove "
+                  'the picture',
+            },
           },
         },
       },
@@ -277,6 +308,25 @@ class DeskTools {
           await onAvatarSet?.call(avatar);
           return jsonEncode({'ok': true, 'avatar': p.basename(avatar.path)});
         case 'set_background':
+          final look = args['look'] == null
+              ? null
+              : Look.byId(args['look'] as String) ??
+                    (throw 'unknown look ${args['look']}');
+          final picture = args['picture'] as String?;
+          if (picture != null) {
+            if (picture.isEmpty) {
+              await Pictures.clearBackground(folder);
+            } else {
+              final file = await _resolve(folder, picture);
+              if (!await file.exists()) throw '$picture does not exist';
+              if (!Pictures.hasImageExtension(picture) ||
+                  !await Pictures.isImage(file)) {
+                throw '$picture is not a PNG, JPEG or WebP picture';
+              }
+              await Pictures.setBackground(folder, file);
+            }
+            await onBackgroundPicture?.call();
+          }
           final rawColors = args['colors'];
           final colors = rawColors == null
               ? null
@@ -291,13 +341,19 @@ class DeskTools {
           final accent = args['accent'] == null
               ? null
               : parseColor(args['accent']);
-          if (colors == null && layout == null && accent == null) {
+          if (colors == null &&
+              layout == null &&
+              accent == null &&
+              look == null) {
+            if (picture != null) return jsonEncode({'ok': true});
             throw 'nothing to change';
           }
           await onBackgroundSet?.call((
-            colors: colors,
-            layout: layout,
-            accent: accent,
+            colors: colors ?? look?.colors,
+            layout: layout ?? look?.layout,
+            accent: accent ?? look?.accent,
+            // A ready-made look sets or clears the special tint; '' clears.
+            colorway: look == null ? null : (look.isSpecial ? look.id : ''),
           ));
           return jsonEncode({'ok': true});
         case 'set_theme':
@@ -346,6 +402,9 @@ class DeskTools {
     final key = canonicalName(name);
     if (key == CoreRules.fileName) {
       throw 'core.md holds your human\'s rules; only they edit it.';
+    }
+    if (key == Skills.statePath) {
+      throw 'Only your human turns skills on and off, in the Skills tab.';
     }
     if (!textExtensions.contains(p.extension(key))) {
       throw 'Only text files can be saved: '

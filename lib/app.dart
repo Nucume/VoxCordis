@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import 'app_scope.dart';
+import 'data/desk/pictures.dart';
+import 'data/looks.dart';
 import 'data/settings.dart';
 import 'features/setup/setup_wizard.dart';
 import 'shell/home_shell.dart';
@@ -57,17 +59,29 @@ class _CompanionAppState extends State<CompanionApp>
     final services = AppScope.of(context);
     final settings = services.settings;
     return ListenableBuilder(
-      listenable: Listenable.merge([settings, services.addingCompanion]),
+      listenable: Listenable.merge([
+        settings,
+        services.addingCompanion,
+        services.backgroundRevision,
+      ]),
       builder: (context, _) {
         final adding = services.addingCompanion.value;
         final setup = settings.value.companionFolder == null || adding;
         final accent = Color(settings.value.accentColor);
+        final folder = settings.value.companionFolder;
+        // The picture belongs to the companion, in its folder; setup keeps
+        // the moving glows.
+        final picture = setup || folder == null
+            ? null
+            : Pictures.backgroundIn(folder);
         return MaterialApp(
           title: settings.value.companionName,
           debugShowCheckedModeBanner: false,
           theme: AppTheme.build(
             accent,
             _brightness(settings.value.themeChoice),
+            picture: picture != null,
+            colorway: Look.byId(settings.value.colorway),
           ),
           color: Colors.transparent,
           home: AuroraBackground(
@@ -79,6 +93,8 @@ class _CompanionAppState extends State<CompanionApp>
             // Moving only during setup: it costs the graphics card the model
             // needs.
             animate: setup,
+            picture: picture,
+            dim: settings.value.backgroundDim,
             // First run (no home folder yet) goes through setup, and so
             // does adding another companion. The window is rebuilt for each
             // companion, so nothing of the last one stays on screen.

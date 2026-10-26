@@ -21,6 +21,46 @@ class Pictures {
     return null;
   }
 
+  static final _background = RegExp(r'^background-\d+\.(png|jpe?g|webp)$');
+
+  /// The picture behind the app for the companion in [folder], if it has
+  /// one. Each new one gets a new name, so a cached old one never shows.
+  static File? backgroundIn(String folder) {
+    final dir = Directory(folder);
+    if (!dir.existsSync()) return null;
+    for (final e in dir.listSync()) {
+      if (e is File && _background.hasMatch(p.basename(e.path))) return e;
+    }
+    return null;
+  }
+
+  /// Copies [source] into [folder] as the background picture, replacing
+  /// the last one.
+  static Future<File> setBackground(String folder, File source) async {
+    var ext = p.extension(source.path).replaceFirst('.', '').toLowerCase();
+    if (ext == 'jpeg') ext = 'jpg';
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final target = File(p.join(folder, 'background-$stamp.$ext'));
+    await source.copy(target.path);
+    await _dropBackgrounds(folder, keep: target.path);
+    return target;
+  }
+
+  static Future<void> clearBackground(String folder) =>
+      _dropBackgrounds(folder);
+
+  static Future<void> _dropBackgrounds(String folder, {String? keep}) async {
+    final dir = Directory(folder);
+    if (!await dir.exists()) return;
+    await for (final e in dir.list()) {
+      if (e is File &&
+          e.path != keep &&
+          _background.hasMatch(p.basename(e.path))) {
+        await e.delete();
+      }
+    }
+  }
+
   static bool hasImageExtension(String path) => extensions.contains(
     p.extension(path).replaceFirst('.', '').toLowerCase(),
   );

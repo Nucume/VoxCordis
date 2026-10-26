@@ -112,6 +112,7 @@ class _KeepKeyDialogState extends State<KeepKeyDialog> {
                       ),
                       child: SelectableText(
                         _shown ? key : '•' * 32,
+                        minLines: 1,
                         maxLines: 2,
                         style: const TextStyle(fontFamily: 'monospace'),
                       ),

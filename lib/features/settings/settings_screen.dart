@@ -1,12 +1,15 @@
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_scope.dart';
 import '../../data/core_rules.dart';
 import '../../data/desk/desk_files.dart';
+import '../../data/desk/pictures.dart';
+import '../../data/looks.dart';
 import '../../data/settings.dart';
 import '../../services/folder_service.dart';
 import '../../theme/app_theme.dart';
@@ -18,6 +21,7 @@ import 'encryption_settings.dart';
 import 'internet_settings.dart';
 import '../update/whats_new_dialog.dart';
 import 'model_picker.dart';
+import '../../shell/runtime_status.dart';
 import 'sight_settings.dart';
 
 /// Minimal v1 Settings: General, Brain (the model) and Images. Other tabs arrive with the systems
@@ -95,7 +99,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       accentColor: current.accentColor,
       backgroundColors: current.backgroundColors,
       backgroundLayout: current.backgroundLayout,
+      colorway: current.colorway ?? '',
       themeChoice: current.themeChoice,
+      statusLight: current.statusLight,
+      backgroundDim: current.backgroundDim,
       clearBackground:
           current.backgroundColors.isEmpty && current.backgroundLayout == null,
       userName: _userName.text.trim(),
@@ -194,7 +201,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ]),
                 _page(const [_Section('Encryption'), EncryptionSettings()]),
-                _page(const [SizedBox(height: 18), _UpdateRow()]),
+                _page(const [_About()]),
               ],
             ),
           ),
@@ -265,10 +272,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 final store = AppScope.of(context).settings;
                 store.update(store.value.copyWith(clearBackground: true));
               },
-              child: Text("Undo $name's background"),
+              child: const Text('Reset the look'),
             ),
         ],
       ),
+      const SizedBox(height: 14),
+      _Colorways(
+        onPicked: (look) => setState(
+          () => _draft = _draft.copyWith(
+            accentColor: look.accent,
+            backgroundColors: look.colors,
+            backgroundLayout: look.layout,
+            colorway: look.isSpecial ? look.id : '',
+          ),
+        ),
+      ),
+      const SizedBox(height: 14),
+      const _BackgroundPicture(),
       const SizedBox(height: 14),
       Row(
         children: [
@@ -314,6 +334,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
+      const SizedBox(height: 14),
+      Row(
+        children: [
+          Text(
+            'Ready light',
+            style: TextStyle(color: context.palette.textMuted),
+          ),
+          const SizedBox(width: 12),
+          ListenableBuilder(
+            listenable: AppScope.of(context).settings,
+            builder: (context, _) {
+              final store = AppScope.of(context).settings;
+              return DropdownButton<StatusLight>(
+                value: store.value.statusLight,
+                dropdownColor: context.popupColor,
+                borderRadius: BorderRadius.circular(14),
+                items: [
+                  for (final p in StatusLight.values)
+                    DropdownMenuItem(
+                      value: p,
+                      child: Text(RuntimeStatus.placeLabel(p)),
+                    ),
+                ],
+                onChanged: (v) {
+                  if (v != null) {
+                    store.update(store.value.copyWith(statusLight: v));
+                  }
+                },
+              );
+            },
+          ),
+          const SizedBox(width: 8),
+          const InfoIcon(
+            message:
+                'The light that shows whether the brain is loaded. You can '
+                'also right-click the light to move it.',
+          ),
+        ],
+      ),
       const _Section('You'),
       _field(
         _userName,
@@ -339,6 +398,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           await launchUrl(Uri.file(file.path));
         },
       ),
+      // Last on the page, apart from everything that only changes a setting.
+      if (AppScope.of(context).background case final background?) ...[
+        const SizedBox(height: 28),
+        const Divider(height: 1),
+        const SizedBox(height: 16),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: background.quit,
+            icon: const Icon(Icons.power_settings_new_rounded),
+            label: const Text('Quit VoxCordis'),
+          ),
+        ),
+      ],
     ];
   }
 
@@ -371,7 +444,6 @@ class _Background extends StatelessWidget {
   Widget build(BuildContext context) {
     final name = value.companionName;
     final muted = TextStyle(fontSize: 12, color: context.palette.textMuted);
-    final background = AppScope.of(context).background;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -382,7 +454,8 @@ class _Background extends StatelessWidget {
           title: const Text('Keep running when I close the window'),
           subtitle: Text(
             'The window goes to the taskbar instead, so $name\'s reminders '
-            'and tasks still happen. Quit below closes VoxCordis for real.',
+            'and tasks still happen. Quit, at the bottom of this page, closes '
+            'VoxCordis for real.',
             style: muted,
           ),
         ),
@@ -409,6 +482,8 @@ class _Background extends StatelessWidget {
               ),
             ),
             DropdownButton<int>(
+              dropdownColor: context.popupColor,
+              borderRadius: BorderRadius.circular(14),
               value: _limits.contains(value.automationRunsPerDay)
                   ? value.automationRunsPerDay
                   : 24,
@@ -431,17 +506,6 @@ class _Background extends StatelessWidget {
             ),
           ],
         ),
-        if (background != null) ...[
-          const SizedBox(height: 10),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: OutlinedButton.icon(
-              onPressed: background.quit,
-              icon: const Icon(Icons.power_settings_new_rounded),
-              label: const Text('Quit VoxCordis'),
-            ),
-          ),
-        ],
       ],
     );
   }
@@ -652,6 +716,361 @@ class _UpdateRow extends StatelessWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Every look in one list: the standard ones change the accent and the
+/// glows, the special colorways below them tint the window and panels too.
+/// Applies at once.
+class _Colorways extends StatelessWidget {
+  const _Colorways({required this.onPicked});
+
+  final ValueChanged<Look> onPicked;
+
+  /// The look in use, or null when the colours were set some other way
+  /// (by hand or by the companion).
+  static Look? current(AppSettings s) {
+    if (s.colorway != null) return Look.byId(s.colorway);
+    for (final l in Look.all) {
+      if (s.accentColor != l.accent) continue;
+      if (listEquals(s.backgroundColors, l.colors)) return l;
+      if (l == Look.all.first && s.backgroundColors.isEmpty) return l;
+    }
+    return null;
+  }
+
+  DropdownMenuItem<String> _item(Look look) => DropdownMenuItem(
+    value: look.id,
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _Orb(look.orbColors),
+        const SizedBox(width: 10),
+        Text(look.label),
+      ],
+    ),
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final store = AppScope.of(context).settings;
+    return ListenableBuilder(
+      listenable: store,
+      builder: (context, _) {
+        final s = store.value;
+        final now = current(s);
+        return Row(
+          children: [
+            Text(
+              'Colorway',
+              style: TextStyle(color: context.palette.textMuted),
+            ),
+            const SizedBox(width: 12),
+            DropdownButton<String>(
+              value: now?.id ?? '',
+              dropdownColor: context.popupColor,
+              borderRadius: BorderRadius.circular(14),
+              menuMaxHeight: 460,
+              items: [
+                if (now == null)
+                  DropdownMenuItem(
+                    value: '',
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        _Orb([
+                          s.accentColor,
+                          ...s.backgroundColors.take(2),
+                          if (s.backgroundColors.length < 2) s.accentColor,
+                        ]),
+                        const SizedBox(width: 10),
+                        const Text('Custom'),
+                      ],
+                    ),
+                  ),
+                for (final look in Look.all) _item(look),
+                // The special ones, set apart by a thin rule.
+                const DropdownMenuItem(
+                  enabled: false,
+                  value: '-',
+                  child: SizedBox(width: 160, child: Divider()),
+                ),
+                for (final look in Look.special) _item(look),
+              ],
+              onChanged: (id) {
+                final look = Look.byId(id);
+                if (look == null) return;
+                store.update(
+                  s.copyWith(
+                    accentColor: look.accent,
+                    backgroundColors: look.colors,
+                    backgroundLayout: look.layout,
+                    colorway: look.isSpecial ? look.id : '',
+                  ),
+                );
+                onPicked(look);
+              },
+            ),
+            const SizedBox(width: 8),
+            const InfoIcon(
+              message:
+                  'The first six change the accent and the soft glows. The '
+                  'ones below the line, like Haru, recolour the window and '
+                  'panels too.',
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// A small glossy orb of a look's colours, lit from the top left.
+class _Orb extends StatelessWidget {
+  const _Orb(this.colors);
+  final List<int> colors;
+
+  @override
+  Widget build(BuildContext context) {
+    final c = [for (final x in colors) Color(x)];
+    return Container(
+      width: 22,
+      height: 22,
+      decoration: BoxDecoration(
+        shape: BoxShape.circle,
+        border: Border.all(color: context.palette.glassBorder),
+        boxShadow: [
+          BoxShadow(
+            color: c.last.withValues(alpha: 0.45),
+            blurRadius: 6,
+            offset: const Offset(0, 2),
+          ),
+        ],
+        // The colours melt into each other from the lit side to the shade.
+        gradient: RadialGradient(
+          center: const Alignment(-0.45, -0.5),
+          radius: 1.15,
+          colors: c.length == 1 ? [c.first, c.first] : c,
+        ),
+      ),
+      // A soft shine, so it reads as a sphere rather than a flat dot.
+      foregroundDecoration: const BoxDecoration(
+        shape: BoxShape.circle,
+        gradient: RadialGradient(
+          center: Alignment(-0.4, -0.5),
+          radius: 0.55,
+          colors: [Color(0x99FFFFFF), Color(0x00FFFFFF)],
+        ),
+      ),
+    );
+  }
+}
+
+/// A picture of the human's (or one the companion picked) behind the
+/// whole app, darkened so the panels stay readable.
+class _BackgroundPicture extends StatelessWidget {
+  const _BackgroundPicture();
+
+  Future<void> _choose(BuildContext context) async {
+    final services = AppScope.of(context);
+    final folder = services.settings.value.companionFolder;
+    if (folder == null) return;
+    final picked = await openFile(
+      acceptedTypeGroups: const [
+        XTypeGroup(
+          label: 'Picture',
+          extensions: ['png', 'jpg', 'jpeg', 'webp'],
+        ),
+      ],
+    );
+    if (picked == null) return;
+    final file = File(picked.path);
+    if (!await Pictures.isImage(file)) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That is not a PNG, JPEG or WebP.')),
+        );
+      }
+      return;
+    }
+    await Pictures.setBackground(folder, file);
+    services.backgroundChanged();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final services = AppScope.of(context);
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        services.settings,
+        services.backgroundRevision,
+      ]),
+      builder: (context, _) {
+        final s = services.settings.value;
+        final folder = s.companionFolder;
+        final has = folder != null && Pictures.backgroundIn(folder) != null;
+        return Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          crossAxisAlignment: WrapCrossAlignment.center,
+          children: [
+            Text(
+              'Background picture',
+              style: TextStyle(color: context.palette.textMuted),
+            ),
+            OutlinedButton.icon(
+              onPressed: folder == null ? null : () => _choose(context),
+              icon: const Icon(Icons.wallpaper_rounded),
+              label: Text(has ? 'Change…' : 'Choose…'),
+            ),
+            if (has) ...[
+              TextButton(
+                onPressed: () async {
+                  await Pictures.clearBackground(folder);
+                  services.backgroundChanged();
+                },
+                child: const Text('Remove'),
+              ),
+              Text(
+                'Darkness',
+                style: TextStyle(color: context.palette.textMuted),
+              ),
+              SizedBox(
+                width: 180,
+                child: Slider(
+                  value: s.backgroundDim,
+                  min: 0.3,
+                  max: 0.9,
+                  onChanged: (v) => services.settings.update(
+                    services.settings.value.copyWith(backgroundDim: v),
+                  ),
+                ),
+              ),
+            ],
+            InfoIcon(
+              message:
+                  'Shown darkened behind everything, with the panels a little '
+                  "see-through. Each companion has its own; ${s.companionName} "
+                  'can pick one from its folder too.',
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+/// What VoxCordis is, its version and updates, and its licence.
+class _About extends StatelessWidget {
+  const _About();
+
+  static const _gpl = 'https://www.gnu.org/licenses/gpl-3.0.html';
+
+  /// The community server, for news, help and sharing companions.
+  static const discord = 'https://discord.gg/hJCzp7tVaT';
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = TextStyle(color: context.palette.textMuted, height: 1.4);
+    // Test builds point at the private repository; only the public one has
+    // source anyone can open.
+    final source = updateRepo.endsWith('PR')
+        ? null
+        : 'https://github.com/$updateRepo';
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            Image.asset(AppTheme.heartMark, height: 44),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'VOX ',
+                          style: TextStyle(fontWeight: FontWeight.w800),
+                        ),
+                        TextSpan(
+                          text: 'CORDIS',
+                          style: TextStyle(fontWeight: FontWeight.w300),
+                        ),
+                      ],
+                    ),
+                    style: TextStyle(fontSize: 20, letterSpacing: 3),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'A companion that lives on your computer. Chats, '
+                    'memories and files stay here unless you choose a '
+                    'server-hosted brain.',
+                    style: muted,
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        FilledButton.tonalIcon(
+          onPressed: () => launchUrl(Uri.parse(discord)),
+          icon: const Icon(Icons.forum_outlined),
+          label: const Text('Join the VoxCordis Discord'),
+        ),
+        const _Section('Version'),
+        const SizedBox(height: 8),
+        const _UpdateRow(),
+        const _Section('Licence'),
+        const SizedBox(height: 6),
+        Text(
+          'VoxCordis is free software under the GNU General Public '
+          'License, version 3. You may use, study, share and change it; '
+          'anything you share built from it keeps the same licence. It '
+          'comes with no warranty.\n'
+          'Copyright © 2026 Nucume.',
+          style: muted,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Local brains run on llama.cpp (MIT licence). The models you '
+          'download keep their own licences, shown where you pick them.',
+          style: muted,
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 10,
+          runSpacing: 8,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () => launchUrl(Uri.parse(_gpl)),
+              icon: const Icon(Icons.gavel_rounded),
+              label: const Text('Read the GPL-3.0'),
+            ),
+            if (source != null)
+              OutlinedButton.icon(
+                onPressed: () => launchUrl(Uri.parse(source)),
+                icon: const Icon(Icons.code_rounded),
+                label: const Text('Source code'),
+              ),
+            TextButton.icon(
+              onPressed: () => showLicensePage(
+                context: context,
+                applicationName: 'VoxCordis',
+                applicationVersion: appVersion,
+                applicationLegalese: 'Copyright © 2026 Nucume · GPL-3.0',
+              ),
+              icon: const Icon(Icons.library_books_outlined),
+              label: const Text('Open-source parts'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 }

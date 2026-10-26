@@ -447,6 +447,8 @@ class _ScheduleDialogState extends State<_ScheduleDialog> {
             ),
             const SizedBox(height: 14),
             DropdownButtonFormField<Repeat>(
+              dropdownColor: context.popupColor,
+              borderRadius: BorderRadius.circular(14),
               initialValue: _repeats.contains(_repeat) ? _repeat : null,
               decoration: const InputDecoration(labelText: 'Repeat'),
               items: [

@@ -9,6 +9,15 @@ see and edit. No account, no cloud required.
 
 Native Flutter app for **Linux and Windows** (macOS builds from source).
 
+💬 **Community:** come say hi, get help and share companions on the
+[VoxCordis Discord](https://discord.gg/hJCzp7tVaT).
+
+![Chatting with a companion](docs/screenshots/chat.png)
+
+| Light theme | Skills |
+| --- | --- |
+| ![Light theme](docs/screenshots/light.png) | ![Skills tab](docs/screenshots/skills.png) |
+
 ## Download
 
 Installers are on the [Releases](https://github.com/Nucume/VoxCordis/releases)
@@ -33,7 +42,10 @@ is installed.
 | **Companions** | Create one in setup, or import a character from a Nemini export, a Soulkyn link or a Character Card (JSON or PNG). Several companions, each with its own chats and memories. |
 | **Its own folder** | `~/VoxCordis/<Name>` holds `personality.md`, `lessons.md`, `privacy.md` and any notes or pictures. The companion can read and write there and rewrite its own personality as it grows. |
 | **Memory** | The companion remembers, updates and forgets facts itself; the Memory tab lets you search, add, edit, pin and restore them. |
-| **Chat** | Streaming replies, visible "thinking" for reasoning models, stop and retry, copy, delete, day history. |
+| **Chat** | Streaming replies, visible "thinking" for reasoning models, stop and retry, copy, delete, day history. Share pictures and text files with the paperclip, by dropping them in, or with Ctrl+V. |
+| **Online (opt-in)** | Web search and an invisible browser of its own, with your home network always off limits. |
+| **Reminders and tasks** | "Remind me at 6 to call Mum" or "every weekday morning, check the weather": the Plans tab lists them, and they keep running in the background if you like. |
+| **Skills** | Teach the companion particular things, like proofreading or a morning briefing, or call one up with `/name`. Claude skills (SKILL.md, .zip, .skill) import as they are. |
 | **Your computer (opt-in)** | Off by default. When on, the companion can run commands and open apps, folders, files and web pages, and asks you every time unless you allowed that exact request. |
 | **Look** | Glass panels, light and dark themes; the companion can restyle its background and accent colour. |
 
@@ -41,7 +53,7 @@ is installed.
 
 - **Images:** InvokeAI is only a connection check for now.
 - **Long-term memory search** is keyword based; search by meaning is planned.
-- **Not yet:** automations, connectors (calendar, MCP), voice.
+- **Not yet:** connectors (calendar, MCP), voice.
 - **macOS** builds from source but has no installer or updates yet.
 
 ## Privacy and security

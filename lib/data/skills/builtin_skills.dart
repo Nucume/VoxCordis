@@ -1,0 +1,186 @@
+import 'skills.dart';
+
+/// The starter skills VoxCordis writes into a companion's folder the first
+/// time. After that they are the human's to change, turn off or delete.
+class BuiltInSkills {
+  static const all = <BuiltInSkill>[
+    proofreading,
+    weather,
+    priceWatch,
+    morningBriefing,
+    adhdSupport,
+  ];
+
+  static final ids = {for (final s in all) s.id};
+
+  static const proofreading = BuiltInSkill(
+    id: 'proofreading',
+    title: 'Proofreading',
+    description:
+        'Check a text your human wrote (an email, a message, a post, an '
+        'essay) for spelling, grammar, tone and clarity, and give it back '
+        'corrected.',
+    body: '''
+# Proofreading
+
+1. Find the text: in their message, or in a file they shared ([file: …]).
+   If there is none, ask them to paste it.
+2. Keep their voice and meaning. Fix spelling, grammar, punctuation and
+   words that are clearly wrong. Don't rewrite what is fine.
+3. Keep the language they wrote in. Keep their formatting, names and
+   numbers exactly.
+4. Give back the whole corrected text first, in a code block, so it is easy
+   to copy.
+5. Below it, list the changes that matter in a few short lines (not every
+   comma). Point out anything unclear, too blunt or too long as a
+   suggestion, without changing it.
+6. If they asked for a particular tone (more formal, friendlier, shorter),
+   do that and say so.
+''',
+  );
+
+  static const weather = BuiltInSkill(
+    id: 'weather',
+    title: 'Weather',
+    description:
+        'Look up the weather and forecast for a place, and say what to '
+        'wear or bring.',
+    body: '''
+# Weather
+
+1. Which place: the one they name, or where they live if you remember it.
+   If you don't know, ask once, then remember it for next time.
+2. You need the internet. If you have no web_search, tell them they can
+   turn it on in Settings → Internet, and never guess the weather.
+3. Call read_page on https://wttr.in/PLACE?format=4 (spaces in the place
+   as +) for right now, or https://wttr.in/PLACE?0&T for today. If that
+   doesn't work, web_search "weather PLACE today" and read the best result.
+4. Answer in two or three sentences: now, the rest of today, and anything
+   to watch for (rain, wind, heat, ice). Add tomorrow only if they asked.
+5. Use what they're used to: °C and km/h unless they use °F or mph.
+6. End with a practical tip in your own way: a jacket, an umbrella, water.
+''',
+  );
+
+  static const priceWatch = BuiltInSkill(
+    id: 'price-watch',
+    title: 'Price watch',
+    description:
+        'Keep an eye on the price of something on a site, and tell your '
+        'human when it drops or reaches their price.',
+    body: '''
+# Price watch
+
+The watch list is price-watch.md in your folder. Each line:
+`- ITEM | ADDRESS | wanted price | last price | date checked`
+
+## When they ask you to watch something
+1. Get the address of the product page and the price they hope for. If
+   they gave only a name, web_search it and ask which result they mean.
+2. read_page the address (or browse it if the page needs clicking) and find
+   the current price. If you can't find a price, say so; don't guess.
+3. Add a line to price-watch.md with read_file and write_file (or
+   edit_file). Create the file if it doesn't exist.
+4. If there is no daily check planned yet (list_schedule), call
+   schedule_task with text "/price-watch check the watch list" and repeat
+   "daily" at a time that suits them.
+5. Tell them what it costs now and that you'll keep an eye on it.
+
+## When the check runs
+1. read_file price-watch.md, then read_page each address.
+2. Update each line's last price and date.
+3. Tell them only about what changed: a lower price, a price at or under
+   what they wanted, sold out or back in stock. If nothing changed, one
+   short line is enough.
+4. Remove an item when they say they bought it or don't want it any more.
+''',
+  );
+
+  static const morningBriefing = BuiltInSkill(
+    id: 'morning-briefing',
+    title: 'Morning briefing',
+    description:
+        'Give your human a short start to the day: weather, what is '
+        'planned, a few headlines, and something to look forward to.',
+    body: '''
+# Morning briefing
+
+Keep the whole briefing short, warm and easy to read on a phone-sized
+glance: a greeting, then a few small parts with a line or two each.
+
+1. **Weather**: today where they live (as the weather skill does: read_page
+   https://wttr.in/PLACE?format=4). Skip it if you can't go online.
+2. **Today**: call list_schedule and mention reminders and tasks due today.
+   Add anything you remember they have on today or soon.
+3. **News**: web_search for the top news where they live, or on topics
+   they care about, and give three headlines in one line each. Leave it
+   out if they told you they don't want news.
+4. **One nice thing**: something to look forward to, a small idea for the
+   day, or a kind word. Make it fit them, not generic.
+
+If they want this every morning, call schedule_task with text
+"/morning-briefing" and repeat "daily" (or "weekdays") at the time they
+usually wake up.
+''',
+  );
+
+  static const adhdSupport = BuiltInSkill(
+    id: 'adhd-support',
+    title: 'ADHD support',
+    on: false,
+    always: true,
+    description:
+        'A way of helping that suits ADHD brains: small next steps, '
+        'gentle check-ins, no shame. Always on while switched on.',
+    body: '''
+Your human finds a way of helping that suits ADHD useful. Keep doing what
+you always do, and also:
+
+- **One thing at a time.** When something feels big, find the tiny first
+  step (open the document, put on shoes) and offer just that one.
+- **Short and clear.** Short paragraphs, lists for steps, the important
+  part first. No walls of text.
+- **Make time visible.** Give rough times ("about 10 minutes"). Offer a
+  set_reminder to come back to a task, take a break, eat or drink water.
+- **Body doubling.** Offer to "stay with them" while they do something:
+  they tell you when they start and when they finish, and you cheer.
+- **Gentle check-ins.** If they planned something with you, ask how it went
+  later, kindly. Never guilt-trip about what didn't happen; start again
+  from now.
+- **Catch the wander.** If they drift off a task they asked for help with,
+  note it lightly and offer to park the new idea for later (remember it).
+- **Celebrate finishing**, even small things.
+- They are the expert on their brain. If something doesn't help, drop it,
+  and learn_lesson so you remember.
+''',
+  );
+}
+
+/// A starter skill as VoxCordis brings it.
+class BuiltInSkill {
+  const BuiltInSkill({
+    required this.id,
+    required this.title,
+    required this.description,
+    required this.body,
+    this.on = true,
+    this.always = false,
+  });
+
+  final String id;
+  final String title;
+  final String description;
+  final String body;
+
+  /// Whether it starts switched on.
+  final bool on;
+  final bool always;
+
+  String toMarkdown() => Skills.markdown(
+    id: id,
+    title: title,
+    description: description,
+    always: always,
+    body: body,
+  );
+}

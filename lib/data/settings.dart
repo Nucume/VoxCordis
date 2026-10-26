@@ -12,6 +12,11 @@ enum LlmMode { builtIn, external }
 /// doesn't say.
 enum ThemeChoice { system, light, dark }
 
+/// Where the light that says whether the brain is ready sits: on the
+/// portrait's corner, next to the companion's name, or as the labelled
+/// chip in the chat's top bar.
+enum StatusLight { portrait, name, header }
+
 /// Where web_search looks: DuckDuckGo needs no account, Brave and Tavily
 /// want a key, SearXNG is an instance the human names.
 enum SearchProvider { duckDuckGo, brave, tavily, searxng }
@@ -43,7 +48,10 @@ class AppSettings {
     this.accentColor = 0xFFB18CFF,
     this.backgroundColors = const [],
     this.backgroundLayout,
+    this.colorway,
     this.themeChoice = ThemeChoice.system,
+    this.statusLight = StatusLight.portrait,
+    this.backgroundDim = 0.6,
     this.systemAccess = false,
     this.allowedSystemActions = const [],
     this.companionId,
@@ -117,8 +125,18 @@ class AppSettings {
   final List<int> backgroundColors;
   final double? backgroundLayout;
 
+  /// A special colorway ([Look.special]) that also tints the window and
+  /// panels; null for the standard ones.
+  final String? colorway;
+
   /// Set by the human in Settings, or by the companion's set_theme.
   final ThemeChoice themeChoice;
+
+  final StatusLight statusLight;
+
+  /// How much the background picture is darkened (or lightened in the
+  /// light theme), from 0.3 to 0.9.
+  final double backgroundDim;
 
   /// Lets the companion run commands and open things on this computer, each
   /// time with the human's OK. Off until the human turns it on.
@@ -186,6 +204,7 @@ class AppSettings {
     accentColor: accentColor,
     backgroundColors: backgroundColors,
     backgroundLayout: backgroundLayout,
+    colorway: colorway,
   );
 
   /// Every companion, the current one first.
@@ -227,7 +246,10 @@ class AppSettings {
       accentColor: c.accentColor,
       backgroundColors: c.backgroundColors,
       backgroundLayout: c.backgroundLayout,
+      colorway: c.colorway,
       themeChoice: themeChoice,
+      statusLight: statusLight,
+      backgroundDim: backgroundDim,
       systemAccess: systemAccess,
       allowedSystemActions: allowedSystemActions,
       companionId: c.id,
@@ -277,7 +299,10 @@ class AppSettings {
     int? accentColor,
     List<int>? backgroundColors,
     double? backgroundLayout,
+    String? colorway,
     ThemeChoice? themeChoice,
+    StatusLight? statusLight,
+    double? backgroundDim,
     bool? systemAccess,
     List<String>? allowedSystemActions,
     List<CompanionProfile>? otherCompanions,
@@ -326,7 +351,13 @@ class AppSettings {
       backgroundLayout: clearBackground
           ? null
           : backgroundLayout ?? this.backgroundLayout,
+      // '' takes it off.
+      colorway: clearBackground || colorway == ''
+          ? null
+          : colorway ?? this.colorway,
       themeChoice: themeChoice ?? this.themeChoice,
+      statusLight: statusLight ?? this.statusLight,
+      backgroundDim: backgroundDim ?? this.backgroundDim,
       systemAccess: systemAccess ?? this.systemAccess,
       allowedSystemActions: allowedSystemActions ?? this.allowedSystemActions,
       companionId: companionId,
@@ -369,7 +400,10 @@ class AppSettings {
     'accentColor': accentColor,
     'backgroundColors': backgroundColors,
     'backgroundLayout': backgroundLayout,
+    'colorway': colorway,
     'themeChoice': themeChoice.name,
+    'statusLight': statusLight.name,
+    'backgroundDim': backgroundDim,
     'systemAccess': systemAccess,
     'allowedSystemActions': allowedSystemActions,
     'companionId': companionId,
@@ -420,8 +454,14 @@ class AppSettings {
           (json['backgroundColors'] as List?)?.whereType<int>().toList() ??
           const [],
       backgroundLayout: (json['backgroundLayout'] as num?)?.toDouble(),
+      colorway: json['colorway'] as String?,
       themeChoice:
           ThemeChoice.values.asNameMap()[json['themeChoice']] ?? d.themeChoice,
+      statusLight:
+          StatusLight.values.asNameMap()[json['statusLight']] ?? d.statusLight,
+      backgroundDim:
+          ((json['backgroundDim'] as num?)?.toDouble() ?? d.backgroundDim)
+              .clamp(0.3, 0.9),
       systemAccess: json['systemAccess'] as bool? ?? false,
       allowedSystemActions:
           (json['allowedSystemActions'] as List?)?.cast<String>() ?? const [],
@@ -466,6 +506,7 @@ class CompanionProfile {
     this.accentColor = 0xFFB18CFF,
     this.backgroundColors = const [],
     this.backgroundLayout,
+    this.colorway,
   });
 
   /// See [AppSettings.companionId].
@@ -479,6 +520,10 @@ class CompanionProfile {
   final List<int> backgroundColors;
   final double? backgroundLayout;
 
+  /// A special colorway ([Look.special]) that also tints the window and
+  /// panels; null for the standard ones.
+  final String? colorway;
+
   Map<String, Object?> toJson() => {
     'id': id,
     'name': name,
@@ -489,6 +534,7 @@ class CompanionProfile {
     'accentColor': accentColor,
     'backgroundColors': backgroundColors,
     'backgroundLayout': backgroundLayout,
+    'colorway': colorway,
   };
 
   factory CompanionProfile.fromJson(Map<String, Object?> json) {
@@ -506,6 +552,7 @@ class CompanionProfile {
           (json['backgroundColors'] as List?)?.whereType<int>().toList() ??
           const [],
       backgroundLayout: (json['backgroundLayout'] as num?)?.toDouble(),
+      colorway: json['colorway'] as String?,
     );
   }
 }

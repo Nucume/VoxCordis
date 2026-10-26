@@ -143,11 +143,13 @@ class _EncryptionSettingsState extends State<EncryptionSettings> {
         const SizedBox(height: 14),
         Row(
           children: [
-            Expanded(
+            // One line, no wider than the key itself needs.
+            Flexible(
               child: Container(
+                constraints: const BoxConstraints(maxWidth: 520),
                 padding: const EdgeInsets.symmetric(
                   horizontal: 12,
-                  vertical: 10,
+                  vertical: 8,
                 ),
                 decoration: BoxDecoration(
                   color: palette.codeFill,
@@ -155,6 +157,7 @@ class _EncryptionSettingsState extends State<EncryptionSettings> {
                 ),
                 child: SelectableText(
                   _shown ? key : '•' * 32,
+                  minLines: 1,
                   maxLines: 2,
                   style: const TextStyle(fontFamily: 'monospace'),
                 ),

@@ -169,6 +169,8 @@ class _InternetSettingsState extends State<InternetSettings> {
                   children: [
                     Expanded(
                       child: DropdownButtonFormField<SearchProvider>(
+                        dropdownColor: context.popupColor,
+                        borderRadius: BorderRadius.circular(14),
                         initialValue: _v.searchProvider,
                         decoration: const InputDecoration(
                           labelText: 'Search with',

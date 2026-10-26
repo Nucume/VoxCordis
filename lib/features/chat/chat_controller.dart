@@ -16,6 +16,8 @@ import '../../data/message_repository.dart';
 import '../../data/schedule/schedule_repository.dart';
 import '../../data/schedule/schedule_tools.dart';
 import '../../data/settings.dart';
+import '../../data/skills/skill_tools.dart';
+import '../../data/skills/skills.dart';
 import '../../services/llm_client.dart';
 import '../../services/runtime/model_catalog.dart';
 import '../../services/schedule/scheduler.dart';
@@ -54,6 +56,7 @@ class ChatController extends ChangeNotifier {
     ...MemoryTools.definitions,
     ...DeskTools.definitions,
     ...ScheduleTools.definitions,
+    ...SkillTools.definitions,
     ...WebTools.definitionsFor(s),
     if (s.systemAccess && !unattended) ...SystemTools.definitions,
   ];
@@ -68,6 +71,12 @@ class ChatController extends ChangeNotifier {
 
   /// The past day being viewed, or null for the live conversation.
   DateTime? viewingDay;
+
+  /// What the human was writing and the files picked to go with it, kept
+  /// here so they survive a visit to another tab.
+  String draft = '';
+  final draftPictures = <String>[];
+  final draftFiles = <String>[];
 
   bool busy = false;
   String? error;
@@ -342,6 +351,7 @@ class ChatController extends ChangeNotifier {
     required String core,
     required ({String personality, String lessons}) desk,
     required String recalled,
+    required String skills,
   }) =>
       '${howYouTalk(settings)}\n\n'
       '$core\n\n'
@@ -355,6 +365,7 @@ class ChatController extends ChangeNotifier {
       '$recalled\n\n'
       '${aboutInternet(settings)}\n\n'
       '${aboutSchedule()}\n\n'
+      '$skills\n\n'
       // Last before the clock: small models follow what they read most
       // recently.
       '${aboutComputer(settings)}\n\n'
@@ -402,6 +413,8 @@ class ChatController extends ChangeNotifier {
             )
           : ScheduleTools.names.contains(c.name)
           ? await _services.scheduleTools.call(c.name, c.parsedArguments)
+          : SkillTools.names.contains(c.name)
+          ? await _services.skillTools.call(c.name, c.parsedArguments)
           : DeskTools.names.contains(c.name)
           ? await _services.deskTools.call(c.name, c.parsedArguments)
           : await _services.memoryTools.call(
@@ -431,6 +444,7 @@ class ChatController extends ChangeNotifier {
           'set_reminder' => 'Set a reminder$what',
           'schedule_task' => 'Planned a task',
           'cancel_schedule' => 'Cancelled a reminder',
+          SkillTools.useTool => 'Used the ${c.parsedArguments['name']} skill',
           _ => WebTools.noteFor(c.name, c.parsedArguments),
         };
         // Several changes in one reply are listed together.
@@ -549,6 +563,17 @@ class ChatController extends ChangeNotifier {
       final recalled = MemoryTools.formatForPrompt(
         await _services.memory.recall(query),
       );
+      final skillList = settings.companionFolder == null
+          ? const <Skill>[]
+          : await Skills.load(settings.companionFolder!);
+      // "/weather in Bern" calls up a skill for this reply.
+      final called = Skills.called(query, skillList);
+      if (called != null) _addNote('Used the ${called.displayTitle} skill');
+      final skills = Skills.forPrompt(
+        skillList,
+        called: called,
+        contextSize: settings.contextSize,
+      );
       final history = alternatingHistory(
         messages.skip(max(0, messages.length - _historyTurns)),
       );
@@ -577,6 +602,7 @@ class ChatController extends ChangeNotifier {
             core: core,
             desk: desk,
             recalled: recalled,
+            skills: skills,
           ),
         },
         ...(await attachments?.expand(history) ?? history),
@@ -724,6 +750,7 @@ class ChatController extends ChangeNotifier {
                 core: core,
                 desk: desk,
                 recalled: recalled,
+                skills: skills,
               ),
             },
             ...await attachments.expand(history),
