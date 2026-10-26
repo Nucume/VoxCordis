@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:companion/data/database.dart';
 import 'package:companion/data/desk/desk_files.dart';
+import 'package:companion/data/schedule/schedule_repository.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/services/import/avatar_download.dart';
 import 'package:companion/services/import/character_card.dart';
@@ -397,6 +398,25 @@ void main() {
           '',
         ].join('\n'),
       );
+      add(
+        'clock/tasks.json',
+        jsonEncode({
+          'tasks': [
+            {
+              'id': 'k1',
+              'type': 'reminder',
+              'text': 'Water the tomatoes',
+              'next_run': '2030-05-01T07:30:00Z',
+            },
+            {
+              'id': 'k2',
+              'prompt': 'Check the news about Mars',
+              'cron': '0 8 * * 1-5',
+            },
+            {'id': 'k3'},
+          ],
+        }),
+      );
       add('providers.json', '{"openai": "SECRET-KEY-1"}');
       add('keys.json', '{"key": "SECRET-KEY-2"}');
       add('google.json', '{"token": "SECRET-KEY-3"}');
@@ -435,6 +455,24 @@ void main() {
       expect(r.files, 2);
       expect(File(p.join(folder, 'tool.desktop')).existsSync(), isTrue);
       expect(File(p.join(folder, 'files', 'run.bat')).existsSync(), isFalse);
+    });
+
+    test('reminders and automations come in paused, once', () async {
+      final c = await NeminiExport.read(neminiZip());
+      expect(c.nemini!.taskCount, 2);
+      final r = await c.nemini!.apply(db: db, folder: tmp.path);
+      expect(r.tasks, 2);
+      await c.nemini!.apply(db: db, folder: tmp.path);
+      final all = await ScheduleRepository(db).all();
+      expect(all, hasLength(2));
+      expect(all.every((s) => !s.active && s.origin == 'nemini'), isTrue);
+      final water = all.firstWhere((s) => s.text == 'Water the tomatoes');
+      expect(water.kind, ScheduleKind.reminder);
+      expect(water.nextAt, DateTime.utc(2030, 5, 1, 7, 30).toLocal());
+      final news = all.firstWhere((s) => s.kind == ScheduleKind.task);
+      expect(news.text, 'Check the news about Mars');
+      expect(news.repeat, Repeat.weekdays);
+      expect(news.nextAt.hour, 8);
     });
 
     test('finds an export inside a top-level folder', () async {
@@ -529,9 +567,10 @@ void main() {
       c.nemini!
         ..memories = false
         ..chat = false
-        ..desk = false;
+        ..desk = false
+        ..tasks = false;
       final r = await c.nemini!.apply(db: db, folder: tmp.path);
-      expect(r, (memories: 0, messages: 0, files: 0));
+      expect(r, (memories: 0, messages: 0, files: 0, tasks: 0));
       expect(await db.query('memories'), isEmpty);
     });
   });

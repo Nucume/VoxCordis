@@ -7,22 +7,31 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'data/database.dart';
+import 'data/database_key.dart';
 import 'data/desk/desk_tools.dart';
 import 'data/memory/memory_repository.dart';
 import 'data/memory/memory_tools.dart';
 import 'data/message_repository.dart';
+import 'data/picture_notes.dart';
 import 'data/desk/desk_files.dart';
 import 'data/desk/pictures.dart';
+import 'data/schedule/schedule_repository.dart';
+import 'data/schedule/schedule_tools.dart';
 import 'data/settings.dart';
 import 'features/chat/prompt_history.dart';
+import 'services/changelog.dart';
 import 'services/import/import_temp.dart';
 import 'services/import/personality_rewrite.dart';
 import 'services/llm_client.dart';
 import 'services/runtime/model_catalog.dart';
 import 'services/runtime/runtime_controller.dart';
 import 'services/secret_store.dart';
+import 'services/system/background.dart';
+import 'services/system/desktop_notifier.dart';
 import 'services/system/system_tools.dart';
 import 'services/updater.dart';
+import 'services/web/headless_browser.dart';
+import 'services/web/web_tools.dart';
 
 /// The app's long-lived objects, created once at startup.
 class AppServices {
@@ -30,6 +39,7 @@ class AppServices {
     required this.settings,
     required Database db,
     required this.runtime,
+    required this.dbKey,
   }) {
     _use(db);
   }
@@ -38,18 +48,31 @@ class AppServices {
   final RuntimeController runtime;
   final updates = Updater();
 
+  /// Encrypts every companion database; Settings → Privacy shows it.
+  final DatabaseKey dbKey;
+
+  /// What changed since the version that ran before, found at startup;
+  /// the main window shows it once and clears it.
+  ({String? from, List<ChangelogEntry> notes})? whatsNew;
+
   /// The current companion's chats and memories. Each companion has its own
   /// database; these change when the human switches companion.
   late Database db;
   late MemoryRepository memory;
   late MessageRepository messages;
   late MemoryTools memoryTools;
+  late PictureNotes pictureNotes;
+  late ScheduleRepository schedules;
+  late ScheduleTools scheduleTools;
 
   void _use(Database next) {
     db = next;
     memory = MemoryRepository(next);
     messages = MessageRepository(next);
     memoryTools = MemoryTools(memory);
+    pictureNotes = PictureNotes(next);
+    schedules = ScheduleRepository(next);
+    scheduleTools = ScheduleTools(schedules, onChanged: scheduleChanged);
     // What the companion forgot over a month ago goes for good.
     memory.purgeForgotten().ignore();
   }
@@ -59,8 +82,19 @@ class AppServices {
   Future<Database> openCompanionDb(String? id) async {
     final path = companionDbPath(runtime.supportDir.path, id);
     await Directory(p.dirname(path)).create(recursive: true);
-    return openAppDatabase(path);
+    return openAppDatabase(path, key: dbKey.value);
   }
+
+  /// Re-encrypts every companion database with [next] (a new random key,
+  /// or the human's own password).
+  Future<void> changeDatabaseKey(String next) => dbKey.change(
+    next,
+    open: db,
+    openPath: companionDbPath(
+      runtime.supportDir.path,
+      settings.value.companionId,
+    ),
+  );
 
   /// `companion.db` for the first companion, `companions/<id>.db` for every
   /// one added after it.
@@ -79,6 +113,7 @@ class AppServices {
     _use(opened);
     await settings.update(next);
     memoryChanged();
+    scheduleChanged();
     await old.close();
     runtime.ensureReady(next).ignore();
     rewriteIfAsked().ignore();
@@ -98,6 +133,7 @@ class AppServices {
     _rewriteRunning = true;
     final http = Client();
     ({String label, String? problem})? after;
+    var held = false;
     try {
       final file = DeskFiles.fileIn(folder, DeskFiles.personality);
       if (!await file.exists() ||
@@ -105,6 +141,8 @@ class AppServices {
         return;
       }
       rewriting.value = (label: 'Rewriting personality…', problem: null);
+      runtime.hold();
+      held = true;
       final target = await runtime.ensureReady(s);
       final maxChars = DeskFiles.personalityMaxChars(s.contextSize);
       final client = LlmClient(
@@ -139,6 +177,7 @@ class AppServices {
       after = (label: 'Rewrite didn\'t work', problem: '$e');
     } finally {
       http.close();
+      if (held) runtime.release(settings.value);
       _rewriteRunning = false;
       rewriting.value = after;
     }
@@ -194,6 +233,28 @@ class AppServices {
   File get systemLog =>
       File(p.join(runtime.supportDir.path, 'system-access.log'));
 
+  /// Search, reading pages and the companion's own browser, while
+  /// Settings → Internet allows them. The window supplies the approval
+  /// dialog ([WebTools.ask]).
+  late final webTools = WebTools(
+    settings: () => settings.value,
+    browser: browser,
+    searchKey: () async => settings.value.searchApiKey,
+  );
+
+  /// The browser without a window that the companion browses with.
+  late final browser = HeadlessBrowser(runtime.supportDir);
+
+  /// Desktop notifications for reminders and finished tasks.
+  DesktopNotifier notifier = const DesktopNotifier();
+
+  /// Keeps running with the window closed; set at startup by main.
+  Background? background;
+
+  /// Bumped whenever reminders or tasks change, so the list reloads.
+  final scheduleRevision = ValueNotifier(0);
+  void scheduleChanged() => scheduleRevision.value++;
+
   /// Bumped whenever memories change, so open views can reload.
   final memoryRevision = ValueNotifier(0);
   void memoryChanged() => memoryRevision.value++;
@@ -201,13 +262,19 @@ class AppServices {
   /// Settings and the database live in the OS app-support directory, e.g.
   /// `~/.local/share/<app id>/` on Linux, `%APPDATA%\Nucume\VoxCordis\` on
   /// Windows. Downloaded models live in the VoxCordis folder instead.
-  static Future<AppServices> open() async {
+  static Future<Directory> supportDir() async {
     final Directory dir = await getApplicationSupportDirectory();
     if (Platform.isWindows) await _adoptOldWindowsFolder(dir);
     await dir.create(recursive: true);
     // Chats, memories, settings and logs: for this user's eyes only, as are
     // the companions' folders (personality, lessons, privacy rules).
     await restrictToOwner(dir.path, directory: true);
+    return dir;
+  }
+
+  /// Everything the window needs, once [key] is unlocked
+  /// ([DatabaseKey.unlock]).
+  static Future<AppServices> open(Directory dir, DatabaseKey key) async {
     final settings = await SettingsStore.load(dir);
     for (final c in settings.value.companions) {
       if (Directory(c.folder).existsSync()) {
@@ -220,8 +287,10 @@ class AppServices {
       settings: settings,
       db: await openAppDatabase(
         companionDbPath(dir.path, settings.value.companionId),
+        key: key.value,
       ),
       runtime: RuntimeController(dir),
+      dbKey: key,
     );
   }
 

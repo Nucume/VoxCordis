@@ -38,6 +38,7 @@ class LlamaServer {
     int contextSize = 8192,
     bool useGpu = true,
     String? chatTemplateFile,
+    String? mmprojPath,
     Duration timeout = const Duration(minutes: 3),
     http.Client? client,
     void Function(int pid)? onSpawn,
@@ -60,6 +61,12 @@ class LlamaServer {
         if (chatTemplateFile != null) ...[
           '--chat-template-file',
           chatTemplateFile,
+        ],
+        // The vision file lets the model see pictures sent with a message.
+        if (mmprojPath != null) ...[
+          '--mmproj',
+          mmprojPath,
+          if (!useGpu) '--no-mmproj-offload',
         ],
         '--no-webui',
         '--alias', modelAlias,

@@ -82,6 +82,22 @@ class SecretStore {
     }
   }
 
+  /// Where [name] is kept, to tell the human.
+  Future<SecretPlace> placeOf(String name) async {
+    final b = _backend;
+    try {
+      if (b is _Dpapi && await _sealed(name).exists()) {
+        return SecretPlace.windows;
+      }
+      if (b is _Libsecret && await b.read(name) != null) {
+        return SecretPlace.keyring;
+      }
+    } on Object {
+      // Locked keyring: it isn't there for us.
+    }
+    return SecretPlace.file;
+  }
+
   /// Written beside the file, made private and then swapped in, so the
   /// secret is never readable by others, not even for a moment.
   static Future<void> _replace(File f, List<int> bytes) async {
@@ -96,6 +112,10 @@ class SecretStore {
     if (await f.exists()) await f.delete();
   }
 }
+
+/// Where [SecretStore] keeps a secret: the desktop keyring, sealed for the
+/// Windows account (DPAPI), or a file only the user can open.
+enum SecretPlace { keyring, windows, file }
 
 /// The OS keeper of secrets, or null when there is none to use.
 sealed class SecretBackend {

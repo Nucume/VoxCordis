@@ -6,21 +6,57 @@ import 'package:flutter_acrylic/flutter_acrylic.dart';
 
 import 'app.dart';
 import 'app_scope.dart';
+import 'data/database_key.dart';
+import 'features/unlock/unlock_app.dart';
+import 'services/changelog.dart';
+import 'services/system/background.dart';
 
-Future<void> main() async {
+Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
   await _makeWindowTranslucent();
-  final services = await AppServices.open();
-  // Never leave a llama-server running after the window closes.
+  final dir = await AppServices.supportDir();
+  final key = DatabaseKey(dir);
+  // Started by the login item: out of the way once the window is up.
+  final hidden = args.contains(Background.startHiddenArg);
+  if (await key.unlock()) return _start(dir, key, startHidden: hidden);
+  // Encrypted chats without their key here: ask for it first.
+  runApp(UnlockApp(dbKey: key, onUnlocked: () => _start(dir, key)));
+}
+
+Future<void> _start(
+  Directory dir,
+  DatabaseKey key, {
+  bool startHidden = false,
+}) async {
+  final services = await AppServices.open(dir, key);
+  Future<void> beforeQuit() async {
+    services.webTools.close();
+    await services.runtime.stopAll();
+  }
+
+  // Never leave a llama-server or the browser running after the window
+  // closes.
   AppLifecycleListener(
     onExitRequested: () async {
-      await services.runtime.stop();
+      await beforeQuit();
       return AppExitResponse.exit;
     },
   );
+  // With "Keep running" on, closing the window only minimizes it.
+  services.background = Background(
+    settings: services.settings,
+    beforeQuit: beforeQuit,
+  );
+  await services.background!.start(startHidden: startHidden);
+  // Before setup can run, so a fresh install never counts as an update.
+  services.whatsNew = await WhatsNew.inSupportDir(
+    services.runtime.supportDir,
+  ).pending(wasSetUp: services.settings.value.isSetUp);
   // Warm the model up while the window opens.
   if (services.settings.value.isSetUp) {
     services.runtime.ensureReady(services.settings.value).ignore();
+    // With "free the graphics card" on, it lets go again if nobody types.
+    services.runtime.touch(services.settings.value);
     services.rewriteIfAsked().ignore();
   }
   runApp(AppScope(services: services, child: const CompanionApp()));

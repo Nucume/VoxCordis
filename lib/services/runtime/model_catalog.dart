@@ -20,6 +20,7 @@ class CatalogModel {
     required this.sha256,
     required this.file,
     this.parts = const [],
+    this.mmproj,
     this.uncensored = false,
     this.huge = false,
     this.chatTemplate,
@@ -51,6 +52,10 @@ class CatalogModel {
   /// llama.cpp finds them by name.
   final List<String> parts;
 
+  /// Path inside the repo of the vision file (mmproj) that lets the model
+  /// see pictures; null for a model that can't. Saved next to [file].
+  final String? mmproj;
+
   /// Safety tuning removed (abliterated or uncensored finetune). Shown with a
   /// badge and never recommended.
   final bool uncensored;
@@ -70,7 +75,9 @@ class CatalogModel {
 
   /// Every file to fetch, the one llama-server loads last, so a finished
   /// [file] means the whole model is there.
-  List<String> get allFiles => [...parts, file];
+  List<String> get allFiles => [...parts, ?mmproj, file];
+
+  bool get canSee => mmproj != null;
 
   Uri urlFor(String path) =>
       Uri.parse('https://huggingface.co/$repo/resolve/$revision/$path');
@@ -178,6 +185,34 @@ class ModelCatalog {
       // MinP=0.
       sampling: {'temperature': 0.6, 'top_p': 0.95, 'top_k': 20, 'min_p': 0},
     ),
+    // Sees the pictures shared in the chat itself, through its vision file.
+    CatalogModel(
+      id: 'qwen3-vl-8b',
+      name: 'Qwen3-VL 8B',
+      blurb:
+          'Qwen3 that can see: looks at the pictures you share itself. '
+          'Friendly and reliable with memory tools.',
+      sizeGb: 5.8,
+      minMemoryGb: 8,
+      repo: 'Qwen/Qwen3-VL-8B-Instruct-GGUF',
+      revision: 'f982a07559d4a2f6c8744d840bf6fccab30eea96',
+      sha256: {
+        'Qwen3VL-8B-Instruct-Q4_K_M.gguf':
+            '67d1659bfe71b89d50b45a4ad1a9e5b997e5bb16ce5da66a6a6167abd569e9e2',
+        'mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf':
+            'c6ba85508d82f42590e6eb77d5340369ab6fecf107a7561d809523d8aa5f3bfd',
+      },
+      file: 'Qwen3VL-8B-Instruct-Q4_K_M.gguf',
+      mmproj: 'mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf',
+      // Qwen's card for the VL instruct models: temperature 0.7, top_p 0.8,
+      // top_k 20, presence_penalty 1.5.
+      sampling: {
+        'temperature': 0.7,
+        'top_p': 0.8,
+        'top_k': 20,
+        'presence_penalty': 1.5,
+      },
+    ),
     // Uncensored picks, tested on llama.cpp b11400. Their GGUFs ship plain
     // templates without tool calling, so each brings its own.
     CatalogModel(
@@ -245,6 +280,32 @@ class ModelCatalog {
       sampling: {'temperature': 0.6, 'top_p': 0.95, 'top_k': 20, 'min_p': 0},
     ),
     CatalogModel(
+      id: 'qwen3-vl-8b-abliterated',
+      name: 'Qwen3-VL 8B Abliterated',
+      blurb:
+          'Qwen3-VL with refusals removed: sees your pictures, NSFW ones '
+          'included. Plain for roleplay, but good with memory tools.',
+      sizeGb: 5.8,
+      minMemoryGb: 8,
+      repo: 'mradermacher/Qwen3-VL-8B-Instruct-abliterated-GGUF',
+      revision: '913604f6b4e56b0d0475706f3df7a6eb8c4dd415',
+      sha256: {
+        'Qwen3-VL-8B-Instruct-abliterated.Q4_K_M.gguf':
+            '713d7cfeb8e1eccb3c92838c26d3fc5c99d238ce161caa3b3d5e3133ec491f42',
+        'Qwen3-VL-8B-Instruct-abliterated.mmproj-Q8_0.gguf':
+            'b0dddc620b652dbd285538d840d1d5b6d196758257cbd89e54ad291b80a569f9',
+      },
+      file: 'Qwen3-VL-8B-Instruct-abliterated.Q4_K_M.gguf',
+      mmproj: 'Qwen3-VL-8B-Instruct-abliterated.mmproj-Q8_0.gguf',
+      uncensored: true,
+      sampling: {
+        'temperature': 0.7,
+        'top_p': 0.8,
+        'top_k': 20,
+        'presence_penalty': 1.5,
+      },
+    ),
+    CatalogModel(
       id: 'dolphin3-8b',
       name: 'Dolphin 3 8B',
       blurb:
@@ -293,6 +354,78 @@ class ModelCatalog {
     ),
   ];
 
+  /// Eyes: a small vision model that looks at the pictures shared with a
+  /// model that can't see, and describes them for it. Abliterated, so it
+  /// describes every picture plainly, NSFW ones included. Never offered as
+  /// a chat model.
+  static const eyes = CatalogModel(
+    id: 'eyes-qwen3-vl-4b',
+    name: 'Eyes (Qwen3-VL 4B Abliterated)',
+    blurb: 'Looks at your pictures and describes them for your companion.',
+    sizeGb: 2.9,
+    minMemoryGb: 4,
+    repo: 'mradermacher/Huihui-Qwen3-VL-4B-Instruct-abliterated-GGUF',
+    revision: 'abf99adf548eb2aa6f9a3d56f976968996959e7f',
+    sha256: {
+      'Huihui-Qwen3-VL-4B-Instruct-abliterated.Q4_K_M.gguf':
+          '20d58872549c13f5476622d2385027e1b346298558822eca8aa33cb8846d5765',
+      'Huihui-Qwen3-VL-4B-Instruct-abliterated.mmproj-Q8_0.gguf':
+          'cd4503cef5b48c55da5f04edd06e88f3c10344129f19bd9ebffdab32d0590a02',
+    },
+    file: 'Huihui-Qwen3-VL-4B-Instruct-abliterated.Q4_K_M.gguf',
+    mmproj: 'Huihui-Qwen3-VL-4B-Instruct-abliterated.mmproj-Q8_0.gguf',
+    uncensored: true,
+    // Steady wording for descriptions.
+    sampling: {'temperature': 0.3, 'top_p': 0.8, 'top_k': 20},
+  );
+
+  /// The model and vision files of Eyes in [s]'s models folder, or null
+  /// when Eyes isn't downloaded.
+  static ({String model, String mmproj})? eyesFiles(AppSettings s) {
+    final dir = dirFor(s);
+    final model = fileFor(dir, eyes);
+    final mmproj = partFor(dir, eyes.mmproj!);
+    if (!model.existsSync() || !mmproj.existsSync()) return null;
+    return (model: model.path, mmproj: mmproj.path);
+  }
+
+  static bool eyesInstalled(AppSettings s) => eyesFiles(s) != null;
+
+  /// The vision file llama-server loads with [s]'s model, or null when the
+  /// model can't see: a catalog model's own, next to it, else the one the
+  /// human attached.
+  static String? mmprojFor(AppSettings s) {
+    final path = s.modelPath;
+    if (path == null) return null;
+    final m = forPath(path);
+    final candidate = m != null
+        ? (m.mmproj == null ? null : partFor(File(path).parent, m.mmproj!).path)
+        : s.mmprojPath;
+    if (candidate == null || !File(candidate).existsSync()) return null;
+    return candidate;
+  }
+
+  /// Whether [path] is a vision file rather than a model.
+  static bool isMmproj(String path) =>
+      p.basename(path).toLowerCase().contains('mmproj');
+
+  /// The vision file lying next to an attached model, when there is
+  /// exactly one, so attaching the model brings its eyes along.
+  static String? mmprojBeside(String modelPath) {
+    try {
+      final found = [
+        for (final e in File(modelPath).parent.listSync())
+          if (e is File &&
+              e.path.toLowerCase().endsWith('.gguf') &&
+              isMmproj(e.path))
+            e.path,
+      ];
+      return found.length == 1 ? found.single : null;
+    } on FileSystemException {
+      return null;
+    }
+  }
+
   /// The best model that fits the card, or the smallest when none does.
   /// Null when the card is unknown.
   static CatalogModel? recommendFor(GpuInfo gpu) {
@@ -300,14 +433,15 @@ class ModelCatalog {
     if (mem == null) return null;
     CatalogModel? best;
     for (final m in models) {
-      if (m.uncensored || m.huge) continue;
+      // Models that see are a choice, not the default.
+      if (m.uncensored || m.huge || m.canSee) continue;
       // Keep a little headroom for the desktop and the 8k memory span.
       if (m.minMemoryGb > mem - 0.5) continue;
       if (best == null || m.minMemoryGb > best.minMemoryGb) best = m;
     }
     return best ??
         models
-            .where((m) => !m.uncensored && !m.huge)
+            .where((m) => !m.uncensored && !m.huge && !m.canSee)
             .reduce((a, b) => a.minMemoryGb <= b.minMemoryGb ? a : b);
   }
 
@@ -352,12 +486,20 @@ class ModelCatalog {
   static File partFor(Directory modelsDir, String path) =>
       File(p.join(modelsDir.path, p.posix.basename(path)));
 
-  /// Every finished .gguf in the models folder.
+  /// Every finished model .gguf in the models folder: not vision files,
+  /// and not Eyes, which isn't a chat model.
   static Future<List<File>> downloaded(Directory modelsDir) async {
     if (!await modelsDir.exists()) return const [];
+    final eyesName = p.posix.basename(eyes.file).toLowerCase();
     return modelsDir
         .list()
-        .where((e) => e is File && e.path.toLowerCase().endsWith('.gguf'))
+        .where(
+          (e) =>
+              e is File &&
+              e.path.toLowerCase().endsWith('.gguf') &&
+              !isMmproj(e.path) &&
+              p.basename(e.path).toLowerCase() != eyesName,
+        )
         .cast<File>()
         .toList();
   }

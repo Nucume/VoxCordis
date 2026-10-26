@@ -12,6 +12,10 @@ enum LlmMode { builtIn, external }
 /// doesn't say.
 enum ThemeChoice { system, light, dark }
 
+/// Where web_search looks: DuckDuckGo needs no account, Brave and Tavily
+/// want a key, SearXNG is an instance the human names.
+enum SearchProvider { duckDuckGo, brave, tavily, searxng }
+
 /// Everything the minimal v1 Settings page edits.
 @immutable
 class AppSettings {
@@ -28,7 +32,9 @@ class AppSettings {
     this.modelsFolder,
     this.contextSize = 8192,
     this.useGpu = true,
+    this.freeGpuWhenIdle = false,
     this.chatFormat,
+    this.mmprojPath,
     this.temperature,
     this.llmEndpoint = 'http://localhost:11434/v1',
     this.llmModel = '',
@@ -43,6 +49,16 @@ class AppSettings {
     this.companionId,
     this.otherCompanions = const [],
     this.toldAboutMoreCompanions = false,
+    this.picturesToServerOk = false,
+    this.internetAccess = false,
+    this.companionBrowser = false,
+    this.searchProvider = SearchProvider.duckDuckGo,
+    this.searxngUrl = '',
+    this.searchApiKey = '',
+    this.blockedSites = const [],
+    this.keepRunning = false,
+    this.startWithComputer = false,
+    this.automationRunsPerDay = 24,
   });
 
   final String companionName;
@@ -69,10 +85,18 @@ class AppSettings {
   final int contextSize;
   final bool useGpu;
 
+  /// Unloads the model (and Eyes) after a minute without typing, so games
+  /// get the graphics card back; typing loads it again.
+  final bool freeGpuWhenIdle;
+
   /// For an attached .gguf: the chat format to use instead of the one in
   /// the file (a [ChatFormat] name). Null means automatic. Catalog models
   /// always use their own.
   final String? chatFormat;
+
+  /// For an attached .gguf: its vision file (mmproj), which lets the model
+  /// see pictures. Catalog models that can see bring their own.
+  final String? mmprojPath;
 
   /// Overrides the model's recommended temperature. Null means recommended.
   final double? temperature;
@@ -116,6 +140,40 @@ class AppSettings {
   /// shown the first time they add another.
   final bool toldAboutMoreCompanions;
 
+  /// Whether the human agreed that pictures they share go to the
+  /// server-hosted brain, asked the first time one would.
+  final bool picturesToServerOk;
+
+  /// Lets the companion search the web and read pages. Off until the human
+  /// turns it on in Settings → Internet.
+  final bool internetAccess;
+
+  /// Lets the companion use its own browser, without a window, for sites
+  /// that need clicking and typing.
+  final bool companionBrowser;
+  final SearchProvider searchProvider;
+
+  /// The SearXNG instance, e.g. `https://searx.example.org`.
+  final String searxngUrl;
+
+  /// The Brave or Tavily key. Kept by [SecretStore], never in
+  /// settings.json.
+  final String searchApiKey;
+
+  /// Sites the companion never visits, e.g. `facebook.com`.
+  final List<String> blockedSites;
+
+  /// Closing the window keeps VoxCordis running in the background, so
+  /// reminders and automations still happen.
+  final bool keepRunning;
+
+  /// Starts VoxCordis in the background when the human logs in.
+  final bool startWithComputer;
+
+  /// Most automation runs a day, so a mistake can't run up a bill with a
+  /// server-hosted brain.
+  final int automationRunsPerDay;
+
   /// The current companion, as it would be stored while another is talked
   /// to.
   CompanionProfile get currentCompanion => CompanionProfile(
@@ -158,7 +216,9 @@ class AppSettings {
       modelsFolder: modelsFolder,
       contextSize: contextSize,
       useGpu: useGpu,
+      freeGpuWhenIdle: freeGpuWhenIdle,
       chatFormat: chatFormat,
+      mmprojPath: mmprojPath,
       temperature: temperature,
       llmEndpoint: llmEndpoint,
       llmModel: llmModel,
@@ -173,6 +233,16 @@ class AppSettings {
       companionId: c.id,
       otherCompanions: others,
       toldAboutMoreCompanions: toldAboutMoreCompanions,
+      picturesToServerOk: picturesToServerOk,
+      internetAccess: internetAccess,
+      companionBrowser: companionBrowser,
+      searchProvider: searchProvider,
+      searxngUrl: searxngUrl,
+      searchApiKey: searchApiKey,
+      blockedSites: blockedSites,
+      keepRunning: keepRunning,
+      startWithComputer: startWithComputer,
+      automationRunsPerDay: automationRunsPerDay,
     );
   }
 
@@ -196,7 +266,9 @@ class AppSettings {
     String? modelsFolder,
     int? contextSize,
     bool? useGpu,
+    bool? freeGpuWhenIdle,
     String? chatFormat,
+    String? mmprojPath,
     double? temperature,
     String? llmEndpoint,
     String? llmModel,
@@ -210,8 +282,19 @@ class AppSettings {
     List<String>? allowedSystemActions,
     List<CompanionProfile>? otherCompanions,
     bool? toldAboutMoreCompanions,
+    bool? picturesToServerOk,
+    bool? internetAccess,
+    bool? companionBrowser,
+    SearchProvider? searchProvider,
+    String? searxngUrl,
+    String? searchApiKey,
+    List<String>? blockedSites,
+    bool? keepRunning,
+    bool? startWithComputer,
+    int? automationRunsPerDay,
     bool clearPortrait = false,
     bool clearChatFormat = false,
+    bool clearMmproj = false,
     bool clearTemperature = false,
     bool clearBackground = false,
   }) {
@@ -228,7 +311,9 @@ class AppSettings {
       modelsFolder: modelsFolder ?? this.modelsFolder,
       contextSize: contextSize ?? this.contextSize,
       useGpu: useGpu ?? this.useGpu,
+      freeGpuWhenIdle: freeGpuWhenIdle ?? this.freeGpuWhenIdle,
       chatFormat: clearChatFormat ? null : chatFormat ?? this.chatFormat,
+      mmprojPath: clearMmproj ? null : mmprojPath ?? this.mmprojPath,
       temperature: clearTemperature ? null : temperature ?? this.temperature,
       llmEndpoint: llmEndpoint ?? this.llmEndpoint,
       llmModel: llmModel ?? this.llmModel,
@@ -248,6 +333,16 @@ class AppSettings {
       otherCompanions: otherCompanions ?? this.otherCompanions,
       toldAboutMoreCompanions:
           toldAboutMoreCompanions ?? this.toldAboutMoreCompanions,
+      picturesToServerOk: picturesToServerOk ?? this.picturesToServerOk,
+      internetAccess: internetAccess ?? this.internetAccess,
+      companionBrowser: companionBrowser ?? this.companionBrowser,
+      searchProvider: searchProvider ?? this.searchProvider,
+      searxngUrl: searxngUrl ?? this.searxngUrl,
+      searchApiKey: searchApiKey ?? this.searchApiKey,
+      blockedSites: blockedSites ?? this.blockedSites,
+      keepRunning: keepRunning ?? this.keepRunning,
+      startWithComputer: startWithComputer ?? this.startWithComputer,
+      automationRunsPerDay: automationRunsPerDay ?? this.automationRunsPerDay,
     );
   }
 
@@ -264,7 +359,9 @@ class AppSettings {
     'modelsFolder': modelsFolder,
     'contextSize': contextSize,
     'useGpu': useGpu,
+    'freeGpuWhenIdle': freeGpuWhenIdle,
     'chatFormat': chatFormat,
+    'mmprojPath': mmprojPath,
     'temperature': temperature,
     'llmEndpoint': llmEndpoint,
     'llmModel': llmModel,
@@ -278,6 +375,15 @@ class AppSettings {
     'companionId': companionId,
     'otherCompanions': [for (final c in otherCompanions) c.toJson()],
     'toldAboutMoreCompanions': toldAboutMoreCompanions,
+    'picturesToServerOk': picturesToServerOk,
+    'internetAccess': internetAccess,
+    'companionBrowser': companionBrowser,
+    'searchProvider': searchProvider.name,
+    'searxngUrl': searxngUrl,
+    'blockedSites': blockedSites,
+    'keepRunning': keepRunning,
+    'startWithComputer': startWithComputer,
+    'automationRunsPerDay': automationRunsPerDay,
   };
 
   factory AppSettings.fromJson(Map<String, Object?> json) {
@@ -300,7 +406,9 @@ class AppSettings {
       modelsFolder: json['modelsFolder'] as String?,
       contextSize: json['contextSize'] as int? ?? d.contextSize,
       useGpu: json['useGpu'] as bool? ?? d.useGpu,
+      freeGpuWhenIdle: json['freeGpuWhenIdle'] as bool? ?? false,
       chatFormat: json['chatFormat'] as String?,
+      mmprojPath: json['mmprojPath'] as String?,
       temperature: (json['temperature'] as num?)?.toDouble(),
       llmEndpoint: json['llmEndpoint'] as String? ?? d.llmEndpoint,
       llmModel: json['llmModel'] as String? ?? d.llmModel,
@@ -325,6 +433,20 @@ class AppSettings {
       ],
       toldAboutMoreCompanions:
           json['toldAboutMoreCompanions'] as bool? ?? false,
+      picturesToServerOk: json['picturesToServerOk'] as bool? ?? false,
+      internetAccess: json['internetAccess'] as bool? ?? false,
+      companionBrowser: json['companionBrowser'] as bool? ?? false,
+      searchProvider:
+          SearchProvider.values.asNameMap()[json['searchProvider']] ??
+          d.searchProvider,
+      searxngUrl: json['searxngUrl'] as String? ?? '',
+      blockedSites:
+          (json['blockedSites'] as List?)?.whereType<String>().toList() ??
+          const [],
+      keepRunning: json['keepRunning'] as bool? ?? false,
+      startWithComputer: json['startWithComputer'] as bool? ?? false,
+      automationRunsPerDay:
+          json['automationRunsPerDay'] as int? ?? d.automationRunsPerDay,
     );
   }
 }
@@ -393,7 +515,8 @@ class CompanionProfile {
 /// The API key goes to [secrets] instead.
 class SettingsStore extends ChangeNotifier {
   SettingsStore(this._file, this._value, {this.secrets})
-    : _savedKey = _value.llmApiKey;
+    : _savedKey = _value.llmApiKey,
+      _savedSearchKey = _value.searchApiKey;
 
   final File _file;
   AppSettings _value;
@@ -404,10 +527,12 @@ class SettingsStore extends ChangeNotifier {
   /// The key as [secrets] holds it, so a save only touches the keyring
   /// when the key changed.
   String _savedKey;
+  String _savedSearchKey;
 
   AppSettings get value => _value;
 
   static const apiKeySecret = 'llm-api-key';
+  static const searchKeySecret = 'search-api-key';
 
   static Future<SettingsStore> load(
     Directory supportDir, {
@@ -440,9 +565,13 @@ class SettingsStore extends ChangeNotifier {
       return s;
     }
     final key = await store.read(apiKeySecret) ?? '';
+    final searchKey = await store.read(searchKeySecret) ?? '';
     return SettingsStore(
       file,
-      key.isEmpty ? settings : settings.copyWith(llmApiKey: key),
+      settings.copyWith(
+        llmApiKey: key.isEmpty ? null : key,
+        searchApiKey: searchKey.isEmpty ? null : searchKey,
+      ),
       secrets: store,
     );
   }
@@ -459,6 +588,10 @@ class SettingsStore extends ChangeNotifier {
       if (secrets != null && s.llmApiKey != _savedKey) {
         await secrets.write(apiKeySecret, s.llmApiKey);
         _savedKey = s.llmApiKey;
+      }
+      if (secrets != null && s.searchApiKey != _savedSearchKey) {
+        await secrets.write(searchKeySecret, s.searchApiKey);
+        _savedSearchKey = s.searchApiKey;
       }
       await _file.parent.create(recursive: true);
       final tmp = File('${_file.path}.tmp');

@@ -14,7 +14,7 @@ class ImportWriter {
   /// [body] and [looks] are the human's edited versions. Files already in
   /// the folder (a reinstall into an old folder) are renamed, never
   /// overwritten.
-  static Future<({int memories, int messages, int files})> write(
+  static Future<({int memories, int messages, int files, int tasks})> write(
     ImportedCharacter c,
     AppSettings s, {
     required String body,
@@ -51,6 +51,6 @@ class ImportWriter {
       await put(DeskFiles.privacy, '${c.privacy!.trim()}\n');
     }
     return await c.nemini?.apply(db: db, folder: folder) ??
-        (memories: 0, messages: 0, files: 0);
+        (memories: 0, messages: 0, files: 0, tasks: 0);
   }
 }

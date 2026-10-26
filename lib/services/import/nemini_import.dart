@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:archive/archive_io.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
+import 'package:uuid/uuid.dart';
 
 import '../../data/desk/desk_files.dart';
 import '../../data/desk/desk_tools.dart';
@@ -11,6 +12,7 @@ import '../../data/desk/pictures.dart';
 import '../../data/memory/memory.dart';
 import 'import_temp.dart';
 import 'imported_character.dart';
+import 'nemini_clock.dart';
 import 'untrusted_text.dart';
 
 /// A Nemini.ai export ZIP: `companion.json`, `desk/` (personality.md,
@@ -18,8 +20,9 @@ import 'untrusted_text.dart';
 /// `memory/facts.json` and `turns.jsonl`.
 ///
 /// `providers.json`, `keys.json` and `google.json` hold credentials and are
-/// never opened. Nor are prefs, clock, achievements or pet, which have no
-/// counterpart here yet.
+/// never opened. Nor are prefs, achievements or pet, which have no
+/// counterpart here yet. `clock/tasks.json` becomes paused reminders and
+/// tasks ([NeminiClock]).
 class NeminiExport {
   static const _secrets = {'providers.json', 'keys.json', 'google.json'};
 
@@ -134,6 +137,7 @@ class NeminiExport {
       final privacy = text('desk/${DeskFiles.privacy}');
 
       final facts = _jsonList(text('memory/facts.json'));
+      final tasks = NeminiClock.parse(text('clock/tasks.json'));
       final turns = entry('turns.jsonl');
       final messageCount = turns == null || !turns.isFile
           ? 0
@@ -183,13 +187,14 @@ class NeminiExport {
         notes: [
           'API keys and account links (providers, keys, Google) were not '
               'read.',
-          'Automations, achievements and the pet stay behind for now.',
+          'Achievements and the pet stay behind for now.',
         ],
         nemini: NeminiExtras(
           zipPath: zip.path,
           root: root,
           factCount: facts.length,
           messageCount: messageCount,
+          taskCount: tasks.length,
           deskFiles: desk.where(isPlainDeskFile).toList(),
           otherFiles: desk.where((f) => !isPlainDeskFile(f)).toList(),
         ),
@@ -303,6 +308,7 @@ class NeminiExtras {
     required this.root,
     required this.factCount,
     required this.messageCount,
+    this.taskCount = 0,
     required this.deskFiles,
     this.otherFiles = const [],
   });
@@ -311,6 +317,9 @@ class NeminiExtras {
   final String root;
   final int factCount;
   final int messageCount;
+
+  /// Reminders and automations in `clock/tasks.json`.
+  final int taskCount;
 
   /// Notes and pictures, copied when [desk] is on.
   final List<String> deskFiles;
@@ -323,15 +332,16 @@ class NeminiExtras {
   bool memories = true;
   bool chat = true;
   bool desk = true;
+  bool tasks = true;
 
   /// Copies what the human kept ticked. Re-running it never duplicates:
   /// memories and messages keep their Nemini ids, and files that already
   /// exist in [folder] are left alone.
-  Future<({int memories, int messages, int files})> apply({
+  Future<({int memories, int messages, int files, int tasks})> apply({
     required Database db,
     required String folder,
   }) async {
-    var memoryCount = 0, messageCount = 0, fileCount = 0;
+    var memoryCount = 0, messageCount = 0, fileCount = 0, taskCount = 0;
     final input = InputFileStream(zipPath);
     try {
       final archive = ZipDecoder().decodeStream(input);
@@ -383,6 +393,27 @@ class NeminiExtras {
         }
       }
 
+      if (tasks) {
+        // Paused, for the human to look at in the Plans tab first. The id
+        // comes from Nemini's, so importing again adds nothing twice.
+        final batch = db.batch();
+        final now = DateTime.now().toUtc().toIso8601String();
+        for (final t in NeminiClock.parse(text('clock/tasks.json'))) {
+          batch.insert('schedules', {
+            'id': const Uuid().v5(Namespace.url.value, 'nemini-task:${t.id}'),
+            'kind': t.kind.name,
+            'text': t.text,
+            'next_at': t.at.toUtc().toIso8601String(),
+            'repeat': t.repeat.code,
+            'active': 0,
+            'created_at': now,
+            'origin': 'nemini',
+          }, conflictAlgorithm: ConflictAlgorithm.ignore);
+          taskCount++;
+        }
+        await batch.commit(noResult: true);
+      }
+
       final wanted = {if (desk) ...deskFiles, ...chosenOthers};
       if (wanted.isNotEmpty) {
         final rootDir = p.normalize(p.absolute(folder));
@@ -403,7 +434,12 @@ class NeminiExtras {
     } finally {
       await input.close();
     }
-    return (memories: memoryCount, messages: messageCount, files: fileCount);
+    return (
+      memories: memoryCount,
+      messages: messageCount,
+      files: fileCount,
+      tasks: taskCount,
+    );
   }
 
   static Memory? _memory(Object? f) {

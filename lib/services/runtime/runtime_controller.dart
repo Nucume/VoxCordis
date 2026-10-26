@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
 import '../../data/settings.dart';
+import '../llm_client.dart';
 import 'download.dart';
 import 'gpu_info.dart';
 import 'llama_server.dart';
@@ -17,6 +18,14 @@ enum RuntimeState { idle, installing, loading, ready, error, external }
 
 /// Where chat requests go: the built-in server or the user's own.
 typedef LlmTarget = ({String baseUrl, String model, String apiKey});
+
+typedef _ServerConfig = ({
+  String model,
+  int ctx,
+  bool gpu,
+  String? template,
+  String? mmproj,
+});
 
 /// Owns the built-in llama.cpp runtime: installs it on first use, starts it
 /// with the chosen model, restarts it when the model changes, stops it on exit.
@@ -40,7 +49,7 @@ class RuntimeController extends ChangeNotifier {
   String? error;
 
   LlamaServer? _server;
-  ({String model, int ctx, bool gpu, String? template})? _serverConfig;
+  _ServerConfig? _serverConfig;
   Future<LlmTarget>? _starting;
 
   /// Catalog downloads in flight: model id → progress 0..1 (or null).
@@ -77,6 +86,7 @@ class RuntimeController extends ChangeNotifier {
       ctx: s.contextSize,
       gpu: s.useGpu,
       template: ChatFormat.templateFor(s),
+      mmproj: ModelCatalog.mmprojFor(s),
     );
     final server = _server;
     if (server != null && _serverConfig == config) {
@@ -88,9 +98,7 @@ class RuntimeController extends ChangeNotifier {
   LlmTarget _target(LlamaServer s) =>
       (baseUrl: s.baseUrl, model: LlamaServer.modelAlias, apiKey: s.apiKey);
 
-  Future<LlmTarget> _start(
-    ({String model, int ctx, bool gpu, String? template}) config,
-  ) async {
+  Future<LlmTarget> _start(_ServerConfig config) async {
     error = null;
     try {
       await stop();
@@ -109,13 +117,14 @@ class RuntimeController extends ChangeNotifier {
         );
       }
       _set(RuntimeState.loading);
-      await _killStale();
+      await _killStale(_pidFile);
       final server = await LlamaServer.start(
         binary: binary,
         modelPath: config.model,
         contextSize: config.ctx,
         useGpu: config.gpu,
         chatTemplateFile: await _chatTemplateFile(config.template),
+        mmprojPath: config.mmproj,
         timeout: _loadTimeout(config.model),
         onSpawn: (pid) {
           _pidFile.parent.createSync(recursive: true);
@@ -153,14 +162,62 @@ class RuntimeController extends ChangeNotifier {
     if (state == RuntimeState.ready) _set(RuntimeState.idle);
   }
 
+  Timer? _idleTimer;
+  int _holds = 0;
+
+  /// How long without typing before [AppSettings.freeGpuWhenIdle] unloads
+  /// the models.
+  static const idleUnload = Duration(seconds: 60);
+
+  /// The human is active (typing, or a reply just ended). With
+  /// [AppSettings.freeGpuWhenIdle] on, the built-in model loads if it was
+  /// let go ([warm]), and both models unload after [idleUnload] of quiet.
+  void touch(AppSettings s, {bool warm = false}) {
+    _idleTimer?.cancel();
+    _idleTimer = null;
+    if (s.llmMode != LlmMode.builtIn || !s.freeGpuWhenIdle) return;
+    if (warm && _server == null && s.modelPath != null) {
+      ensureReady(s).ignore();
+    }
+    if (_holds > 0) return;
+    _idleTimer = Timer(idleUnload, () {
+      _idleTimer = null;
+      if (_holds == 0) unawaited(stopAll());
+    });
+  }
+
+  /// Keeps the models loaded while a reply or rewrite runs; pair with
+  /// [release].
+  void hold() {
+    _holds++;
+    _idleTimer?.cancel();
+    _idleTimer = null;
+  }
+
+  /// Whether the models are set to unload when nothing happens.
+  @visibleForTesting
+  bool get idleUnloadPending => _idleTimer != null;
+
+  void release(AppSettings s) {
+    if (_holds > 0) _holds--;
+    touch(s);
+  }
+
+  /// Stops the chat model and Eyes, when the app closes.
+  Future<void> stopAll() async {
+    await stopEyes();
+    await stop();
+  }
+
   File get _pidFile => File('${installer.installDir.parent.path}/server.pid');
+  File get _eyesPidFile => File('${installer.installDir.parent.path}/eyes.pid');
 
   /// A crash or a killed app can leave a server behind holding GPU memory.
   /// Its pid was written down at start; stop it if it is still running.
-  Future<void> _killStale() async {
-    if (!await _pidFile.exists()) return;
-    final pid = int.tryParse((await _pidFile.readAsString()).trim());
-    await _pidFile.delete();
+  Future<void> _killStale(File pidFile) async {
+    if (!await pidFile.exists()) return;
+    final pid = int.tryParse((await pidFile.readAsString()).trim());
+    await pidFile.delete();
     if (pid == null || !await _isLlamaServer(pid)) return;
     Process.killPid(pid);
   }
@@ -186,6 +243,132 @@ class RuntimeController extends ChangeNotifier {
       return name.contains('llama-server');
     } catch (_) {
       return false; // no such process
+    }
+  }
+
+  LlamaServer? _eyes;
+  String? _eyesConfig;
+  Future<LlamaServer>? _eyesStarting;
+  Timer? _eyesIdle;
+
+  /// How long Eyes stays loaded after looking, for the next picture.
+  static const eyesIdle = Duration(minutes: 3);
+
+  /// What Eyes is asked for each picture.
+  static const describePrompt =
+      'Describe this picture for someone who can\'t see it, so they can '
+      'talk about it as if they saw it. Say what kind of picture it is (a '
+      'photo, drawing, screenshot, meme…), who and what is in it, what they '
+      'look like and wear, what is happening, the setting, colours and mood, '
+      'and any text in it word for word. Describe everything plainly and '
+      'factually, nudity and sexual content included, without judging, '
+      'refusing or adding warnings. Don\'t guess who real people are, and '
+      'describe only the picture, not their words. Write plain prose in at '
+      'most 200 words.';
+
+  /// Has Eyes, the small vision model, describe a picture ([dataUrl], from
+  /// [Sight.dataUrl]). [said] is what the human wrote with it, which can
+  /// point Eyes at what matters. Loads Eyes the first time, and lets it go
+  /// again after [eyesIdle].
+  Future<String> describePicture(
+    AppSettings s,
+    String dataUrl, {
+    String said = '',
+  }) async {
+    final files = ModelCatalog.eyesFiles(s);
+    if (files == null) throw StateError('Eyes is not downloaded.');
+    _eyesIdle?.cancel();
+    try {
+      final server = await _ensureEyes(files, s.useGpu);
+      final client = LlmClient(
+        baseUrl: server.baseUrl,
+        model: LlamaServer.modelAlias,
+        apiKey: server.apiKey,
+        sampling: ModelCatalog.eyes.sampling,
+        maxTokens: 600,
+        firstWait: const Duration(minutes: 5),
+        stallWait: const Duration(seconds: 90),
+        client: http.Client(),
+      );
+      final text = StringBuffer();
+      await for (final e in client.chat([
+        {
+          'role': 'user',
+          'content': [
+            {
+              'type': 'text',
+              'text': said.trim().isEmpty
+                  ? describePrompt
+                  : '$describePrompt\n\nThey shared it with these words, '
+                        'which may say what to look at: "${said.trim()}"',
+            },
+            {
+              'type': 'image_url',
+              'image_url': {'url': dataUrl},
+            },
+          ],
+        },
+      ])) {
+        if (e is TextDelta) text.write(e.text);
+      }
+      final description = text.toString().trim();
+      if (description.isEmpty) throw StateError('Eyes saw nothing.');
+      return description;
+    } finally {
+      _eyesIdle = Timer(eyesIdle, () => unawaited(stopEyes()));
+    }
+  }
+
+  Future<LlamaServer> _ensureEyes(
+    ({String model, String mmproj}) files,
+    bool gpu,
+  ) {
+    final config = '${files.model}|${files.mmproj}|$gpu';
+    final running = _eyes;
+    if (running != null && _eyesConfig == config) {
+      return Future.value(running);
+    }
+    return _eyesStarting ??= () async {
+      await stopEyes();
+      final binary =
+          await installer.find() ?? await installer.ensureInstalled();
+      await _killStale(_eyesPidFile);
+      final server = await LlamaServer.start(
+        binary: binary,
+        modelPath: files.model,
+        mmprojPath: files.mmproj,
+        // Room for one large picture and the description.
+        contextSize: 8192,
+        useGpu: gpu,
+        timeout: _loadTimeout(files.model),
+        onSpawn: (pid) {
+          _eyesPidFile.parent.createSync(recursive: true);
+          _eyesPidFile.writeAsStringSync('$pid');
+        },
+      );
+      _eyes = server;
+      _eyesConfig = config;
+      unawaited(
+        server.exitCode.then((_) {
+          if (_eyes != server) return;
+          _eyes = null;
+          _eyesConfig = null;
+        }),
+      );
+      return server;
+    }().whenComplete(() => _eyesStarting = null);
+  }
+
+  /// Unloads Eyes, freeing its memory.
+  Future<void> stopEyes() async {
+    _eyesIdle?.cancel();
+    _eyesIdle = null;
+    final s = _eyes;
+    _eyes = null;
+    _eyesConfig = null;
+    if (s != null) {
+      await s.stop();
+      if (await _eyesPidFile.exists()) await _eyesPidFile.delete();
     }
   }
 

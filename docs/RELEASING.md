@@ -27,8 +27,13 @@ the app on first use into the app-support directory.
 ## Cutting a release
 
 1. Bump `version:` in `pubspec.yaml` (optional; the tag wins for file names).
-2. Add a `<release>` line to `packaging/linux/com.nucume.companion.metainfo.xml`.
-3. Tag and push:
+2. In `CHANGELOG.md`, rename `## Unreleased` to `## <version>` (e.g.
+   `## 0.2.1`). Those notes become the release page, and the app shows them
+   on its first start after updating, together with the notes of any
+   version the user skipped. A release without a section gets GitHub's list
+   of pull requests on its page, and no notes in the app.
+3. Add a `<release>` line to `packaging/linux/com.nucume.companion.metainfo.xml`.
+4. Tag and push:
 
    ```sh
    git tag v0.2.0

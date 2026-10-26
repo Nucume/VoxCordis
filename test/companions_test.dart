@@ -3,8 +3,10 @@ import 'dart:io';
 
 import 'package:companion/app_scope.dart';
 import 'package:companion/data/database.dart';
+import 'package:companion/data/database_key.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
+import 'package:companion/services/secret_store.dart';
 import 'package:companion/shell/companion_switcher.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -82,10 +84,22 @@ void main() {
       llmModel: 'mock',
     );
     final runtime = RuntimeController(tmp);
+    final key = DatabaseKey(
+      tmp,
+      secrets: SecretStore(
+        Directory(p.join(tmp.path, 'secrets')),
+        system: false,
+      ),
+    );
+    await key.unlock();
     final services = AppServices(
       settings: SettingsStore(File(p.join(tmp.path, 'settings.json')), start),
-      db: await openAppDatabase(AppServices.companionDbPath(tmp.path, null)),
+      db: await openAppDatabase(
+        AppServices.companionDbPath(tmp.path, null),
+        key: key.value,
+      ),
       runtime: runtime,
+      dbKey: key,
     );
     await services.messages.add('user', 'hello Aria');
 
@@ -112,6 +126,15 @@ void main() {
     expect((await services.messages.recent()).map((m) => m.content), [
       'hello Aria',
     ]);
+
+    // Both are encrypted, and a new key reaches both, the open one too.
+    expect(key.databases(), hasLength(2));
+    expect(key.databases().every((f) => !DatabaseKey.isPlain(f)), isTrue);
+    await services.changeDatabaseKey('a new password');
+    await services.messages.add('user', 'still here');
+    for (final f in key.databases()) {
+      expect(DatabaseKey.opens(f, 'a new password'), isTrue);
+    }
     await services.db.close();
   });
 

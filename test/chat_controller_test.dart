@@ -3,12 +3,14 @@ import 'dart:io';
 
 import 'package:companion/app_scope.dart';
 import 'package:companion/data/database.dart';
+import 'package:companion/data/database_key.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/features/chat/chat_controller.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
 import 'package:companion/services/system/installed_apps.dart';
 import 'package:companion/services/system/system_tools.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:image/image.dart' as img;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 /// A fake OpenAI-compatible server: the first request gets a streamed
@@ -78,6 +80,8 @@ void main() {
         ),
       ),
       db: db,
+      // In memory: nothing to encrypt.
+      dbKey: DatabaseKey(Directory.systemTemp),
       runtime: RuntimeController(tmp),
     );
     addTearDown(() async {
@@ -155,10 +159,10 @@ void main() {
     expect((await services.messages.recent()).length, 4);
 
     // A shared picture is copied into the folder and named in the message,
-    // and the prompt tells the companion it can't see it but may use it.
+    // and a server-hosted model is sent the picture itself.
     final picture = await File(
       '${tmp.path}/selfie.png',
-    ).writeAsBytes([0x89, 0x50, 0x4E, 0x47]);
+    ).writeAsBytes(img.encodePng(img.Image(width: 4, height: 3)));
     await chat.send('', images: [picture.path]);
     final shared = chat.messages[chat.messages.length - 2];
     expect(
@@ -169,8 +173,15 @@ void main() {
     expect(File('${tmp.path}/Aria/$rel').existsSync(), isTrue);
     final pictureSystem =
         ((requests.last['messages'] as List).first as Map)['content'] as String;
-    expect(pictureSystem, contains('You cannot see pictures yet'));
+    expect(pictureSystem, contains('you see it with their message'));
     expect(pictureSystem, contains('set_avatar'));
+    final sent = (requests.last['messages'] as List).last as Map;
+    final parts = sent['content'] as List;
+    expect((parts.first as Map)['text'], '[image: $rel]');
+    expect(
+      ((parts.last as Map)['image_url'] as Map)['url'],
+      startsWith('data:image/png;base64,'),
+    );
   });
 
   test(
@@ -190,6 +201,8 @@ void main() {
           ),
         ),
         db: db,
+        // In memory: nothing to encrypt.
+        dbKey: DatabaseKey(Directory.systemTemp),
         runtime: RuntimeController(tmp),
       );
       addTearDown(() async {
@@ -256,6 +269,8 @@ void main() {
         ),
       ),
       db: db,
+      // In memory: nothing to encrypt.
+      dbKey: DatabaseKey(Directory.systemTemp),
       runtime: RuntimeController(tmp),
     );
     addTearDown(() async {
@@ -292,6 +307,8 @@ void main() {
         AppSettings(companionFolder: '${tmp.path}/c'),
       ),
       db: db,
+      // In memory: nothing to encrypt.
+      dbKey: DatabaseKey(Directory.systemTemp),
       runtime: RuntimeController(tmp),
     );
     addTearDown(() async {
@@ -349,6 +366,8 @@ void main() {
         ),
       ),
       db: db,
+      // In memory: nothing to encrypt.
+      dbKey: DatabaseKey(Directory.systemTemp),
       runtime: RuntimeController(tmp),
     );
     addTearDown(() async {
@@ -389,6 +408,8 @@ void main() {
         ),
       ),
       db: db,
+      // In memory: nothing to encrypt.
+      dbKey: DatabaseKey(Directory.systemTemp),
       runtime: RuntimeController(tmp),
     );
     addTearDown(() async {

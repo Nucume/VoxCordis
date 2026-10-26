@@ -51,7 +51,13 @@ class MessageRepository {
   final Database _db;
   static const _uuid = Uuid();
 
-  Future<ChatMessage> add(String role, String content) async {
+  /// [via] says where a message came from: `app` for the chat, `reminder`
+  /// or `automation` for what the companion wrote on schedule.
+  Future<ChatMessage> add(
+    String role,
+    String content, {
+    String via = 'app',
+  }) async {
     final rows = await _db.rawQuery(
       'SELECT coalesce(max(sort_order), 0) + 1 AS n FROM messages',
     );
@@ -61,6 +67,7 @@ class MessageRepository {
       ts: DateTime.now(),
       role: role,
       content: content,
+      via: via,
       sortOrder: next,
     );
     await _db.insert('messages', {

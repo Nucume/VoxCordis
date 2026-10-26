@@ -4,6 +4,7 @@ import 'dart:io';
 
 import 'package:companion/app_scope.dart';
 import 'package:companion/data/database.dart';
+import 'package:companion/data/database_key.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/features/chat/chat_controller.dart';
 import 'package:companion/features/chat/prompt_history.dart';
@@ -67,6 +68,8 @@ Future<ChatController> _chat(HttpServer server) async {
         ),
       ),
       db: db,
+      // In memory: nothing to encrypt.
+      dbKey: DatabaseKey(Directory.systemTemp),
       runtime: RuntimeController(tmp),
     ),
   );

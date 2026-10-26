@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:companion/app_scope.dart';
 import 'package:companion/data/database.dart';
+import 'package:companion/data/database_key.dart';
 import 'package:companion/data/memory/memory_tools.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/features/chat/chat_controller.dart';
@@ -10,8 +11,10 @@ import 'package:companion/services/runtime/download.dart';
 import 'package:companion/services/runtime/model_catalog.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
 import 'package:companion/services/runtime/runtime_installer.dart';
+import 'package:companion/services/sight.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
+import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
@@ -163,6 +166,8 @@ void main() {
           settings.copyWith(companionFolder: p.join(support.path, 'home')),
         ),
         db: db,
+        // In memory: nothing to encrypt.
+        dbKey: DatabaseKey(Directory.systemTemp),
         runtime: runtime,
       );
       final chat = ChatController(services);
@@ -179,8 +184,112 @@ void main() {
     timeout: const Timeout(Duration(minutes: 3)),
   );
 
+  // Real Eyes end to end. Runs when LLAMA_SERVER_DIR is set and
+  // TEST_EYES_DIR holds the Eyes model and vision files.
+  final eyesDir = Platform.environment['TEST_EYES_DIR'];
+  test(
+    'Eyes describes a picture, and a model that sees gets it in the chat',
+    () async {
+      final support = await Directory.systemTemp.createTemp('eyes_test');
+      final install = Directory(
+        p.join(support.path, 'runtime', RuntimeInstaller.pinnedTag),
+      );
+      await install.create(recursive: true);
+      for (final f in Directory(binDir!).listSync()) {
+        await Link(p.join(install.path, p.basename(f.path))).create(f.path);
+      }
+      final runtime = RuntimeController(support);
+      addTearDown(() async {
+        await runtime.stopAll();
+        await support.delete(recursive: true);
+      });
+
+      // A red disc on white, with a word in it.
+      final picture = img.Image(width: 400, height: 300)
+        ..clear(img.ColorRgb8(255, 255, 255));
+      img.fillCircle(
+        picture,
+        x: 200,
+        y: 150,
+        radius: 120,
+        color: img.ColorRgb8(220, 20, 20),
+      );
+      img.drawString(
+        picture,
+        'TEA',
+        font: img.arial48,
+        x: 160,
+        y: 125,
+        color: img.ColorRgb8(255, 255, 255),
+      );
+      final file = File(p.join(support.path, 'disc.png'))
+        ..writeAsBytesSync(img.encodePng(picture));
+
+      final settings = AppSettings(
+        modelsFolder: eyesDir,
+        contextSize: 4096,
+        useGpu: false,
+      );
+      expect(ModelCatalog.eyesInstalled(settings), isTrue);
+      final description = await runtime.describePicture(
+        settings,
+        await Sight.dataUrl(file),
+        said: 'What do you think?',
+      );
+      expect(description.toLowerCase(), contains('red'));
+
+      // The same model, attached with its vision file, sees by itself.
+      final files = ModelCatalog.eyesFiles(settings)!;
+      final db = await openAppDatabase(inMemoryDatabasePath);
+      addTearDown(db.close);
+      final services = AppServices(
+        settings: SettingsStore(
+          File(p.join(support.path, 'settings.json')),
+          settings.copyWith(
+            companionName: 'Aria',
+            companionFolder: p.join(support.path, 'home'),
+            modelPath: files.model,
+            mmprojPath: files.mmproj,
+          ),
+        ),
+        db: db,
+        dbKey: DatabaseKey(Directory.systemTemp),
+        runtime: runtime,
+      );
+      expect(Sight.modeFor(services.settings.value), SightMode.native);
+      final chat = ChatController(services);
+      await chat.send(
+        'What colour is the circle in this picture?',
+        images: [file.path],
+      );
+      expect(chat.error, isNull);
+      expect(chat.messages.last.content.toLowerCase(), contains('red'));
+      // ignore: avoid_print
+      print('Eyes: $description\nChat: ${chat.messages.last.content}');
+
+      // Without its vision file the model is blind, and Eyes looks for it.
+      await services.settings.update(
+        services.settings.value.copyWith(clearMmproj: true),
+      );
+      expect(Sight.modeFor(services.settings.value), SightMode.eyes);
+      await chat.send('And now, what is written on it?', images: [file.path]);
+      expect(chat.error, isNull);
+      expect(chat.messages.last.content.toLowerCase(), contains('tea'));
+      final rel = RegExp(
+        r'images/[^\]]+',
+      ).firstMatch(chat.messages[chat.messages.length - 2].content)![0]!;
+      expect(await services.pictureNotes.get(rel), isNotNull);
+      // ignore: avoid_print
+      print('Through Eyes: ${chat.messages.last.content}');
+    },
+    skip: binDir == null || eyesDir == null
+        ? 'set LLAMA_SERVER_DIR and TEST_EYES_DIR to run'
+        : false,
+    timeout: const Timeout(Duration(minutes: 10)),
+  );
+
   test('every catalog file is pinned to a commit and a checksum', () {
-    for (final m in ModelCatalog.models) {
+    for (final m in [...ModelCatalog.models, ModelCatalog.eyes]) {
       expect(m.revision, matches(RegExp(r'^[0-9a-f]{40}$')), reason: m.id);
       for (final f in m.allFiles) {
         expect(m.sha256[f], matches(RegExp(r'^[0-9a-f]{64}$')), reason: f);

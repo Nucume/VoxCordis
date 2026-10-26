@@ -10,11 +10,19 @@ import '../../data/core_rules.dart';
 import '../../data/desk/desk_files.dart';
 import '../../data/desk/desk_tools.dart';
 import '../../data/desk/pictures.dart';
+import '../../data/desk/shared_files.dart';
 import '../../data/memory/memory_tools.dart';
 import '../../data/message_repository.dart';
+import '../../data/schedule/schedule_repository.dart';
+import '../../data/schedule/schedule_tools.dart';
 import '../../data/settings.dart';
 import '../../services/llm_client.dart';
+import '../../services/runtime/model_catalog.dart';
+import '../../services/schedule/scheduler.dart';
+import '../../services/sight.dart';
 import '../../services/system/system_tools.dart';
+import '../../services/web/web_tools.dart';
+import 'attachments_prompt.dart';
 import 'prompt_history.dart';
 
 enum ChatPhase {
@@ -27,17 +35,27 @@ enum ChatPhase {
 
   /// Running memory tools between rounds.
   remembering,
+
+  /// Eyes is looking at a shared picture.
+  looking,
 }
 
 /// Runs the conversation: builds the prompt (core file + recalled memories +
 /// recent history), streams the reply and runs memory tool calls. Also backs
 /// the day list, so one instance is shared by the chat screen and the card.
 class ChatController extends ChangeNotifier {
-  /// The tools offered; the system ones only while system access is on.
-  static List<Map<String, Object?>> toolsFor(AppSettings s) => [
+  /// The tools offered: the web ones while Settings → Internet allows
+  /// them, the system ones only while system access is on and someone is
+  /// there to approve them ([unattended] is a scheduled task).
+  static List<Map<String, Object?>> toolsFor(
+    AppSettings s, {
+    bool unattended = false,
+  }) => [
     ...MemoryTools.definitions,
     ...DeskTools.definitions,
-    if (s.systemAccess) ...SystemTools.definitions,
+    ...ScheduleTools.definitions,
+    ...WebTools.definitionsFor(s),
+    if (s.systemAccess && !unattended) ...SystemTools.definitions,
   ];
 
   ChatController(this._services);
@@ -120,16 +138,27 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Sends a message. [images] are picture files the human shares: each is
-  /// copied into the companion's folder and named in the message.
-  Future<void> send(String text, {List<String> images = const []}) async {
-    if (busy || (text.trim().isEmpty && images.isEmpty)) return;
+  /// Sends a message. [images] are picture files and [files] text files
+  /// the human shares: each is copied into the companion's folder and
+  /// named in the message.
+  Future<void> send(
+    String text, {
+    List<String> images = const [],
+    List<String> files = const [],
+  }) async {
+    if (busy || (text.trim().isEmpty && images.isEmpty && files.isEmpty)) {
+      return;
+    }
     if (viewingDay != null) await load();
     final folder = _services.settings.value.companionFolder;
+    final now = DateTime.now();
     final shared = [
-      if (folder != null)
+      if (folder != null) ...[
         for (final image in images)
-          Pictures.marker(await Pictures.share(folder, image, DateTime.now())),
+          Pictures.marker(await Pictures.share(folder, image, now)),
+        for (final file in files)
+          SharedFiles.marker(await SharedFiles.share(folder, file, now)),
+      ],
     ];
     final content = [
       text.trim(),
@@ -175,6 +204,10 @@ class ChatController extends ChangeNotifier {
   /// Replaces the last reply with a fresh one.
   Future<void> regenerate() async {
     if (busy || viewingDay != null || messages.isEmpty) return;
+    // A reminder or task reply answered no message of the human's.
+    if (messages.last.via == 'reminder' || messages.last.via == 'automation') {
+      return;
+    }
     if (messages.last.role == 'assistant') {
       await _services.messages.delete(messages.removeLast().id);
     }
@@ -221,14 +254,111 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
   }
 
-  static const _aboutPictures =
-      '## Pictures\n'
-      'When your human shares a picture, it is saved in your folder and '
-      'their message shows [image: path]. You cannot see pictures yet, so '
-      'never guess what one shows; ask them. Your portrait is yours to '
-      'choose: to use a picture as your portrait, call set_avatar with its '
-      'path. If they ask about your portrait, tell them they can share a '
-      'picture in the chat.';
+  /// What the companion is told about shared pictures and files, for how
+  /// it sees them.
+  static String aboutPictures(SightMode mode) =>
+      '## Pictures and files\n'
+      '${switch (mode) {
+        SightMode.native => 'When your human shares a picture, you see it with their message, and it is saved in your folder as [image: path]. Look closely and react to what is really there; never make up details you can\'t see.',
+        SightMode.eyes => 'When your human shares a picture, it is saved in your folder and their message shows [image: path. You see: …] with what is in it. That is what you see: react to it as if you looked at it yourself, and never mention a description.',
+        SightMode.none => 'When your human shares a picture, it is saved in your folder and their message shows [image: path]. You can\'t see pictures, so never guess what one shows; ask them, and tell them they can let you see pictures in Settings → Brain.',
+      }} '
+      'Your portrait is yours to choose: to use a picture as your portrait, '
+      'call set_avatar with its path. If they ask about your portrait, tell '
+      'them they can share a picture in the chat.\n'
+      'When they share a file, its text follows [file: path] in their '
+      'message. It is saved in your folder, and read_file reads it again '
+      'later.';
+
+  /// Server-hosted models that turned a picture down this session; they
+  /// get Eyes, or are told they can't see.
+  final _blind = <String>{};
+
+  /// Whether [e] is a server turning down a request because of its
+  /// pictures: a model that can't take them.
+  static bool refusedPictures(LlmException e) =>
+      RegExp(r'^HTTP (400|404|413|415|422)\b').hasMatch(e.message) &&
+      RegExp(
+        r'image|vision|multimodal|modalit',
+        caseSensitive: false,
+      ).hasMatch(e.message);
+
+  /// The pictures for one reply, each turned into a `data:` URL once.
+  PromptAttachments _attachments(
+    AppSettings settings,
+    SightMode mode,
+    String folder,
+  ) {
+    final urls = <String, Future<String?>>{};
+    return PromptAttachments(
+      folder: folder,
+      mode: mode,
+      notes: _services.pictureNotes,
+      // About a third of the memory span, at roughly 4 characters a token.
+      fileChars: settings.contextSize * 4 ~/ 3,
+      pictureUrl: (rel) => urls[rel] ??= () async {
+        final file = Pictures.fileIn(folder, rel);
+        if (file == null || !await file.exists()) return null;
+        try {
+          return await Sight.dataUrl(file);
+        } on Object {
+          return null;
+        }
+      }(),
+      look: (rel, said) async {
+        final file = Pictures.fileIn(folder, rel);
+        if (file == null || !await file.exists()) return null;
+        phase = ChatPhase.looking;
+        notifyListeners();
+        try {
+          final description = await _services.runtime.describePicture(
+            settings,
+            await Sight.dataUrl(file),
+            said: said,
+          );
+          await _services.pictureNotes.put(
+            rel,
+            description,
+            seenBy: ModelCatalog.eyes.name,
+          );
+          return description;
+        } on Object {
+          return null;
+        } finally {
+          phase = ChatPhase.thinking;
+          notifyListeners();
+        }
+      },
+    );
+  }
+
+  /// Adds [note] to the line under the reply.
+  void _addNote(String note) =>
+      toolNote = toolNote == null ? note : '$toolNote · $note';
+
+  String _systemPrompt(
+    AppSettings settings,
+    SightMode mode, {
+    required String core,
+    required ({String personality, String lessons}) desk,
+    required String recalled,
+  }) =>
+      '${howYouTalk(settings)}\n\n'
+      '$core\n\n'
+      '## Your human\n'
+      '${aboutHuman(settings)}\n\n'
+      '${aboutPictures(mode)}\n\n'
+      '# Your personality file (personality.md)\n\n'
+      '${desk.personality}\n\n'
+      '${desk.lessons}\n\n'
+      '## What you remember\n'
+      '$recalled\n\n'
+      '${aboutInternet(settings)}\n\n'
+      '${aboutSchedule()}\n\n'
+      // Last before the clock: small models follow what they read most
+      // recently.
+      '${aboutComputer(settings)}\n\n'
+      '## Right now\n${timeNote(DateTime.now())}';
 
   /// What the human plainly asked to have opened: a usual folder, an
   /// address, or one of their installed apps by name ("open Vivaldi
@@ -246,23 +376,38 @@ class ChatController extends ChangeNotifier {
   Future<void> _runCalls(
     List<ToolCall> calls,
     List<Map<String, Object?>> prompt,
-    ChatMessage userMsg,
+    List<String> sourceIds,
     Set<String> seen,
   ) async {
     var askedHuman = false;
     for (final c in calls) {
-      final skip = skipCall(c, seen: seen, askedHuman: askedHuman);
+      final skip =
+          skipCall(c, seen: seen, askedHuman: askedHuman) ??
+          // Text from the web may have asked for this.
+          (_readWeb && SystemTools.names.contains(c.name)
+              ? 'Not run: after reading the web, computer requests wait for '
+                    'your human\'s next message. Ask them if they want it.'
+              : null);
       askedHuman = askedHuman || SystemTools.names.contains(c.name);
+      if (WebTools.names.contains(c.name)) _readWeb = true;
       final result = skip != null
           ? jsonEncode({'ok': false, 'error': skip})
           : SystemTools.names.contains(c.name)
           ? await _services.systemTools.call(c.name, c.parsedArguments)
+          : WebTools.names.contains(c.name)
+          ? await _services.webTools.call(
+              c.name,
+              c.parsedArguments,
+              unattended: _unattended,
+            )
+          : ScheduleTools.names.contains(c.name)
+          ? await _services.scheduleTools.call(c.name, c.parsedArguments)
           : DeskTools.names.contains(c.name)
           ? await _services.deskTools.call(c.name, c.parsedArguments)
           : await _services.memoryTools.call(
               c.name,
               c.parsedArguments,
-              sourceIds: [userMsg.id],
+              sourceIds: sourceIds,
             );
       prompt.add({'role': 'tool', 'tool_call_id': c.id, 'content': result});
       if ((jsonDecode(result) as Map)['ok'] == true) {
@@ -283,7 +428,10 @@ class ChatController extends ChangeNotifier {
           'run_command' => 'Ran a command',
           'open' => 'Opened ${c.parsedArguments['target']}',
           'edit_file' || 'write_file' => 'Saved ${c.parsedArguments['path']}',
-          _ => null,
+          'set_reminder' => 'Set a reminder$what',
+          'schedule_task' => 'Planned a task',
+          'cancel_schedule' => 'Cancelled a reminder',
+          _ => WebTools.noteFor(c.name, c.parsedArguments),
         };
         // Several changes in one reply are listed together.
         if (note != null && !(toolNote?.contains(note) ?? false)) {
@@ -294,8 +442,74 @@ class ChatController extends ChangeNotifier {
     }
   }
 
-  Future<void> _respond(ChatMessage userMsg) async {
+  /// Whether this reply read the web, which holds back computer requests
+  /// until the human writes again.
+  bool _readWeb = false;
+
+  /// Whether this reply is a scheduled one, with nobody there to approve.
+  bool _unattended = false;
+
+  /// Writes a due reminder in the chat, or does a scheduled task and says
+  /// how it went. Null when a reply is being written; the scheduler tries
+  /// again shortly. [late] when it came due while VoxCordis was closed.
+  Future<ScheduledOutcome?> runScheduled(
+    Schedule item, {
+    bool late = false,
+  }) async {
+    if (busy) return null;
+    if (viewingDay != null) await load();
+    await _respond(null, scheduled: item, late: late);
+    final last = messages.lastOrNull;
+    final wrote = last != null && last.role == 'assistant' && last.via != 'app'
+        ? last.content
+        : '';
+    if (wrote.trim().isNotEmpty && error == null) {
+      return ScheduledOutcome(ok: true, text: wrote);
+    }
+    if (item.kind == ScheduleKind.reminder) {
+      // The reminder still reaches the human, in plain words.
+      final m = await _services.messages.add(
+        'assistant',
+        '⏰ Reminder: ${item.text}',
+        via: 'reminder',
+      );
+      messages.add(m);
+      error = null;
+      days = await _services.messages.days();
+      notifyListeners();
+      return ScheduledOutcome(ok: true, text: m.content);
+    }
+    return ScheduledOutcome(ok: false, text: error ?? 'Nothing was written.');
+  }
+
+  /// The note that starts a scheduled turn, in place of a human message.
+  String _scheduledNote(Schedule item, AppSettings s, {required bool late}) {
+    final human = humanName(s);
+    final when = late
+        ? ' It was due at ${Schedule.stamp(item.nextAt)}, but VoxCordis '
+              'wasn\'t running then, so it is late.'
+        : '';
+    return item.kind == ScheduleKind.reminder
+        ? '[Note from VoxCordis, not from $human: the reminder you set is due '
+              'now: "${item.text}".$when Remind $human of it now in a short, '
+              'natural message, in your own voice.]'
+        : '[Note from VoxCordis, not from $human: time for the task you '
+              'planned: "${item.text}".$when Do it now with your tools, then '
+              'tell $human what you found or did, briefly, in your own '
+              'voice. $human may be away from the computer, and nobody can '
+              'approve anything right now.]';
+  }
+
+  Future<void> _respond(
+    ChatMessage? userMsg, {
+    Schedule? scheduled,
+    bool late = false,
+  }) async {
     final settings = _services.settings.value;
+    final query = scheduled?.text ?? userMsg!.content;
+    final sourceIds = [?userMsg?.id];
+    _readWeb = false;
+    _unattended = scheduled?.kind == ScheduleKind.task;
     error = null;
     toolNote = null;
     stopped = false;
@@ -312,6 +526,7 @@ class ChatController extends ChangeNotifier {
     var looped = false;
     var lastFinish = '';
 
+    _services.runtime.hold();
     try {
       final target = await _services.runtime.ensureReady(settings);
       if (_stopRequested) throw const _Stopped();
@@ -331,36 +546,61 @@ class ChatController extends ChangeNotifier {
       );
       final core = await CoreRules.load(settings);
       final desk = await DeskFiles.load(settings);
-      final recalled = await _services.memory.recall(userMsg.content);
+      final recalled = MemoryTools.formatForPrompt(
+        await _services.memory.recall(query),
+      );
+      final history = alternatingHistory(
+        messages.skip(max(0, messages.length - _historyTurns)),
+      );
+      if (scheduled != null) {
+        final note = _scheduledNote(scheduled, settings, late: late);
+        // Templates want turns to alternate: after the human's own last
+        // message the note joins it.
+        if (history.isNotEmpty && history.last['role'] == 'user') {
+          final last = history.removeLast();
+          history.add({...last, 'content': '${last['content']}\n\n$note'});
+        } else {
+          history.add({'role': 'user', 'content': note});
+        }
+      }
+      var mode = Sight.modeFor(settings, blind: _blind);
+      final folder = settings.companionFolder;
+      var attachments = folder == null
+          ? null
+          : _attachments(settings, mode, folder);
       final prompt = <Map<String, Object?>>[
         {
           'role': 'system',
-          'content':
-              '${howYouTalk(settings)}\n\n'
-              '$core\n\n'
-              '## Your human\n'
-              '${aboutHuman(settings)}\n\n'
-              '$_aboutPictures\n\n'
-              '# Your personality file (personality.md)\n\n'
-              '${desk.personality}\n\n'
-              '${desk.lessons}\n\n'
-              '## What you remember\n'
-              '${MemoryTools.formatForPrompt(recalled)}\n\n'
-              // Last before the clock: small models follow what they read
-              // most recently.
-              '${aboutComputer(settings)}\n\n'
-              '## Right now\n${timeNote(DateTime.now())}',
+          'content': _systemPrompt(
+            settings,
+            mode,
+            core: core,
+            desk: desk,
+            recalled: recalled,
+          ),
         },
-        ...alternatingHistory(
-          messages.skip(max(0, messages.length - _historyTurns)),
-        ),
+        ...(await attachments?.expand(history) ?? history),
       ];
+      if (attachments?.unseen.isNotEmpty ?? false) {
+        _addNote('Eyes couldn\'t look at the picture');
+      }
+      if (_stopRequested) throw const _Stopped();
+      phase = ChatPhase.thinking;
+      notifyListeners();
 
-      var reply = await _services.messages.add('assistant', '');
+      var reply = await _services.messages.add(
+        'assistant',
+        '',
+        via: switch (scheduled?.kind) {
+          null => 'app',
+          ScheduleKind.reminder => 'reminder',
+          ScheduleKind.task => 'automation',
+        },
+      );
       replyId = reply.id;
       messages.add(reply);
 
-      final tools = toolsFor(settings);
+      final tools = toolsFor(settings, unattended: _unattended);
       final toolNames = {
         for (final t in tools) (t['function'] as Map)['name'] as String,
       };
@@ -371,7 +611,7 @@ class ChatController extends ChangeNotifier {
       // without calling anything, so a plain request like that is put to
       // the human by the app itself, and the model replies knowing how it
       // went.
-      if (settings.systemAccess) {
+      if (settings.systemAccess && userMsg != null) {
         if (await _requestedTarget(userMsg.content) case final target?) {
           final call = ToolCall(
             'askedOpen', // nine letters, as Mistral's template wants
@@ -388,7 +628,7 @@ class ChatController extends ChangeNotifier {
           });
           phase = ChatPhase.remembering;
           notifyListeners();
-          await _runCalls([call], prompt, userMsg, seen);
+          await _runCalls([call], prompt, sourceIds, seen);
           actedFirst = true;
           phase = ChatPhase.thinking;
           notifyListeners();
@@ -398,67 +638,103 @@ class ChatController extends ChangeNotifier {
         List<ToolCall>? calls;
         var checkedText = buffer.length, checkedThoughts = thoughts.length;
         endMarked = false;
-        await for (final event in client.chat(prompt, tools: tools)) {
-          switch (event) {
-            case PromptProgress(:final fraction):
-              reading = fraction;
-              _notifySoon();
-            case TextDelta(:final text):
-              // Past an end mark is the model writing on past its turn.
-              if (endMarked) continue;
-              buffer.write(text);
-              final cut = cutEndMark(buffer.toString());
-              if (cut.ended) {
-                endMarked = true;
-                buffer
-                  ..clear()
-                  ..write(cut.text);
-              }
-              reading = null;
-              phase = ChatPhase.typing;
-              if (buffer.length - checkedText >= 32) {
-                checkedText = buffer.length;
-                final all = buffer.toString();
-                if (loopCut(all) case final cut?) {
+        try {
+          await for (final event in client.chat(prompt, tools: tools)) {
+            switch (event) {
+              case PromptProgress(:final fraction):
+                reading = fraction;
+                _notifySoon();
+              case TextDelta(:final text):
+                // Past an end mark is the model writing on past its turn.
+                if (endMarked) continue;
+                buffer.write(text);
+                final cut = cutEndMark(buffer.toString());
+                if (cut.ended) {
+                  endMarked = true;
                   buffer
                     ..clear()
-                    ..write(all.substring(0, cut).trimRight());
-                  looped = true;
+                    ..write(cut.text);
                 }
-              }
-              reply = reply.withContent(shown());
-              messages[messages.length - 1] = reply;
-              _notifySoon();
-            case ReasoningDelta(:final text):
-              thoughts.write(text);
-              reading = null;
-              phase = ChatPhase.thinking;
-              if (thoughts.length - checkedThoughts >= 32) {
-                checkedThoughts = thoughts.length;
-                final all = thoughts.toString();
-                if (loopCut(all) case final cut?) {
-                  thoughts
-                    ..clear()
-                    ..write(all.substring(0, cut).trimRight());
-                  looped = true;
+                reading = null;
+                phase = ChatPhase.typing;
+                if (buffer.length - checkedText >= 32) {
+                  checkedText = buffer.length;
+                  final all = buffer.toString();
+                  if (loopCut(all) case final cut?) {
+                    buffer
+                      ..clear()
+                      ..write(all.substring(0, cut).trimRight());
+                    looped = true;
+                  }
                 }
-              }
-              reply = reply.withContent(
-                shown(),
-                reasoning: thoughts.toString(),
-              );
-              messages[messages.length - 1] = reply;
-              _notifySoon();
-            case ToolCallsRequested(calls: final c):
-              // Models sometimes invent tools; only run ours.
-              final known = [
-                for (final x in c)
-                  if (toolNames.contains(x.name)) withShortId(x),
-              ];
-              if (known.isNotEmpty) calls = known;
+                reply = reply.withContent(shown());
+                messages[messages.length - 1] = reply;
+                _notifySoon();
+              case ReasoningDelta(:final text):
+                thoughts.write(text);
+                reading = null;
+                phase = ChatPhase.thinking;
+                if (thoughts.length - checkedThoughts >= 32) {
+                  checkedThoughts = thoughts.length;
+                  final all = thoughts.toString();
+                  if (loopCut(all) case final cut?) {
+                    thoughts
+                      ..clear()
+                      ..write(all.substring(0, cut).trimRight());
+                    looped = true;
+                  }
+                }
+                reply = reply.withContent(
+                  shown(),
+                  reasoning: thoughts.toString(),
+                );
+                messages[messages.length - 1] = reply;
+                _notifySoon();
+              case ToolCallsRequested(calls: final c):
+                // Models sometimes invent tools; only run ours.
+                final known = [
+                  for (final x in c)
+                    if (toolNames.contains(x.name)) withShortId(x),
+                ];
+                if (known.isNotEmpty) calls = known;
+            }
+            // Leaving the loop closes the stream, which stops the server.
+            if (looped) break;
           }
-          // Leaving the loop closes the stream, which stops the server.
-          if (looped) break;
+        } on LlmException catch (e) {
+          // A server-hosted model that can't take pictures: send them
+          // again as Eyes sees them, or as names, and remember that.
+          if (round > 0 ||
+              attachments == null ||
+              !attachments.sentPictures ||
+              buffer.isNotEmpty ||
+              thoughts.isNotEmpty ||
+              !refusedPictures(e)) {
+            rethrow;
+          }
+          _blind.add(Sight.serverKey(settings));
+          mode = Sight.modeFor(settings, blind: _blind);
+          attachments = _attachments(settings, mode, folder!);
+          prompt.replaceRange(0, 1 + history.length, [
+            {
+              'role': 'system',
+              'content': _systemPrompt(
+                settings,
+                mode,
+                core: core,
+                desk: desk,
+                recalled: recalled,
+              ),
+            },
+            ...await attachments.expand(history),
+          ]);
+          _addNote(
+            mode == SightMode.eyes
+                ? '${settings.llmModel} can\'t see pictures, so Eyes looked'
+                : '${settings.llmModel} can\'t see pictures',
+          );
+          round--;
+          continue;
         }
         lastFinish = client.finishReason ?? '';
         if (looped ||
@@ -479,7 +755,7 @@ class ChatController extends ChangeNotifier {
           'content': shown(),
           'tool_calls': [for (final c in calls) c.toJson()],
         });
-        await _runCalls(calls, prompt, userMsg, seen);
+        await _runCalls(calls, prompt, sourceIds, seen);
         notifyListeners();
       }
       stopped = _stopRequested;
@@ -545,6 +821,7 @@ class ChatController extends ChangeNotifier {
       _stopRequested = false;
       busy = false;
       phase = ChatPhase.idle;
+      _services.runtime.release(_services.settings.value);
       days = await _services.messages.days();
       notifyListeners();
     }

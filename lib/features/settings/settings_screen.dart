@@ -10,15 +10,28 @@ import '../../data/desk/desk_files.dart';
 import '../../data/settings.dart';
 import '../../services/folder_service.dart';
 import '../../theme/app_theme.dart';
+import '../../services/changelog.dart';
 import '../../services/updater.dart';
 import '../setup/character_pickers.dart';
 import '../update/update_dialog.dart';
+import 'encryption_settings.dart';
+import 'internet_settings.dart';
+import '../update/whats_new_dialog.dart';
 import 'model_picker.dart';
+import 'sight_settings.dart';
 
 /// Minimal v1 Settings: General, Brain (the model) and Images. Other tabs arrive with the systems
 /// they control.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key});
+  const SettingsScreen({super.key, this.initialTab = 0});
+
+  /// The page to open on, e.g. [privacyTab].
+  final int initialTab;
+
+  /// Privacy: the encryption key ([EncryptionSettings]).
+  static const brainTab = 2;
+  static const internetTab = 4;
+  static const privacyTab = 5;
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -97,6 +110,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
     if (!mounted) return;
     final services = AppScope.of(context);
+    services.runtime.touch(next);
     await services.settings.update(next);
     // Load the (possibly new) model in the background so chat is ready.
     services.runtime.ensureReady(next).ignore();
@@ -122,7 +136,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 5,
+      length: 7,
+      initialIndex: widget.initialTab,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -137,6 +152,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Tab(text: 'Images'),
                 Tab(text: 'Brain'),
                 Tab(text: 'Computer'),
+                Tab(text: 'Internet'),
+                Tab(text: 'Privacy'),
                 Tab(text: 'About'),
               ],
             ),
@@ -159,12 +176,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     onChanged: (v) => setState(() => _draft = v),
                   ),
                   const SizedBox(height: 28),
+                  SightSettings(
+                    value: _draft,
+                    onChanged: (v) => setState(() => _draft = v),
+                  ),
+                  const SizedBox(height: 28),
                   BrainAdvanced(
                     value: _draft,
                     onChanged: (v) => setState(() => _draft = v),
                   ),
                 ]),
                 _page(const [_SystemAccess()]),
+                _page([
+                  InternetSettings(
+                    value: _draft,
+                    onChanged: (v) => setState(() => _draft = v),
+                  ),
+                ]),
+                _page(const [_Section('Encryption'), EncryptionSettings()]),
                 _page(const [SizedBox(height: 18), _UpdateRow()]),
               ],
             ),
@@ -298,6 +327,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         onChanged: (v) =>
             setState(() => _draft = _draft.copyWith(userPronouns: v)),
       ),
+      _Section('In the background'),
+      _Background(value: _draft, onChanged: (v) => setState(() => _draft = v)),
       _Section(name),
       _CompanionFiles(
         name: name,
@@ -324,6 +355,96 @@ class _SettingsScreenState extends State<SettingsScreen> {
       decoration: InputDecoration(labelText: label, hintText: hint),
     ),
   );
+}
+
+/// Keep running with the window closed, start with the computer, the
+/// daily limit for tasks, and Quit.
+class _Background extends StatelessWidget {
+  const _Background({required this.value, required this.onChanged});
+
+  final AppSettings value;
+  final ValueChanged<AppSettings> onChanged;
+
+  static const _limits = [5, 10, 24, 50, 100];
+
+  @override
+  Widget build(BuildContext context) {
+    final name = value.companionName;
+    final muted = TextStyle(fontSize: 12, color: context.palette.textMuted);
+    final background = AppScope.of(context).background;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: value.keepRunning,
+          onChanged: (on) => onChanged(value.copyWith(keepRunning: on)),
+          title: const Text('Keep running when I close the window'),
+          subtitle: Text(
+            'The window goes to the taskbar instead, so $name\'s reminders '
+            'and tasks still happen. Quit below closes VoxCordis for real.',
+            style: muted,
+          ),
+        ),
+        if (!Platform.isMacOS)
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: value.startWithComputer,
+            onChanged: (on) => onChanged(value.copyWith(startWithComputer: on)),
+            title: const Text('Start with my computer'),
+            subtitle: Text(
+              value.keepRunning
+                  ? 'Starts in the taskbar when you log in.'
+                  : 'Starts when you log in.',
+              style: muted,
+            ),
+          ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Most tasks $name may run a day',
+                style: TextStyle(color: context.palette.text),
+              ),
+            ),
+            DropdownButton<int>(
+              value: _limits.contains(value.automationRunsPerDay)
+                  ? value.automationRunsPerDay
+                  : 24,
+              items: [
+                for (final n in _limits)
+                  DropdownMenuItem(value: n, child: Text('$n')),
+              ],
+              onChanged: (n) {
+                if (n != null) {
+                  onChanged(value.copyWith(automationRunsPerDay: n));
+                }
+              },
+            ),
+            const SizedBox(width: 8),
+            const InfoIcon(
+              message:
+                  'Each task run is a reply from the brain. With a '
+                  'server-hosted brain every run costs a little, so this '
+                  'caps a mistake like a task set to run every 15 minutes.',
+            ),
+          ],
+        ),
+        if (background != null) ...[
+          const SizedBox(height: 10),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: OutlinedButton.icon(
+              onPressed: background.quit,
+              icon: const Icon(Icons.power_settings_new_rounded),
+              label: const Text('Quit VoxCordis'),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
 }
 
 class _Section extends StatelessWidget {
@@ -510,6 +631,15 @@ class _UpdateRow extends StatelessWidget {
                 icon: const Icon(Icons.refresh_rounded),
                 label: const Text('Check for updates'),
               ),
+            TextButton.icon(
+              onPressed: () async {
+                final entry = await WhatsNew.latest();
+                if (entry == null || !context.mounted) return;
+                await showWhatsNew(context, [entry], host: const _NoHost());
+              },
+              icon: const Icon(Icons.auto_awesome_outlined),
+              label: const Text('What\'s new'),
+            ),
             if (status.isNotEmpty)
               Text(
                 status,
@@ -524,6 +654,14 @@ class _UpdateRow extends StatelessWidget {
       },
     );
   }
+}
+
+/// Already in Settings, so an action there just closes the notes.
+class _NoHost implements WhatsNewHost {
+  const _NoHost();
+
+  @override
+  void openSettings({int tab = 0}) {}
 }
 
 /// The companion's own section: a plain note on how to change who they are,

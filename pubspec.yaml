@@ -1,7 +1,7 @@
 name: companion
 description: A private AI companion for the desktop. Runs a local LLM, keeps its files in a real folder and remembers in a memory you can edit.
 publish_to: 'none'
-version: 0.2.0+2
+version: 0.2.3+3
 
 environment:
   sdk: ^3.8.0
@@ -15,6 +15,7 @@ dependencies:
   path: ^1.9.0
   path_provider: ^2.1.4
   sqflite_common_ffi: ^2.3.4
+  sqlite3: ^3.5.2
   url_launcher: ^6.3.1
   uuid: ^4.5.1
   intl: ^0.20.3
@@ -23,6 +24,11 @@ dependencies:
   desktop_webview_window: ^0.4.0
   ffi: ^2.1.0
   cryptography: ^2.9.0
+  desktop_drop: 0.8.4
+  image: 4.10.1
+  pasteboard: 0.5.0
+  html: ^0.15.7
+  window_manager: ^0.5.2
 
 dev_dependencies:
   flutter_test:
@@ -32,5 +38,13 @@ dev_dependencies:
 flutter:
   uses-material-design: true
   assets:
+    - CHANGELOG.md
     - assets/brand/
     - assets/chat_templates/
+
+hooks:
+  user_defines:
+    sqlite3:
+      # SQLite3 Multiple Ciphers: SQLite with encryption (PRAGMA key), no
+      # OpenSSL needed. Every companion database is encrypted with it.
+      source: sqlite3mc

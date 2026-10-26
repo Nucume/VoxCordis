@@ -312,6 +312,19 @@ class _ImportReviewState extends State<ImportReview> {
               style: small,
             ),
           ),
+          if (nemini.taskCount > 0)
+            CheckboxListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              value: nemini.tasks,
+              onChanged: (v) => setState(() => nemini.tasks = v!),
+              title: Text('${nemini.taskCount} reminders and automations'),
+              subtitle: Text(
+                'They arrive paused: check each one in the Plans tab and '
+                'resume the ones you want.',
+                style: small,
+              ),
+            ),
           if (nemini.otherFiles.isNotEmpty) _OtherDeskFiles(nemini),
           if (c.lessons != null)
             Text(

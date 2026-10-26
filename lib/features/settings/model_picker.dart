@@ -12,6 +12,7 @@ import '../../services/llm_client.dart';
 import '../../services/llm_providers.dart';
 import '../../services/runtime/gpu_info.dart';
 import '../../services/runtime/model_catalog.dart';
+import '../../services/sight.dart';
 import '../../theme/app_theme.dart';
 
 /// Chooses the companion's brain: a model for the built-in runtime (download
@@ -181,7 +182,15 @@ class _ModelPickerState extends State<ModelPicker> {
     );
     if (file == null) return;
     // Large files stay where they are; the app only remembers the path.
-    widget.onChanged(_fitSpan(_v.copyWith(modelPath: file.path)));
+    // A vision file lying next to it comes along, so the model can see.
+    final mmproj = ModelCatalog.mmprojBeside(file.path);
+    widget.onChanged(
+      _fitSpan(
+        mmproj == null
+            ? _v.copyWith(modelPath: file.path, clearMmproj: true)
+            : _v.copyWith(modelPath: file.path, mmprojPath: mmproj),
+      ),
+    );
   }
 
   /// Moves every downloaded model to a folder the user picks. The runtime
@@ -234,7 +243,7 @@ class _ModelPickerState extends State<ModelPicker> {
       ),
     );
     try {
-      await runtime.stop();
+      await runtime.stopAll();
       await ModelCatalog.moveFolder(
         from,
         to,
@@ -383,6 +392,7 @@ class _ModelPickerState extends State<ModelPicker> {
                 '${m.blurb}\n${m.sizeGb.toStringAsFixed(1)} GB download · '
                 'about ${m.minMemoryGb} GB of graphics memory',
             uncensored: m.uncensored,
+            sees: m.canSee,
             danger: m.huge
                 ? 'Huge: ${m.sizeGb.round()} GB on disk and about '
                       '${m.minMemoryGb} GB of memory. Workstations only.'
@@ -465,14 +475,37 @@ class _ModelPickerState extends State<ModelPicker> {
                             'times faster than the main processor.\n\n'
                             'While VoxCordis is open the model stays in '
                             'graphics memory, so games and other GPU-heavy '
-                            'apps will run much worse. Close VoxCordis (or '
-                            'turn this off) before gaming.'
+                            'apps will run much worse. Turn on "Free the '
+                            'graphics card when I\'m not chatting", or close '
+                            'VoxCordis, before gaming.'
                       : 'Off: the model runs on the main processor only. '
                             'Nothing else on your graphics card is affected, '
                             'but replies come much more slowly.',
                 ),
               ],
             ),
+            if (_v.useGpu)
+              Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Switch(
+                    value: _v.freeGpuWhenIdle,
+                    onChanged: (on) =>
+                        widget.onChanged(_v.copyWith(freeGpuWhenIdle: on)),
+                  ),
+                  const SizedBox(width: 8),
+                  const Text('Free the graphics card when I\'m not chatting'),
+                  const SizedBox(width: 6),
+                  const InfoIcon(
+                    message:
+                        'For gaming with VoxCordis open: after a minute '
+                        'without typing, the model (and Eyes) leave graphics '
+                        'memory. Typing loads the model again, which takes '
+                        'from a few seconds to a minute, so the first reply '
+                        'after a break can be slower.',
+                  ),
+                ],
+              ),
             Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -565,9 +598,18 @@ class _ModelPickerState extends State<ModelPicker> {
       if (!custom) ...[
         const SizedBox(height: 4),
         Text(
-          'Your chats are sent to ${provider.label} and its usage rules '
-          'apply. Each message costs a little from your ${provider.label} '
-          'credit.',
+          'Everything your companion reads is sent to ${provider.label}, and '
+          'its usage rules apply: your messages, the pictures and files you '
+          'share, and the memories and notes in its prompt. Each message '
+          'costs a little from your ${provider.label} credit.',
+          style: muted,
+        ),
+      ] else if (Sight.picturesLeave(_v)) ...[
+        const SizedBox(height: 4),
+        Text(
+          'This server isn\'t on your computer or home network: your '
+          'messages, the pictures and files you share, and the memories and '
+          'notes in the prompt are sent to it.',
           style: muted,
         ),
       ],
@@ -755,6 +797,7 @@ class _ModelCard extends StatelessWidget {
     this.warning,
     this.danger,
     this.uncensored = false,
+    this.sees = false,
     this.recommended = false,
     required this.selected,
     required this.downloaded,
@@ -772,6 +815,9 @@ class _ModelCard extends StatelessWidget {
   /// Shown in red, in place of [warning].
   final String? danger;
   final bool uncensored;
+
+  /// Sees the pictures shared in the chat itself.
+  final bool sees;
   final bool recommended;
   final bool selected;
   final bool downloaded;
@@ -865,6 +911,28 @@ class _ModelCard extends StatelessWidget {
                         child: const Text(
                           'Recommended for you',
                           style: TextStyle(fontSize: 11),
+                        ),
+                      ),
+                    ],
+                    if (sees) ...[
+                      const SizedBox(width: 8),
+                      Tooltip(
+                        message:
+                            'Looks at the pictures you share itself, without '
+                            'Eyes.',
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: context.palette.tile,
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: const Text(
+                            'Sees pictures',
+                            style: TextStyle(fontSize: 11),
+                          ),
                         ),
                       ),
                     ],

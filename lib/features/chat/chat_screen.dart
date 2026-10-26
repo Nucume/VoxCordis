@@ -1,14 +1,21 @@
 import 'dart:io';
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
+import 'package:pasteboard/pasteboard.dart';
+import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_scope.dart';
 import '../../data/desk/pictures.dart';
+import '../../data/desk/shared_files.dart';
 import '../../data/message_repository.dart';
+import '../../data/settings.dart';
+import '../../services/llm_providers.dart';
+import '../../services/sight.dart';
 import '../../theme/app_theme.dart';
 import 'chat_controller.dart';
 import 'chat_text.dart';
@@ -29,12 +36,19 @@ class _ChatScreenState extends State<ChatScreen> {
   /// Pictures picked to go with the next message.
   final _pending = <String>[];
 
+  /// Text files picked to go with the next message.
+  final _pendingFiles = <String>[];
+
+  /// Files are being dragged over the chat.
+  bool _dropping = false;
+
   ChatController get _chat => widget.chat;
 
   @override
   void initState() {
     super.initState();
     _chat.addListener(_onChat);
+    _input.addListener(_onTyping);
     _jumpToEnd();
   }
 
@@ -44,6 +58,13 @@ class _ChatScreenState extends State<ChatScreen> {
     _input.dispose();
     _scroll.dispose();
     super.dispose();
+  }
+
+  /// Typing keeps the model loaded, and loads it again when it was let go
+  /// to free the graphics card, so it's ready by the time they send.
+  void _onTyping() {
+    final services = AppScope.of(context);
+    services.runtime.touch(services.settings.value, warm: true);
   }
 
   void _onChat() {
@@ -87,23 +108,135 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  void _send() {
+  Future<void> _send() async {
     final text = _input.text;
-    if ((text.trim().isEmpty && _pending.isEmpty) || _chat.busy) return;
+    final nothing =
+        text.trim().isEmpty && _pending.isEmpty && _pendingFiles.isEmpty;
+    if (nothing || _chat.busy) return;
     final images = [..._pending];
+    final files = [..._pendingFiles];
+    if (images.isNotEmpty && !await _okToSendPictures()) return;
     _input.clear();
-    setState(_pending.clear);
-    _chat.send(text, images: images);
+    setState(() {
+      _pending.clear();
+      _pendingFiles.clear();
+    });
+    _chat.send(text, images: images, files: files);
   }
 
-  Future<void> _pickPictures() async {
+  /// The first time pictures would go to a server-hosted brain, says so
+  /// and asks. True when they may go.
+  Future<bool> _okToSendPictures() async {
+    final store = AppScope.of(context).settings;
+    final s = store.value;
+    if (!Sight.picturesLeave(s) || s.picturesToServerOk) return true;
+    final provider = LlmProvider.forEndpoint(s.llmEndpoint);
+    final where = provider == LlmProvider.custom
+        ? Uri.tryParse(s.llmEndpoint)?.host ?? s.llmEndpoint
+        : provider.label;
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.image_outlined),
+        title: Text('Send pictures to $where?'),
+        content: SizedBox(
+          width: 420,
+          child: Text(
+            '${s.companionName}\'s brain is server-hosted, so the pictures '
+            'you share go to $where with your message, for the model to look '
+            'at. Like your messages, they are handled under $where\'s terms.'
+            '\n\nIf the model can\'t see, Eyes describes them on this '
+            'computer instead (Settings → Brain).',
+            style: const TextStyle(height: 1.4),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Send'),
+          ),
+        ],
+      ),
+    );
+    if (ok != true) return false;
+    await store.update(store.value.copyWith(picturesToServerOk: true));
+    return true;
+  }
+
+  Future<void> _pickFiles() async {
     final files = await openFiles(
       acceptedTypeGroups: [
-        XTypeGroup(label: 'Pictures', extensions: Pictures.extensions),
+        XTypeGroup(
+          label: 'Pictures and text files',
+          extensions: [...Pictures.extensions, ...SharedFiles.textExtensions],
+        ),
       ],
     );
-    if (files.isEmpty) return;
-    setState(() => _pending.addAll(files.map((f) => f.path)));
+    await _addPaths([for (final f in files) f.path]);
+  }
+
+  /// Sorts picked, dropped or pasted files into pictures and text files,
+  /// and says which can't be shared.
+  Future<void> _addPaths(List<String> paths) async {
+    final refused = <String>[];
+    final pictures = <String>[], texts = <String>[];
+    for (final path in paths) {
+      switch (await SharedFiles.kindOf(path)) {
+        case SharedKind.picture:
+          pictures.add(path);
+        case SharedKind.text:
+          texts.add(path);
+        case null:
+          refused.add(p.basename(path));
+      }
+    }
+    if (!mounted) return;
+    setState(() {
+      _pending.addAll(pictures.where((x) => !_pending.contains(x)));
+      _pendingFiles.addAll(texts.where((x) => !_pendingFiles.contains(x)));
+    });
+    if (refused.isNotEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${refused.join(', ')}: only pictures (PNG, JPEG, WebP) and '
+            'text files can be shared for now.',
+          ),
+        ),
+      );
+    }
+  }
+
+  /// Ctrl+V: files copied in the file manager and copied pictures are
+  /// added to the message; text is pasted into it as usual.
+  Future<void> _paste() async {
+    final context = primaryFocus?.context;
+    try {
+      final files = await Pasteboard.files();
+      if (files.isNotEmpty) return await _addPaths(files);
+      if (!await Clipboard.hasStrings()) {
+        final bytes = await Pasteboard.image;
+        final picture = bytes == null ? null : Sight.normalizePasted(bytes);
+        if (picture != null) {
+          final dir = await Directory.systemTemp.createTemp('voxcordis-paste');
+          final file = File(p.join(dir.path, 'pasted.png'));
+          await file.writeAsBytes(picture);
+          return await _addPaths([file.path]);
+        }
+      }
+    } on Object {
+      // The clipboard couldn't be read as files or a picture: paste text.
+    }
+    if (context != null && context.mounted) {
+      Actions.maybeInvoke(
+        context,
+        const PasteTextIntent(SelectionChangedCause.keyboard),
+      );
+    }
   }
 
   Future<void> _confirmDelete(ChatMessage m) async {
@@ -204,6 +337,43 @@ class _ChatScreenState extends State<ChatScreen> {
   Widget build(BuildContext context) {
     final settings = AppScope.of(context).settings.value;
     final accent = Theme.of(context).colorScheme.primary;
+    // Pictures and text files dropped anywhere on the chat go with the
+    // next message.
+    return DropTarget(
+      enable: settings.isSetUp,
+      onDragEntered: (_) => setState(() => _dropping = true),
+      onDragExited: (_) => setState(() => _dropping = false),
+      onDragDone: (d) {
+        setState(() => _dropping = false);
+        _addPaths([for (final f in d.files) f.path]);
+      },
+      child: Stack(
+        children: [
+          _chatColumn(settings, accent),
+          if (_dropping)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  margin: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: accent.withValues(alpha: 0.12),
+                    border: Border.all(color: accent, width: 2),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  alignment: Alignment.center,
+                  child: Text(
+                    'Drop to share with ${settings.companionName}',
+                    style: Theme.of(context).textTheme.titleMedium,
+                  ),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _chatColumn(AppSettings settings, Color accent) {
     return ListenableBuilder(
       listenable: _chat,
       builder: (context, _) {
@@ -325,7 +495,7 @@ class _ChatScreenState extends State<ChatScreen> {
                   ],
                 ),
               ),
-            if (_pending.isNotEmpty)
+            if (_pending.isNotEmpty || _pendingFiles.isNotEmpty)
               Container(
                 padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
                 alignment: Alignment.centerLeft,
@@ -338,6 +508,13 @@ class _ChatScreenState extends State<ChatScreen> {
                         path: path,
                         onRemove: () => setState(() => _pending.remove(path)),
                       ),
+                    for (final path in _pendingFiles)
+                      InputChip(
+                        avatar: const Icon(Icons.description_outlined),
+                        label: Text(p.basename(path)),
+                        onDeleted: () =>
+                            setState(() => _pendingFiles.remove(path)),
+                      ),
                   ],
                 ),
               ),
@@ -347,6 +524,10 @@ class _ChatScreenState extends State<ChatScreen> {
                 bindings: {
                   // Enter sends; Shift+Enter makes a new line.
                   const SingleActivator(LogicalKeyboardKey.enter): _send,
+                  const SingleActivator(LogicalKeyboardKey.keyV, control: true):
+                      _paste,
+                  const SingleActivator(LogicalKeyboardKey.keyV, meta: true):
+                      _paste,
                 },
                 child: TextField(
                   controller: _input,
@@ -361,10 +542,10 @@ class _ChatScreenState extends State<ChatScreen> {
                       padding: const EdgeInsets.only(left: 6),
                       child: IconButton(
                         onPressed: settings.isSetUp && !_chat.busy
-                            ? _pickPictures
+                            ? _pickFiles
                             : null,
-                        tooltip: 'Share a picture',
-                        icon: const Icon(Icons.add_photo_alternate_outlined),
+                        tooltip: 'Share a picture or file',
+                        icon: const Icon(Icons.attach_file_rounded),
                       ),
                     ),
                     suffixIcon: Padding(
@@ -521,9 +702,10 @@ class _BubbleState extends State<_Bubble> {
     final mine = message.role == 'user';
     final accent = Theme.of(context).colorScheme.primary;
     final pictures = Pictures.inText(message.content);
-    final text = pictures.isEmpty
+    final files = SharedFiles.inText(message.content);
+    final text = pictures.isEmpty && files.isEmpty
         ? message.content
-        : Pictures.withoutMarkers(message.content);
+        : SharedFiles.withoutMarkers(message.content);
 
     final actions = AnimatedOpacity(
       opacity: _hover && message.content.isNotEmpty ? 1 : 0,
@@ -622,6 +804,18 @@ class _BubbleState extends State<_Bubble> {
                           ],
                         ),
                       ),
+                    if (files.isNotEmpty)
+                      Padding(
+                        padding: EdgeInsets.only(bottom: text.isEmpty ? 0 : 8),
+                        child: Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final rel in files)
+                              _SharedFile(folder: widget.folder, path: rel),
+                          ],
+                        ),
+                      ),
                     if (text.isNotEmpty)
                       SelectableText.rich(
                         formatChat(
@@ -683,6 +877,28 @@ class _SharedPicture extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// A text file the human shared. A click shows it in its folder: opening
+/// the file itself could run it, if it is a script.
+class _SharedFile extends StatelessWidget {
+  const _SharedFile({required this.folder, required this.path});
+
+  final String? folder;
+  final String path;
+
+  @override
+  Widget build(BuildContext context) {
+    final file = folder == null ? null : SharedFiles.fileIn(folder!, path);
+    return ActionChip(
+      avatar: const Icon(Icons.description_outlined),
+      label: Text(p.posix.basename(path)),
+      tooltip: 'Show in folder',
+      onPressed: file == null
+          ? null
+          : () => launchUrl(Uri.directory(file.parent.path)),
     );
   }
 }
@@ -817,6 +1033,10 @@ class _StatusLine extends StatelessWidget {
       ChatPhase.remembering => (
         Icons.auto_awesome_outlined,
         '$name is updating memories',
+      ),
+      ChatPhase.looking => (
+        Icons.visibility_outlined,
+        '$name is looking at the picture',
       ),
       ChatPhase.idle => (Icons.circle, ''),
     };

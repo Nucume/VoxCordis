@@ -1,25 +1,38 @@
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import 'database_key.dart';
+
 /// Opens the app database and creates the v1 schema.
 ///
-/// Uses the FFI build of sqflite, which works on Linux, macOS and Windows.
-/// Pass [inMemoryDatabasePath] as [path] in tests.
-Future<Database> openAppDatabase(String path) async {
+/// Uses the FFI build of sqflite, which works on Linux, macOS and Windows,
+/// on SQLite3 Multiple Ciphers: with a [key] (see [DatabaseKey]) everything
+/// in the file is encrypted. Pass [inMemoryDatabasePath] as [path] in tests.
+Future<Database> openAppDatabase(String path, {String? key}) async {
   sqfliteFfiInit();
   return databaseFactoryFfi.openDatabase(
     path,
     options: OpenDatabaseOptions(
-      version: 2,
-      onConfigure: (db) => db.execute('PRAGMA foreign_keys = ON'),
+      version: 4,
+      onConfigure: (db) async {
+        // The key comes first: nothing in the file is readable before it.
+        if (key != null) {
+          await db.execute('PRAGMA key = ${DatabaseKey.quote(key)}');
+        }
+        await db.execute('PRAGMA foreign_keys = ON');
+      },
       onCreate: (db, _) async {
         final batch = db.batch();
         _createV1(batch);
         _upgradeToV2(batch);
+        _upgradeToV3(batch);
+        _upgradeToV4(batch);
         await batch.commit(noResult: true);
       },
       onUpgrade: (db, from, _) async {
         final batch = db.batch();
         if (from < 2) _upgradeToV2(batch);
+        if (from < 3) _upgradeToV3(batch);
+        if (from < 4) _upgradeToV4(batch);
         await batch.commit(noResult: true);
       },
     ),
@@ -72,4 +85,43 @@ void _createV1(Batch b) {
 /// deleted at once.
 void _upgradeToV2(Batch b) {
   b.execute('ALTER TABLE memories ADD COLUMN forgotten_at TEXT');
+}
+
+/// v3: what a shared picture shows, written once by the vision model that
+/// looked at it, so later turns can mention it without sending it again.
+void _upgradeToV3(Batch b) {
+  b.execute('''
+    CREATE TABLE picture_notes (
+      path        TEXT PRIMARY KEY,
+      description TEXT NOT NULL,
+      seen_by     TEXT NOT NULL,
+      created_at  TEXT NOT NULL
+    )''');
+}
+
+/// v4: reminders and automations the companion (or the human) set, and a
+/// log of each automation run. Times are UTC ISO 8601.
+void _upgradeToV4(Batch b) {
+  b.execute('''
+    CREATE TABLE schedules (
+      id           TEXT PRIMARY KEY,
+      kind         TEXT NOT NULL,
+      text         TEXT NOT NULL,
+      next_at      TEXT NOT NULL,
+      repeat       TEXT NOT NULL DEFAULT '',
+      active       INTEGER NOT NULL DEFAULT 1,
+      created_at   TEXT NOT NULL,
+      last_run_at  TEXT,
+      origin       TEXT NOT NULL DEFAULT 'chat'
+    )''');
+  b.execute('CREATE INDEX schedules_due ON schedules(active, next_at)');
+  b.execute('''
+    CREATE TABLE schedule_runs (
+      id           TEXT PRIMARY KEY,
+      schedule_id  TEXT NOT NULL,
+      started_at   TEXT NOT NULL,
+      ok           INTEGER NOT NULL,
+      summary      TEXT NOT NULL DEFAULT ''
+    )''');
+  b.execute('CREATE INDEX schedule_runs_started ON schedule_runs(started_at)');
 }

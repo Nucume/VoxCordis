@@ -43,12 +43,15 @@ is installed.
 - **Long-term memory search** is keyword based; search by meaning is planned.
 - **Not yet:** automations, connectors (calendar, MCP), voice.
 - **macOS** builds from source but has no installer or updates yet.
-- **Encryption:** chats and memories are private to your user account but not
-  yet encrypted on disk. Encryption, on by default, is planned next.
 
 ## Privacy and security
 
 - Everything stays on your computer unless you choose a server-hosted brain.
+- Chats and memories are encrypted on disk (SQLite3 Multiple Ciphers,
+  ChaCha20-Poly1305) with a random key kept in your keyring (Linux) or
+  encrypted for your account (Windows), so the app opens without a password.
+  Settings → Privacy shows the key to keep, makes a new one or uses your own
+  password. On another computer the app asks for it.
 - An API key is kept in your desktop keyring (Linux) or encrypted for your
   account (Windows), never in the settings file.
 - App data and companion folders are readable only by your user account.
