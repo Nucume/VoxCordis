@@ -1,0 +1,71 @@
+
+/* ---------- Narrow screens: the header's links fold into a menu ---------- */
+.menu { display: none; position: relative; }
+.menu summary { list-style: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; cursor: pointer; color: var(--muted); }
+.menu summary::-webkit-details-marker { display: none; }
+.menu summary:hover { background: var(--tile); color: var(--ink); }
+.menu summary svg { width: 22px; height: 22px; }
+.menu nav { position: absolute; right: 0; top: calc(100% + 8px); min-width: 210px; display: grid; padding: 6px; border-radius: 14px;
+  background: color-mix(in oklab, var(--bg, var(--base)) 94%, var(--ink)); border: 1px solid var(--line); box-shadow: 0 24px 48px -20px rgb(0 0 0 / .6); }
+.menu nav a { padding: 9px 12px; border-radius: 9px; text-decoration: none; color: var(--muted); }
+.menu nav a:hover { background: var(--tile); color: var(--ink); }
+@media (max-width: 900px) { .docked .menu { display: block; } }
+
+/* ---------- Folding sections: privacy details, the guide, questions ---------- */
+.qas { max-width: 52em; margin-top: 24px; border-top: 1px solid var(--line); }
+.qa { border-bottom: 1px solid var(--line); scroll-margin-top: calc(var(--bar) + 16px); }
+.qa summary { list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 15px 2px; cursor: pointer; font-weight: 600; color: var(--ink); }
+.qa summary::-webkit-details-marker { display: none; }
+.qa summary::after { content: ""; flex: none; width: 9px; height: 9px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: translateY(-3px) rotate(45deg); transition: transform .25s; }
+.qa[open] summary::after { transform: translateY(2px) rotate(-135deg); }
+.qa summary:hover { color: var(--accent-text); }
+.qa > div { padding: 0 2px 18px; color: var(--muted); }
+.qa > div > p { margin: 0 0 10px; }
+.qa.ch summary { font-size: 1.06rem; padding-block: 17px; }
+.prose { color: color-mix(in oklab, var(--ink) 84%, transparent); }
+.prose p { margin: 0 0 12px; }
+.prose ul { margin: 0 0 14px; padding-left: 1.25em; display: grid; gap: 6px; }
+.prose li::marker { color: var(--accent-text); }
+.prose dl { margin: 0 0 12px; display: grid; gap: 4px; }
+.prose dt { font-weight: 600; color: var(--ink); margin-top: 10px; } .prose dd { margin: 0; }
+.qa a { color: var(--accent-text); text-underline-offset: 3px; }
+.qa code { padding: 1px 6px; border-radius: 6px; background: var(--tile); }
+.qa .term { margin-top: 4px; } .qa .term code { padding: 0; background: none; }
+.tbl-wrap { overflow-x: auto; margin: 4px 0 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.tbl { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.tbl th { text-align: left; font-weight: 600; color: var(--muted); font-size: .82rem; }
+.tbl th, .tbl td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl td:first-child { color: var(--ink); font-weight: 500; white-space: nowrap; }
+.tbl code { white-space: nowrap; }
+.qa-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px 48px; margin-top: 24px; align-items: start; }
+.qa-group h3 { margin: 0 0 6px; font-size: 1.05rem; color: var(--muted); font-weight: 600; }
+.qa-group .qa:first-of-type { border-top: 1px solid var(--line); }
+
+/* ---------- Setting it up ---------- */
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
+.two .card, .wide { display: grid; gap: 10px; align-content: start; }
+.two h3, .wide h3 { margin: 0; font-size: 1.15rem; }
+.two p, .wide p { margin: 0; color: var(--muted); font-size: .96rem; }
+.two small { color: var(--faint); font-size: .86rem; padding-top: 10px; border-top: 1px solid var(--line); }
+.wide { margin-top: 16px; }
+.tag { justify-self: start; font-size: .78rem; padding: 2px 10px; border-radius: 99px; background: color-mix(in oklab, var(--accent) 20%, transparent); color: var(--accent-text); }
+
+/* ---------- Footer ---------- */
+footer.site { display: block; margin-top: 110px; padding-block: 36px 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: .92rem; }
+.fone { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 36px; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand .logo { width: 34px; height: 33px; }
+.site .word { font-size: .82rem; letter-spacing: .2em; margin-right: 0; }
+.look { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.look .ways { gap: 5px; }
+.look .way { padding: 3px; border-radius: 50%; } .look .way span { display: none; } .look .way i { width: 18px; height: 18px; }
+.look .seg button { padding: 4px 11px; font-size: .82rem; }
+.fone nav { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-left: auto; }
+.fone nav a { text-decoration: none; } .fone nav a:hover { color: var(--ink); }
+.fbase { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--faint); font-size: .86rem; }
+
+@media (max-width: 900px) {
+  .two, .qa-grid { grid-template-columns: 1fr; } .qa-grid { gap: 28px; }
+  .fone nav { margin-left: 0; }
+}

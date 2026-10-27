@@ -1,0 +1,84 @@
+# Publishes the website (website/, built by website/build.py) to the root of
+# the gh-pages branch, which GitHub Pages serves ("deploy from a branch",
+# gh-pages, /). The release workflow keeps the apt and dnf repository in
+# repo/ on the same branch, so this leaves repo/ exactly as it is.
+#
+# Runs when website/ changes on main (a pull request here, or the source a
+# release brings over), and by hand from Actions -> Website -> Run workflow.
+name: Website
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'website/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: website
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+      pages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: python3 website/build.py
+      - name: Put the site on gh-pages
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          site="$RUNNER_TEMP/site"
+          published=false
+          for attempt in 1 2 3 4; do
+            rm -rf "$site"
+            if git ls-remote --exit-code --heads "$url" gh-pages >/dev/null 2>&1; then
+              git clone -q --depth 1 --branch gh-pages "$url" "$site"
+              lease=$(git -C "$site" rev-parse HEAD)
+            else
+              git init -q -b gh-pages "$site"
+              git -C "$site" remote add origin "$url"
+              lease=
+            fi
+            # Everything but repo/ is the website: replace it whole, so files
+            # the site no longer has don't linger.
+            find "$site" -mindepth 1 -maxdepth 1 ! -name .git ! -name repo -exec rm -rf {} +
+            cp -R website/out/. "$site/"
+            touch "$site/.nojekyll"
+            git -C "$site" add -A
+            if [ -n "$lease" ] && git -C "$site" diff --cached --quiet; then
+              echo "The site on gh-pages is already up to date."; published=true; break
+            fi
+            # One fresh commit, like the release workflow does, so the
+            # branch doesn't pile up old packages.
+            git -C "$site" checkout -q --orphan fresh
+            git -C "$site" -c user.name=Nucume \
+                -c user.email=119841008+Nucume@users.noreply.github.com \
+                commit -q -m "Website from ${GITHUB_SHA::7}"
+            # A release may have updated repo/ meanwhile: then the lease
+            # fails and this runs again on top of it.
+            if git -C "$site" push -q --force-with-lease="gh-pages:$lease" origin fresh:gh-pages; then
+              published=true; break
+            fi
+            sleep $((attempt * 10))
+          done
+          $published || { echo "::error::Could not update gh-pages."; exit 1; }
+          # The first time, switch Pages on for gh-pages /. After that, a
+          # push made with the workflow token may not start a Pages build by
+          # itself, so ask for one.
+          if ! gh api "repos/$GITHUB_REPOSITORY/pages" >/dev/null 2>&1; then
+            gh api -X POST "repos/$GITHUB_REPOSITORY/pages" \
+                -f 'source[branch]=gh-pages' -f 'source[path]=/' >/dev/null \
+              || echo "::warning::Could not switch Pages on; choose gh-pages / in Settings > Pages."
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" >/dev/null \
+              || echo "::warning::Could not start a Pages build; check Settings > Pages."
+          fi
