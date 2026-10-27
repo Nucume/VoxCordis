@@ -52,7 +52,18 @@ class _ImagesScreenState extends State<ImagesScreen> {
     _images ??= _listImages(
       AppScope.of(context).settings.value.companionFolder,
     );
+    // The screen stays built while another tab is open; coming back, look
+    // for pictures drawn (or added to the folder) meanwhile.
+    final shown = TickerMode.valuesOf(context).enabled;
+    if (shown && !_shown) {
+      _images = _listImages(
+        AppScope.of(context).settings.value.companionFolder,
+      );
+    }
+    _shown = shown;
   }
+
+  bool _shown = true;
 
   @override
   void dispose() {
@@ -84,7 +95,8 @@ class _ImagesScreenState extends State<ImagesScreen> {
         )
         .cast<File>()
         .toList();
-    files.sort((a, b) => b.lastModifiedSync().compareTo(a.lastModifiedSync()));
+    final stamps = {for (final f in files) f: await f.lastModified()};
+    files.sort((a, b) => stamps[b]!.compareTo(stamps[a]!));
     return files;
   }
 
@@ -153,86 +165,104 @@ class _ImagesScreenState extends State<ImagesScreen> {
         final titleStyle = Theme.of(
           context,
         ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w600);
-        return ListView(
-          padding: const EdgeInsets.fromLTRB(24, 12, 24, 24),
-          children: [
-            Row(
-              children: [
-                Expanded(child: Text('Pictures', style: titleStyle)),
-                if (canDraw)
-                  FilledButton.tonalIcon(
-                    onPressed: () => setState(() => _drawOpen = !_drawOpen),
-                    icon: Icon(
-                      _drawOpen ? Icons.close_rounded : Icons.brush_rounded,
-                      size: 18,
-                    ),
-                    label: Text(_drawOpen ? 'Close' : 'Draw'),
+        // Slivers, so only the thumbnails in view are built and decoded,
+        // not the whole gallery at once.
+        return CustomScrollView(
+          slivers: [
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+              sliver: SliverList.list(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(child: Text('Pictures', style: titleStyle)),
+                      if (canDraw)
+                        FilledButton.tonalIcon(
+                          onPressed: () =>
+                              setState(() => _drawOpen = !_drawOpen),
+                          icon: Icon(
+                            _drawOpen
+                                ? Icons.close_rounded
+                                : Icons.brush_rounded,
+                            size: 18,
+                          ),
+                          label: Text(_drawOpen ? 'Close' : 'Draw'),
+                        ),
+                      IconButton(
+                        tooltip: 'Picture settings',
+                        onPressed: widget.onSettings,
+                        icon: const Icon(Icons.tune_rounded),
+                      ),
+                    ],
                   ),
-                IconButton(
-                  tooltip: 'Picture settings',
-                  onPressed: widget.onSettings,
-                  icon: const Icon(Icons.tune_rounded),
-                ),
-              ],
-            ),
-            if (!canDraw)
-              Padding(
-                padding: const EdgeInsets.only(top: 2),
-                child: Text(
-                  invoke
-                      ? 'Invoke isn\'t answering at ${s.invokeUrl}, or has no '
-                            'Stable Diffusion model. Check it in Settings → '
-                            'Images.'
-                      : !SdInstaller.supported
-                      ? 'Drawing isn\'t available for this computer yet.'
-                      : !on
-                      ? 'To let ${s.companionName} draw, turn it on in '
-                            'Settings → Images.'
-                      : 'Download a picture model in Settings → Images to '
-                            'start drawing.',
-                  style: TextStyle(fontSize: 12.5, color: palette.textMuted),
-                ),
+                  if (!canDraw)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        invoke
+                            ? 'Invoke isn\'t answering at ${s.invokeUrl}, or has no '
+                                  'Stable Diffusion model. Check it in Settings → '
+                                  'Images.'
+                            : !SdInstaller.supported
+                            ? 'Drawing isn\'t available for this computer yet.'
+                            : !on
+                            ? 'To let ${s.companionName} draw, turn it on in '
+                                  'Settings → Images.'
+                            : 'Download a picture model in Settings → Images to '
+                                  'start drawing.',
+                        style: TextStyle(
+                          fontSize: 12.5,
+                          color: palette.textMuted,
+                        ),
+                      ),
+                    ),
+                  if (canDraw && (_drawOpen || engine.current != null)) ...[
+                    const SizedBox(height: 12),
+                    _drawPanel(s, ready, engine),
+                  ],
+                  const SizedBox(height: 16),
+                ],
               ),
-            if (canDraw && (_drawOpen || engine.current != null)) ...[
-              const SizedBox(height: 12),
-              _drawPanel(s, ready, engine),
-            ],
-            const SizedBox(height: 16),
+            ),
             FutureBuilder<List<File>>(
               future: _images,
               builder: (context, snap) {
                 final files = snap.data ?? const [];
                 if (files.isEmpty) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 60),
-                    child: Center(
-                      child: Text(
-                        'No pictures yet.',
-                        style: TextStyle(color: palette.textMuted),
+                  return SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 60),
+                      child: Center(
+                        child: Text(
+                          'No pictures yet.',
+                          style: TextStyle(color: palette.textMuted),
+                        ),
                       ),
                     ),
                   );
                 }
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-                    maxCrossAxisExtent: 220,
-                    mainAxisSpacing: 10,
-                    crossAxisSpacing: 10,
-                  ),
-                  itemCount: files.length,
-                  itemBuilder: (context, i) => InkWell(
-                    borderRadius: BorderRadius.circular(14),
-                    onTap: () => showPicture(context, files[i]),
-                    child: Hero(
-                      tag: files[i].path,
-                      child: ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: Image.file(
-                          files[i],
-                          fit: BoxFit.cover,
-                          cacheWidth: 440,
+                return SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+                  sliver: SliverGrid.builder(
+                    gridDelegate:
+                        const SliverGridDelegateWithMaxCrossAxisExtent(
+                          maxCrossAxisExtent: 220,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                        ),
+                    itemCount: files.length,
+                    itemBuilder: (context, i) => InkWell(
+                      borderRadius: BorderRadius.circular(14),
+                      onTap: () => showPicture(context, files[i]),
+                      child: Hero(
+                        tag: files[i].path,
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(14),
+                          child: Image.file(
+                            files[i],
+                            fit: BoxFit.cover,
+                            cacheWidth: 440,
+                          ),
                         ),
                       ),
                     ),

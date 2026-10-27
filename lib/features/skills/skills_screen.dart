@@ -25,8 +25,14 @@ class _SkillsScreenState extends State<SkillsScreen> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    if (_loading) _reload();
+    // It stays built behind other tabs; the companion may have written or
+    // changed a skill meanwhile.
+    final shown = TickerMode.valuesOf(context).enabled;
+    if (_loading || (shown && !_shown)) _reload();
+    _shown = shown;
   }
+
+  bool _shown = true;
 
   Future<void> _reload() async {
     final folder = _folder;

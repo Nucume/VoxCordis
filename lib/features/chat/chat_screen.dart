@@ -860,9 +860,11 @@ class _BubbleState extends State<_Bubble> {
     final accent = Theme.of(context).colorScheme.primary;
     final pictures = Pictures.inText(message.content);
     final files = SharedFiles.inText(message.content);
-    final text = pictures.isEmpty && files.isEmpty
+    final raw = pictures.isEmpty && files.isEmpty
         ? message.content
         : SharedFiles.withoutMarkers(message.content);
+    // Older replies were saved with the model's stray blank lines.
+    final text = mine ? raw : tidyBlankLines(raw);
 
     final actions = AnimatedOpacity(
       opacity: _hover && message.content.isNotEmpty ? 1 : 0,

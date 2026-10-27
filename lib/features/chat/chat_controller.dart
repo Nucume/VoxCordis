@@ -30,6 +30,7 @@ import '../../services/sight.dart';
 import '../../services/system/system_tools.dart';
 import '../../services/web/web_tools.dart';
 import 'attachments_prompt.dart';
+import 'chat_text.dart';
 import 'prompt_history.dart';
 
 enum ChatPhase {
@@ -660,7 +661,7 @@ class ChatController extends ChangeNotifier {
     String? replyId;
     final buffer = StringBuffer();
     // The reply without a chat-template end mark the model wrote out.
-    String shown() => cutEndMark(buffer.toString()).text;
+    String shown() => tidyBlankLines(cutEndMark(buffer.toString()).text);
     var endMarked = false;
     final thoughts = StringBuffer();
     var looped = false;

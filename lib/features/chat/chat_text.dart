@@ -1,5 +1,16 @@
 import 'package:flutter/material.dart';
 
+/// [text] without leading blank lines, and with every run of blank lines
+/// cut to one. Some models write dozens of empty lines (often right after
+/// thinking), which would leave a reply bubble mostly blank.
+String tidyBlankLines(String text) =>
+    text.replaceFirst(_leadingBlank, '').replaceAll(_blankRun, '\n\n');
+
+// Spaces, tabs and invisible characters that can fill an "empty" line.
+const _gap = r'(?:[^\S\n]|\u200B|\u200C|\u200D|\u2060|\uFEFF)*';
+final _leadingBlank = RegExp('^(?:$_gap\n)+');
+final _blankRun = RegExp('\n(?:$_gap\n){2,}');
+
 /// The light Markdown that chat models write: **bold**, *actions* (italic,
 /// tinted), ***both***, ~~strike~~, `code`, `# headings` and `- bullets`.
 /// A marker only counts when it has a partner on the same line, so a half

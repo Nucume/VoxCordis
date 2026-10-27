@@ -73,13 +73,35 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
   }
 
   @override
-  void openSettings({int tab = 0}) => setState(() {
-    _tab = AppTab.settings;
-    _settingsTab = tab;
-  });
+  void openSettings({int tab = 0}) => _go(AppTab.settings, settingsTab: tab);
 
-  /// The Settings page to open on.
+  /// The Settings page to open on. Only a shortcut (the Images screen's
+  /// settings button, a What's new action) picks another one; the tab bar
+  /// always opens on General.
   int _settingsTab = 0;
+
+  /// Tabs opened so far. They stay built (hidden) after that, so coming
+  /// back is instant and keeps their place, instead of building the whole
+  /// screen again and reloading its pictures. Settings is the exception:
+  /// it starts afresh from the saved settings each time.
+  final _opened = <AppTab>{AppTab.chat};
+  final _settings = GlobalKey<SettingsScreenState>();
+
+  /// Moves to [tab], first asking what to do with unsaved changes when
+  /// leaving Settings. False when the human chose to stay.
+  Future<bool> _go(AppTab tab, {int settingsTab = 0}) async {
+    if (tab == _tab) return true;
+    if (_tab == AppTab.settings) {
+      final leave = await _settings.currentState?.mayLeave() ?? true;
+      if (!leave || !mounted) return false;
+    }
+    setState(() {
+      _tab = tab;
+      _settingsTab = settingsTab;
+      _opened.add(tab);
+    });
+    return true;
+  }
 
   @override
   void didChangeDependencies() {
@@ -129,9 +151,8 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
     super.dispose();
   }
 
-  void _openDay(DateTime day) {
-    setState(() => _tab = AppTab.chat);
-    _chat!.showDay(day);
+  Future<void> _openDay(DateTime day) async {
+    if (await _go(AppTab.chat)) _chat!.showDay(day);
   }
 
   Widget _screen(AppTab tab) => switch (tab) {
@@ -142,10 +163,7 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
     AppTab.images => ImagesScreen(
       onSettings: () => openSettings(tab: SettingsScreen.imagesTab),
     ),
-    AppTab.settings => SettingsScreen(
-      key: ValueKey(_settingsTab),
-      initialTab: _settingsTab,
-    ),
+    AppTab.settings => SettingsScreen(key: _settings, initialTab: _settingsTab),
   };
 
   @override
@@ -175,10 +193,7 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
                           children: [
                             Flexible(
                               flex: 0,
-                              child: _TabBar(
-                                current: _tab,
-                                onSelect: (t) => setState(() => _tab = t),
-                              ),
+                              child: _TabBar(current: _tab, onSelect: _go),
                             ),
                             const SizedBox(width: 12),
                             // Shrinks instead of overflowing on narrow windows.
@@ -209,24 +224,18 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
                         ),
                       ),
                       Expanded(
-                        child: AnimatedSwitcher(
-                          duration: const Duration(milliseconds: 320),
-                          switchInCurve: Curves.easeOutCubic,
-                          switchOutCurve: Curves.easeInCubic,
-                          transitionBuilder: (child, anim) => FadeTransition(
-                            opacity: anim,
-                            child: SlideTransition(
-                              position: Tween(
-                                begin: const Offset(0, 0.02),
-                                end: Offset.zero,
-                              ).animate(anim),
-                              child: child,
-                            ),
-                          ),
-                          child: KeyedSubtree(
-                            key: ValueKey(_tab),
-                            child: _screen(_tab),
-                          ),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            for (final t in AppTab.values)
+                              if (t == _tab ||
+                                  (t != AppTab.settings && _opened.contains(t)))
+                                _TabLayer(
+                                  key: ValueKey(t),
+                                  shown: t == _tab,
+                                  child: _screen(t),
+                                ),
+                          ],
                         ),
                       ),
                     ],
@@ -239,6 +248,57 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
       ),
     );
   }
+}
+
+/// One tab's screen in the stack. Hidden ones are neither painted nor
+/// animated, and keep their state; the one coming forward fades in alone,
+/// so only a single screen is drawn during the switch.
+class _TabLayer extends StatefulWidget {
+  const _TabLayer({super.key, required this.shown, required this.child});
+
+  final bool shown;
+  final Widget child;
+
+  @override
+  State<_TabLayer> createState() => _TabLayerState();
+}
+
+class _TabLayerState extends State<_TabLayer>
+    with SingleTickerProviderStateMixin {
+  late final _fade = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+  )..forward();
+  late final _opacity = CurvedAnimation(
+    parent: _fade,
+    curve: Curves.easeOutCubic,
+  );
+
+  @override
+  void didUpdateWidget(_TabLayer old) {
+    super.didUpdateWidget(old);
+    if (widget.shown && !old.shown) _fade.forward(from: 0);
+  }
+
+  @override
+  void dispose() {
+    _opacity.dispose();
+    _fade.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Offstage(
+    offstage: !widget.shown,
+    child: TickerMode(
+      enabled: widget.shown,
+      // Typing never lands in a hidden screen's text box.
+      child: ExcludeFocus(
+        excluding: !widget.shown,
+        child: FadeTransition(opacity: _opacity, child: widget.child),
+      ),
+    ),
+  );
 }
 
 /// The main panel over the companion's background picture, when it has

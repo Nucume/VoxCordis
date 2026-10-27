@@ -2,12 +2,15 @@
 
 ![VoxCordis](docs/banner.png)
 
-A private AI companion for your desktop. VoxCordis runs a language model on
+A private AI companion that you truly own. VoxCordis runs a language model on
 your own computer, keeps its companion's personality and notes as plain files
 in a folder you choose, and remembers what matters in a local memory you can
-see and edit. No account, no cloud required.
+see and edit. No account or cloud required.
 
-Native Flutter app for **Linux and Windows** (macOS builds from source).
+Native Flutter app for **Linux and Windows** (macOS builds from source, no
+installer yet).
+
+ℹ️ **Bugs:** this app is still in early development, so bugs can occur.
 
 💬 **Community:** come say hi, get help and share companions on the
 [VoxCordis Discord](https://discord.gg/hJCzp7tVaT).
@@ -39,7 +42,7 @@ is installed.
 | --- | --- |
 | **Built-in brain** | Downloads and runs llama.cpp's `llama-server` for you (Vulkan on Linux and Windows, Metal on macOS, CPU as a fallback). Pick a recommended model or attach any `.gguf`. |
 | **Or a server** | Ollama, LM Studio, llama.cpp, any OpenAI-compatible API, or OpenRouter, OpenAI and Anthropic with your own key. |
-| **Companions** | Create one in setup, or import a character from a Nemini export, a Soulkyn link or a Character Card (JSON or PNG). Several companions, each with its own chats and memories. |
+| **Companions** | Create one in setup, or import a character from other companion apps, a link or a Character Card (JSON or PNG). Several companions, each with its own chats and memories. |
 | **Its own folder** | `~/VoxCordis/<Name>` holds `personality.md`, `lessons.md`, `privacy.md` and any notes or pictures. The companion can read and write there and rewrite its own personality as it grows. |
 | **Memory** | The companion remembers, updates and forgets facts itself; the Memory tab lets you search, add, edit, pin and restore them. |
 | **Chat** | Streaming replies, visible "thinking" for reasoning models, stop and retry, copy, delete, day history. Share pictures and text files with the paperclip, by dropping them in, or with Ctrl+V. |
@@ -47,14 +50,31 @@ is installed.
 | **Reminders and tasks** | "Remind me at 6 to call Mum" or "every weekday morning, check the weather": the Plans tab lists them, and they keep running in the background if you like. |
 | **Skills** | Teach the companion particular things, like proofreading or a morning briefing, or call one up with `/name`. Claude skills (SKILL.md, .zip, .skill) import as they are. |
 | **Your computer (opt-in)** | Off by default. When on, the companion can run commands and open apps, folders, files and web pages, and asks you every time unless you allowed that exact request. |
-| **Look** | Glass panels, light and dark themes; the companion can restyle its background and accent colour. |
+| **Drawing** | Drawn on your computer with stable-diffusion.cpp (SDXL, anime and photo models, or your own .safetensors with LoRAs), or through an InvokeAI you run. The companion picks the model and LoRAs itself, and you can draw by hand in the Images tab. |
+| **Seeing** | Models that can see look at pictures themselves; for others, a small "Eyes" model describes them on your computer. |
+| **Poke** | After a few hours of silence the companion may write, tidy its notes or wander the web. Never during quiet hours. |
+| **Export and import** | Export a companion to a password-locked ZIP and bring it back here or on another computer. Exports from other companion apps import too. |
+| **Your computer (opt-in)** | Off by default. When on, the companion can run commands and open apps, folders, files and web pages, and asks you every time unless you allowed that exact request. |
+| **Look** | Own title bar, light and dark themes, Colorways, a background picture, and a system tray icon. The companion can restyle its colours too. |
+| **Privacy** | Chats and memories are encrypted on disk; see below. |
 
-### Not there yet
+### Still missing
 
-- **Images:** drawn on this computer with stable-diffusion.cpp, or through an InvokeAI you run (Settings → Images; SD 1.5, 2 and SDXL models).
-- **Long-term memory search** is keyword based; search by meaning is planned.
-- **Not yet:** connectors (calendar, MCP), voice.
-- **macOS** builds from source but has no installer or updates yet.
+- **No macOS build.** It compiles from source, but there is no installer or one-click update.
+- **Unsigned Windows installer.** SmartScreen warns on first run until code signing is in place.
+- **Memory search is keyword based;** search by meaning is planned.
+- **Not yet:** connectors (calendar, MCP) and voice.
+
+## Importing characters
+
+When you add a companion, **Import a character** accepts:
+
+- **Nemini exports** (ZIP): memories, chat history, notes, reminders and automations.
+- **Soulkyn characters**, by pasting a link.
+- **Character Cards** (V1 to V3, JSON or PNG).
+- **VoxCordis exports**, from the companion menu's **Export**.
+
+Imported text is treated as information, never as instructions.
 
 ## Privacy and security
 
@@ -90,7 +110,7 @@ flutter pub get
 flutter run -d linux            # or: flutter build linux --release
 ```
 
-At run time WebKitGTK is optional (used only for the Soulkyn browser window),
+At run time WebKitGTK is optional (used only for importing characters from a link),
 and libsecret is used for the API key when a keyring is running.
 
 **Windows:** install Visual Studio 2022 with "Desktop development with C++",
@@ -144,6 +164,12 @@ lib/
   depends on your compositor; KDE works best.
 - **macOS sandbox is off**, so the companion folder stays reachable after a
   restart.
+
+## Made with AI
+
+VoxCordis was written largely by Claude, Anthropic's AI assistant, working
+from Nucume's direction, testing and decisions. Many commits are authored by
+Claude for that reason. It is open source so you can read what it does.
 
 ## Feedback and security
 

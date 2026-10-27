@@ -344,6 +344,7 @@ class ThinkSplitter {
   final _held = StringBuffer();
   bool _thinking = false;
   bool _started = false; // past the point where a <think> could still open
+  bool _afterThink = false; // drop the blank lines a model puts after </think>
 
   List<LlmEvent> add(String chunk) {
     _held.write(chunk);
@@ -355,9 +356,10 @@ class ThinkSplitter {
         final end = text.indexOf(_close);
         if (end >= 0) {
           if (end > 0) out.add(ReasoningDelta(text.substring(0, end)));
-          text = text.substring(end + _close.length).trimLeft();
+          text = text.substring(end + _close.length);
           _thinking = false;
           _started = true;
+          _afterThink = true;
           continue;
         }
         final keep = _partialSuffix(text, _close);
@@ -379,6 +381,11 @@ class ThinkSplitter {
           return out;
         }
         _started = true;
+      }
+      if (_afterThink) {
+        text = text.trimLeft();
+        if (text.isEmpty) return out;
+        _afterThink = false;
       }
       out.add(TextDelta(text));
       return out;

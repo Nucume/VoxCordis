@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -44,10 +45,10 @@ class SettingsScreen extends StatefulWidget {
   static const privacyTab = 6;
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  State<SettingsScreen> createState() => SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class SettingsScreenState extends State<SettingsScreen> {
   late AppSettings _draft;
   late final _userName = TextEditingController();
   bool _loaded = false;
@@ -73,48 +74,110 @@ class _SettingsScreenState extends State<SettingsScreen> {
     setState(() => _draft = _draft.copyWith(companionFolder: path));
   }
 
-  Future<void> _save() async {
+  /// What Save would store: this page's copy, minus what is changed
+  /// elsewhere while it is open.
+  AppSettings _merged(AppSettings current) => _draft.copyWith(
+    // After setup name, pronouns, traits and portrait are the companion's
+    // own; keep what it last saved, not this page's copy.
+    companionName: current.companionName,
+    traits: current.traits,
+    pronouns: current.pronouns,
+    portraitPath: current.portraitPath,
+    // System access applies at once on its page, and "Always allow" in
+    // the chat adds to the list while this page is open.
+    systemAccess: current.systemAccess,
+    allowedSystemActions: current.allowedSystemActions,
+    // Switching and adding companions happen outside this page.
+    otherCompanions: current.otherCompanions,
+    toldAboutMoreCompanions: current.toldAboutMoreCompanions,
+    // The look applies at once, and the companion may restyle it.
+    accentColor: current.accentColor,
+    backgroundColors: current.backgroundColors,
+    backgroundLayout: current.backgroundLayout,
+    colorway: current.colorway ?? '',
+    themeChoice: current.themeChoice,
+    statusLight: current.statusLight,
+    backgroundDim: current.backgroundDim,
+    clearBackground:
+        current.backgroundColors.isEmpty && current.backgroundLayout == null,
+    userName: _userName.text.trim(),
+  );
+
+  /// Whether leaving now would lose something changed on this page.
+  bool get changed {
     final current = AppScope.of(context).settings.value;
-    final next = _draft.copyWith(
-      // After setup name, pronouns, traits and portrait are the companion's
-      // own; keep what it last saved, not this page's copy.
-      companionName: current.companionName,
-      traits: current.traits,
-      pronouns: current.pronouns,
-      portraitPath: current.portraitPath,
-      // System access applies at once on its page, and "Always allow" in
-      // the chat adds to the list while this page is open.
-      systemAccess: current.systemAccess,
-      allowedSystemActions: current.allowedSystemActions,
-      // Switching and adding companions happen outside this page.
-      otherCompanions: current.otherCompanions,
-      toldAboutMoreCompanions: current.toldAboutMoreCompanions,
-      // The look applies at once, and the companion may restyle it.
-      accentColor: current.accentColor,
-      backgroundColors: current.backgroundColors,
-      backgroundLayout: current.backgroundLayout,
-      colorway: current.colorway ?? '',
-      themeChoice: current.themeChoice,
-      statusLight: current.statusLight,
-      backgroundDim: current.backgroundDim,
-      clearBackground:
-          current.backgroundColors.isEmpty && current.backgroundLayout == null,
-      userName: _userName.text.trim(),
+    final next = _merged(current);
+    if (next.llmApiKey != current.llmApiKey ||
+        next.searchApiKey != current.searchApiKey) {
+      return true;
+    }
+    final a = next.toJson();
+    final b = current.toJson();
+    // Without a model the Brain page sizes the span by itself on opening.
+    if (next.modelPath == null) {
+      a.remove('contextSize');
+      b.remove('contextSize');
+    }
+    return jsonEncode(a) != jsonEncode(b);
+  }
+
+  /// Asked before the app leaves Settings: unsaved changes get Save,
+  /// Discard or Cancel. True when it may go.
+  Future<bool> mayLeave() async {
+    if (!changed) return true;
+    final choice = await showDialog<_Leave>(
+      context: context,
+      builder: (context) => AlertDialog(
+        icon: const Icon(Icons.save_outlined),
+        title: const Text('Save your changes?'),
+        content: const SizedBox(
+          width: 380,
+          child: Text(
+            'Some settings were changed but not saved yet. Discarding '
+            'puts them back the way they were.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, _Leave.cancel),
+            child: const Text('Cancel'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, _Leave.discard),
+            child: const Text('Discard'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, _Leave.save),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
     );
-    if (!await confirmModelFits(context, next)) return;
+    if (!mounted) return false;
+    return switch (choice) {
+      _Leave.save => await _save(),
+      _Leave.discard => true,
+      _Leave.cancel || null => false,
+    };
+  }
+
+  /// True once saved; false when the human held back (the model won't fit).
+  Future<bool> _save() async {
+    final next = _merged(AppScope.of(context).settings.value);
+    if (!await confirmModelFits(context, next)) return false;
     final folder = next.companionFolder;
     if (folder != null) {
       await CompanionFolder(folder).ensureExists();
       await CoreRules.load(next); // writes core.md the first time
       await DeskFiles.ensure(next);
     }
-    if (!mounted) return;
+    if (!mounted) return false;
     final services = AppScope.of(context);
     services.runtime.touch(next);
     await services.settings.update(next);
     // Load the (possibly new) model in the background so chat is ready.
     services.runtime.ensureReady(next).ignore();
-    if (!mounted) return;
+    if (!mounted) return true;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         duration: const Duration(seconds: 2),
@@ -131,6 +194,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         ),
       ),
     );
+    return true;
   }
 
   @override
@@ -1223,6 +1287,8 @@ void _openLicenses(BuildContext context) {
 }
 
 /// Already in Settings, so an action there just closes the notes.
+enum _Leave { save, discard, cancel }
+
 class _NoHost implements WhatsNewHost {
   const _NoHost();
 

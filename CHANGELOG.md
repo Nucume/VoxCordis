@@ -13,6 +13,17 @@ the ids); it is left out of the release page.
 ## Unreleased
 
 ### New
+- **Settings asks before losing changes.** Leave Settings after changing something without saving, and VoxCordis asks whether to save or discard them, or stay.
+
+
+### Fixed
+- **Switching tabs is quicker.** Chat, Images, Memory, Skills and Plans stay ready once opened instead of being built again each time, so going back is instant and keeps your place. The Images gallery only loads the pictures in view.
+- **Settings opens on General again.** After using the settings button in the Images tab, it kept opening on Images.
+- **No more big empty replies after long thoughts.** Some models write a pile of blank lines after thinking, which left the reply bubble mostly empty with the text at the bottom. Those blank lines are now dropped, also in replies you already have.
+
+## 0.3.1
+
+### New
 - **A VoxCordis title bar** on Windows and Linux, in the app's own colours, with minimise, maximise and close. Drag it to move the window, double-click it to maximise. Prefer your system's bar? Turn on *Use the system title bar* in **Settings → Appearance**. On KDE that brings back the Breeze bar instead of the big GTK one. On Windows 11, hovering the maximise button still offers Snap Layouts.
 
 ### Changed

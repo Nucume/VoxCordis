@@ -47,4 +47,11 @@ void main() {
     expect(pieces('## Ideas'), ['Ideas|b']);
     expect(pieces('- one\n* two'), ['•  ', 'one', '\n', '•  ', 'two']);
   });
+
+  test('blank lines are tidied', () {
+    expect(tidyBlankLines('\n\n \n\u200B\n*sighs*'), '*sighs*');
+    expect(tidyBlankLines('Hi.\n\n\n\n  \n\n\nBye.'), 'Hi.\n\nBye.');
+    expect(tidyBlankLines('Hi.\n\nBye.\n  - one'), 'Hi.\n\nBye.\n  - one');
+    expect(tidyBlankLines('  indented'), '  indented');
+  });
 }

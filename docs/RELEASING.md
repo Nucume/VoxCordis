@@ -1,17 +1,27 @@
 # Releasing VoxCordis
 
-Releases are built and signed by the maintainer's CI in the development
-repository, which then publishes each version's source and installers to the
-public repository. The workflows described here are not part of the public
-source; you can build everything yourself as shown in the README.
+A tag in the development repository checks the release, then sends that
+version's source and the tag to the public repository, whose own workflow
+builds, signs and publishes the installers. The development repository's
+workflows are not part of the public source; you can build everything yourself
+as shown in the README.
 
-Two workflows live in `.github/workflows/`:
+Workflows in the development repository (`.github/workflows/`):
 
 - **CI** (`ci.yml`): `flutter analyze` and `flutter test` on every pull request
-  and every push to `main`. Linux runner only.
-- **Release** (`release.yml`): builds the installers. It runs when a `v*` tag is
-  pushed, when started by hand (Actions → Release → Run workflow), and on pull
-  requests that change the packaging.
+  and every push to `main` (skipped when only docs change; can be started by
+  hand). Linux runner only.
+- **Release** (`release.yml`): checks a `v*` tag (version, release key,
+  privacy) and pushes the source commit and the tag to the public repository.
+  It builds nothing. A hand run only does the checks.
+
+Workflow in the public repository (`Nucume/VoxCordis`, `release.yml`):
+
+- **Release**: runs when the tag arrives. It builds the installers, signs them
+  and publishes the GitHub Release. Free there. A hand run (Actions → Release →
+  Run workflow) builds Linux only unless you pick `all` or `windows`, and keeps
+  the files as artifacts without making a release. Pull requests do not start
+  it, so test a packaging change with a hand run.
 
 | Platform | File | Built with |
 | --- | --- | --- |
@@ -30,7 +40,7 @@ the app on first use into the app-support directory.
 2. Check that `## Unreleased` in `CHANGELOG.md` says what's new. Those notes
    become the release page, and the app shows them on its first start after
    updating, together with the notes of any version the user skipped. There
-   is no need to rename the heading: after the release is published, the
+   is no need to rename the heading: after the source is pushed, the
    workflow's `changelog` job files them under `## <version>` on main (notes
    merged after the tag stay under Unreleased). Renaming it yourself before
    tagging works too.
@@ -42,11 +52,10 @@ the app on first use into the app-support directory.
    git push origin v0.2.0
    ```
 
-The Release workflow builds everything and creates a GitHub Release with the
-two files attached. A tag with a dash (`v0.2.0-beta.1`) becomes a pre-release.
-
-Manual runs and pull request runs keep the files as workflow artifacts (on the
-run's summary page) instead of making a release.
+The tag starts the private checks; the public repository then builds
+everything and creates a GitHub Release with the two files attached, after you
+approve the `release` environment there. A tag with a dash (`v0.2.0-beta.1`)
+becomes a pre-release.
 
 ## In-app updates
 
@@ -72,19 +81,26 @@ publish releases to a separate public repository:
 
 1. Create the public repository (e.g. `Nucume/VoxCordis`) with at least one
    commit (a README), because a release needs a commit to tag.
-2. Add a fine-grained token with *Contents: read and write* on that repository
-   as the secret `RELEASES_TOKEN`.
+2. Create an SSH key pair, add the public half to the public repository as a
+   deploy key with write access, and save the private half here as the secret
+   `PUBLIC_DEPLOY_KEY`. Add *Deploy keys* to the bypass list of the public
+   repository's rulesets for `main` and for `v*` tags, so only the pipeline
+   can create release tags.
 3. Add the repository variable `UPDATE_REPO` = `Nucume/VoxCordis`.
+4. In the public repository, create the environment `release` (required
+   reviewer: the maintainer, deployment tags: `v*`) and save the secret
+   `RELEASE_SIGNING_KEY` in it, not as a repository secret.
 
-Tags then still go to this repository, and the workflow publishes the release
-(and bakes `UPDATE_REPO` into the app) to the public one.
+Tags then still go to this repository; the pipeline pushes the source and the
+tag to the public one, which builds the app with itself as its update source.
 
-**The source goes public with each release.** Before publishing, the release
-job replaces the public repository's files with this tag's source and commits
+**The source goes public with each release.** Before the tag is pushed, the
+release job replaces the public repository's files with this tag's source and commits
 it as one commit, "VoxCordis x.y.z", authored by Nucume. The release tags that
 commit, so every release's source is right next to it (GPL-3.0). This
 repository's history, pull requests and reviews stay private. Workflows are
-left out, so nothing runs on the public repository's tags.
+left out; the public repository keeps its own `release.yml`, which runs on
+the tag that comes with the commit.
 
 ## Installing unsigned builds
 
@@ -100,8 +116,8 @@ Every installer a release publishes gets a `<file>.sig`: an Ed25519
 signature over the file's SHA-256 (64 lowercase hex characters). The app
 has the matching public key built in (`releasePublicKey` in
 `lib/services/release_signature.dart`) and the updater installs only files
-that carry a valid signature. Without it, anyone holding `RELEASES_TOKEN`
-could publish an update every user would install.
+that carry a valid signature. Without it, anyone who can publish to the public
+repository could ship an update every user would install.
 
 One-time setup, on your own computer:
 
@@ -110,8 +126,8 @@ openssl genpkey -algorithm ed25519 -out voxcordis-release.pem
 openssl pkey -in voxcordis-release.pem -pubout   # the public key
 ```
 
-1. Save the whole content of `voxcordis-release.pem` as the repository
-   secret `RELEASE_SIGNING_KEY`, then keep the file offline (a password
+1. Save the whole content of `voxcordis-release.pem` as the secret
+   `RELEASE_SIGNING_KEY` in the public repository's `release` environment, then keep the file offline (a password
    manager or a USB stick). Losing it means the next version has to ship a
    new key, which installed apps won't trust, so their users update once by
    hand.
@@ -121,8 +137,9 @@ A tag fails to publish when the secret is missing or the app has no key.
 
 ## Signing (optional, add secrets to turn on)
 
-The signing steps are skipped while their secrets are missing. Add them under
-*Settings → Secrets and variables → Actions*.
+Code signing is off. The public workflow no longer has the Windows signing
+steps (the macOS ones are not built), so these tables are for adding them
+back later.
 
 **macOS** (needs a paid Apple Developer Program membership):
 
@@ -162,9 +179,11 @@ KDE Discover needs a Flathub listing. Flathub requires:
 
 ## Cost
 
-On a private repository Actions minutes are billed past the plan's monthly
-allowance, and Windows minutes count 2x. A Release run is roughly 10 Linux
-and 15 Windows minutes, which counts as about 40 minutes. CI alone is a few Linux minutes per push.
+Builds run on the public repository, where Actions minutes are free. Here, on
+a private repository, minutes are billed past the plan's monthly allowance and
+Windows counts 2x: a tag costs a few Linux minutes for the checks and the
+source push, and CI is a few Linux minutes per push (none for docs-only
+changes).
 
 ## Privacy check
 

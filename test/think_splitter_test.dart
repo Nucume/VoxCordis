@@ -44,4 +44,11 @@ void main() {
   test('an unclosed think block is all reasoning', () {
     expect(_split(['<think>still going']), ('still going', ''));
   });
+
+  test('blank lines after the think block are dropped across chunks', () {
+    expect(_split(['<think>Hmm.</think>', '\n\n', '\n  \n', 'Hi\n\nthere']), (
+      'Hmm.',
+      'Hi\n\nthere',
+    ));
+  });
 }
