@@ -322,35 +322,42 @@ class _PicturePanel extends StatelessWidget {
         final s = services.settings.value;
         final folder = s.companionFolder;
         final picture = folder == null ? null : Pictures.backgroundIn(folder);
-        if (picture == null) return child;
         final theme = Theme.of(context);
         final palette = context.palette;
+        // The same shape with or without a picture: a panel moved to
+        // another place in the tree would build every tab afresh, and the
+        // chat would lose where it was scrolled to.
         return Stack(
           fit: StackFit.expand,
           children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(22),
-              child: RepaintBoundary(
-                child: ColoredBox(
-                  color: palette.background,
-                  child: Image.file(
-                    picture,
-                    // A new picture under the same name is loaded afresh.
-                    key: ValueKey(picture.statSync().modified),
-                    fit: BoxFit.cover,
-                    // Decoded once at about panel size, not at full size.
-                    cacheWidth: 2048,
-                    color: palette.background.withValues(
-                      alpha: s.backgroundDim,
+            if (picture == null)
+              const SizedBox.shrink()
+            else
+              ClipRRect(
+                borderRadius: BorderRadius.circular(22),
+                child: RepaintBoundary(
+                  child: ColoredBox(
+                    color: palette.background,
+                    child: Image.file(
+                      picture,
+                      // A new picture under the same name is loaded afresh.
+                      key: ValueKey(picture.statSync().modified),
+                      fit: BoxFit.cover,
+                      // Decoded once at about panel size, not at full size.
+                      cacheWidth: 2048,
+                      color: palette.background.withValues(
+                        alpha: s.backgroundDim,
+                      ),
+                      colorBlendMode: BlendMode.srcATop,
+                      errorBuilder: (_, _, _) => const SizedBox.expand(),
                     ),
-                    colorBlendMode: BlendMode.srcATop,
-                    errorBuilder: (_, _, _) => const SizedBox.expand(),
                   ),
                 ),
               ),
-            ),
             Theme(
-              data: theme.copyWith(extensions: [palette.seeThrough()]),
+              data: picture == null
+                  ? theme
+                  : theme.copyWith(extensions: [palette.seeThrough()]),
               child: child,
             ),
           ],

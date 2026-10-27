@@ -567,6 +567,7 @@ class _ImagesScreenState extends State<ImagesScreen> {
 
 /// Shows [file] over the window: scroll or pinch to zoom, drag to look
 /// around, and "Show file" opens it in the computer's own picture viewer.
+/// Escape, the close button or a click beside the picture closes it.
 Future<void> showPicture(BuildContext context, File file) => showDialog<void>(
   context: context,
   barrierColor: Colors.black87,
@@ -619,11 +620,12 @@ class _PictureViewerState extends State<_PictureViewer> {
           autofocus: true,
           child: Stack(
             children: [
+              // A click beside the picture closes it, like clicking
+              // outside any other window; one on the picture doesn't.
               Positioned.fill(
                 child: GestureDetector(
-                  onDoubleTap: () => _zoom.value.getMaxScaleOnAxis() > 1.01
-                      ? _zoom.value = Matrix4.identity()
-                      : _scale(2.5),
+                  behavior: HitTestBehavior.opaque,
+                  onTap: () => Navigator.pop(context),
                   child: InteractiveViewer(
                     transformationController: _zoom,
                     minScale: 1,
@@ -631,9 +633,16 @@ class _PictureViewerState extends State<_PictureViewer> {
                     child: Center(
                       child: Padding(
                         padding: const EdgeInsets.fromLTRB(24, 64, 24, 24),
-                        child: Hero(
-                          tag: widget.file.path,
-                          child: Image.file(widget.file),
+                        child: GestureDetector(
+                          onTap: () {},
+                          onDoubleTap: () =>
+                              _zoom.value.getMaxScaleOnAxis() > 1.01
+                              ? _zoom.value = Matrix4.identity()
+                              : _scale(2.5),
+                          child: Hero(
+                            tag: widget.file.path,
+                            child: Image.file(widget.file),
+                          ),
                         ),
                       ),
                     ),

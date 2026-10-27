@@ -400,4 +400,20 @@ void main() {
       isFalse,
     );
   });
+
+  test('spots a server saying a model has no tool support', () {
+    expect(
+      ChatController.refusedTools(
+        LlmException(
+          'HTTP 404: {"error":{"message":"No endpoints found that support '
+          'tool use. Try disabling \\"remember\\"."}}',
+        ),
+      ),
+      isTrue,
+    );
+    expect(
+      ChatController.refusedTools(LlmException('HTTP 401: bad key')),
+      isFalse,
+    );
+  });
 }

@@ -13,6 +13,21 @@ the ids); it is left out of the release page.
 ## Unreleased
 
 ### New
+- **Latest button.** Scrolled up in the chat, a Latest button floats in at the bottom and takes you back down to the newest message.
+
+
+### Fixed
+- **OpenRouter models without tool support.** Some models have no provider that takes tools, and OpenRouter answered with a 404. VoxCordis now chats with them without tools and says so in the chat. Their memory still works in a simpler way: the companion writes a short note and VoxCordis saves it, though small models may miss it now and then.
+- **Dragging the chat's scrollbar.** Dragging the bar at the side made the chat jump around, because the chat only guessed its full length until every message had been seen. It now knows the real length, so the bar moves smoothly.
+- **Chat opening partway up.** Coming back from a past day could leave the chat at the top of the day instead of at the newest message. It now opens at the newest one. Setting or removing a background picture no longer resets the chat either; switching tabs keeps your place.
+- **Closing a picture.** A click beside a picture you're looking at now closes it, not only the X.
+
+### Changed
+- **Verified releases.** Release commits are signed, so GitHub shows them as Verified.
+
+## 0.3.2
+
+### New
 - **Settings asks before losing changes.** Leave Settings after changing something without saving, and VoxCordis asks whether to save or discard them, or stay.
 
 

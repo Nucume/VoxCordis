@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pasteboard/pasteboard.dart';
@@ -62,6 +63,8 @@ class _ChatScreenState extends State<ChatScreen> {
     );
     _input.addListener(_onTyping);
     _input.addListener(_onCommand);
+    _scroll.addListener(_onScroll);
+    _shownLoad = _chat.loads;
     _jumpToEnd();
   }
 
@@ -71,6 +74,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _chat.draft = _input.text;
     _input.dispose();
     _scroll.dispose();
+    _away.dispose();
     super.dispose();
   }
 
@@ -127,9 +131,18 @@ class _ChatScreenState extends State<ChatScreen> {
   void _onChat() {
     // A past day opens at its start; the live chat follows the newest reply.
     if (_chat.viewingDay != null) {
+      _shownLoad = _chat.loads;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scroll.hasClients) _scroll.jumpTo(0);
       });
+      return;
+    }
+    // Back from a past day, or the chat loaded again: it opens at the
+    // newest message, not wherever the last list was left.
+    final fresh = _chat.loads != _shownLoad;
+    _shownLoad = _chat.loads;
+    if (fresh) {
+      _jumpToEnd();
       return;
     }
     // Follow the reply only while the human is at the bottom: scrolled up
@@ -159,6 +172,28 @@ class _ChatScreenState extends State<ChatScreen> {
 
   /// How far from the bottom still counts as reading the newest message.
   static const _followSlack = 120.0;
+
+  /// [ChatController.loads] when the list last started over, to tell a
+  /// chat that was loaded again from one that grew.
+  int _shownLoad = 0;
+
+  /// Scrolled up from the newest message: the "Latest" button shows.
+  final _away = ValueNotifier(false);
+
+  void _onScroll() {
+    final pos = _scroll.position;
+    _away.value = pos.maxScrollExtent - pos.pixels > _followSlack;
+  }
+
+  Future<void> _toLatest() async {
+    if (!_scroll.hasClients) return;
+    await _scroll.animateTo(
+      _scroll.position.maxScrollExtent,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+    _jumpToEnd();
+  }
 
   /// Opens at the newest message. The list only knows its full length once
   /// the bubbles near the end are laid out, so the first jump can land
@@ -448,6 +483,61 @@ class _ChatScreenState extends State<ChatScreen> {
     );
   }
 
+  /// Far enough past the edges of the view to take in a whole chat.
+  static const _layOutAll = ScrollCacheExtent.pixels(1e7);
+
+  /// Each message's row as last built, with what it was built from.
+  ///
+  /// Every message stays laid out, so each new word of a reply would
+  /// otherwise build all of them again; a row that hasn't changed is
+  /// handed back as is and skipped.
+  final _rows = <String, (Object, Widget)>{};
+
+  Widget _item(
+    List<ChatMessage> msgs,
+    int i, {
+    required String? folder,
+    required String? lastAssistant,
+  }) {
+    final m = msgs[i];
+    final newDay = i == 0 || !DateUtils.isSameDay(msgs[i - 1].ts, m.ts);
+    final last = i == msgs.length - 1;
+    final live = _chat.busy && last;
+    final thinkingLive = live && _chat.phase == ChatPhase.thinking;
+    final deletable = !_chat.busy;
+    final regenerable =
+        m.id == lastAssistant && !_chat.busy && _chat.viewingDay == null;
+    final from = (
+      m,
+      newDay,
+      folder,
+      live,
+      thinkingLive,
+      deletable,
+      regenerable,
+    );
+    final cached = _rows[m.id];
+    if (cached != null && cached.$1 == from) return cached.$2;
+    if (_rows.length > msgs.length * 2) _rows.clear();
+    final row = Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (newDay) _DaySeparator(day: m.ts),
+        _Bubble(
+          key: ValueKey(m.id),
+          message: m,
+          folder: folder,
+          live: live,
+          thinkingLive: thinkingLive,
+          onDelete: deletable ? () => _confirmDelete(m) : null,
+          onRegenerate: regenerable ? _confirmRegenerate : null,
+        ),
+      ],
+    );
+    _rows[m.id] = (from, row);
+    return row;
+  }
+
   Widget _chatColumn(AppSettings settings, Color accent) {
     return ListenableBuilder(
       listenable: _chat,
@@ -458,8 +548,13 @@ class _ChatScreenState extends State<ChatScreen> {
             : null;
         return Column(
           children: [
-            if (_chat.viewingDay != null)
-              _DayBanner(day: _chat.viewingDay!, onBack: _chat.load),
+            // Always holds its place, so the list below keeps its spot in
+            // the column: moved down a place, it would be built afresh and
+            // lose where it was scrolled to.
+            if (_chat.viewingDay case final day?)
+              _DayBanner(day: day, onBack: _chat.load)
+            else
+              const SizedBox.shrink(),
             Expanded(
               child: msgs.isEmpty
                   ? _EmptyState(
@@ -467,41 +562,38 @@ class _ChatScreenState extends State<ChatScreen> {
                           ? 'Say hello to ${settings.companionName}.'
                           : 'Pick a companion folder and a model in Settings to start.',
                     )
-                  : ListView.builder(
-                      controller: _scroll,
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
-                      itemCount: msgs.length,
-                      itemBuilder: (context, i) {
-                        final m = msgs[i];
-                        final newDay =
-                            i == 0 ||
-                            !DateUtils.isSameDay(msgs[i - 1].ts, m.ts);
-                        return Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (newDay) _DaySeparator(day: m.ts),
-                            _Bubble(
-                              key: ValueKey(m.id),
-                              message: m,
-                              folder: settings.companionFolder,
-                              live: _chat.busy && i == msgs.length - 1,
-                              thinkingLive:
-                                  _chat.busy &&
-                                  i == msgs.length - 1 &&
-                                  _chat.phase == ChatPhase.thinking,
-                              onDelete: _chat.busy
-                                  ? null
-                                  : () => _confirmDelete(m),
-                              onRegenerate:
-                                  m.id == lastAssistant &&
-                                      !_chat.busy &&
-                                      _chat.viewingDay == null
-                                  ? _confirmRegenerate
-                                  : null,
+                  : Stack(
+                      children: [
+                        ListView.builder(
+                          controller: _scroll,
+                          // Lays out every loaded message, not just the ones in
+                          // view, so the list knows its real length. Built
+                          // lazily, the length was a guess that changed as
+                          // bubbles came into view, and dragging the scrollbar
+                          // made the chat jump around.
+                          scrollCacheExtent: _layOutAll,
+                          padding: const EdgeInsets.fromLTRB(20, 12, 20, 12),
+                          itemCount: msgs.length,
+                          itemBuilder: (context, i) => _item(
+                            msgs,
+                            i,
+                            folder: settings.companionFolder,
+                            lastAssistant: lastAssistant,
+                          ),
+                        ),
+                        if (_chat.viewingDay == null)
+                          Positioned(
+                            bottom: 12,
+                            left: 0,
+                            right: 0,
+                            child: Center(
+                              child: _LatestButton(
+                                away: _away,
+                                onPressed: _toLatest,
+                              ),
                             ),
-                          ],
-                        );
-                      },
+                          ),
+                      ],
                     ),
             ),
             _DrawingLine(name: settings.companionName),
@@ -740,6 +832,51 @@ class _DrawingLine extends StatelessWidget {
       },
     );
   }
+}
+
+/// Floats in over the chat while the human is scrolled up, and takes them
+/// back down to the newest message.
+class _LatestButton extends StatelessWidget {
+  const _LatestButton({required this.away, required this.onPressed});
+
+  final ValueNotifier<bool> away;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: away,
+    builder: (context, bool shown, child) => IgnorePointer(
+      ignoring: !shown,
+      child: AnimatedSlide(
+        offset: shown ? Offset.zero : const Offset(0, 0.6),
+        duration: const Duration(milliseconds: 220),
+        curve: Curves.easeOutCubic,
+        child: AnimatedOpacity(
+          opacity: shown ? 1 : 0,
+          duration: const Duration(milliseconds: 180),
+          child: child,
+        ),
+      ),
+    ),
+    // Solid, with a shadow, so it stands out over the bubbles.
+    child: Builder(
+      builder: (context) {
+        final accent = Theme.of(context).colorScheme.primary;
+        return FilledButton.icon(
+          onPressed: onPressed,
+          style: FilledButton.styleFrom(
+            backgroundColor: context.popupColor,
+            foregroundColor: accent,
+            elevation: 6,
+            shadowColor: Colors.black54,
+            side: BorderSide(color: accent.withValues(alpha: 0.5)),
+          ),
+          icon: const Icon(Icons.arrow_downward_rounded, size: 18),
+          label: const Text('Latest'),
+        );
+      },
+    ),
+  );
 }
 
 class _EmptyState extends StatelessWidget {

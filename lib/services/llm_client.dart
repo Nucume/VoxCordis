@@ -142,6 +142,7 @@ class LlmClient {
   Stream<LlmEvent> chat(
     List<Map<String, Object?>> messages, {
     List<Map<String, Object?>> tools = const [],
+    Set<String> textTools = const {},
   }) async* {
     final req = http.Request('POST', _url('/chat/completions'))
       // A fresh connection per completion: llama-server may close a kept-alive
@@ -181,6 +182,7 @@ class LlmClient {
     final pending = <int, ({String id, String name, StringBuffer args})>{};
     final think = ThinkSplitter();
     final inline = InlineToolCalls({
+      ...textTools,
       for (final t in tools)
         ((t['function'] as Map?)?['name'] as String?) ?? '',
     });

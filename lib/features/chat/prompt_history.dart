@@ -338,3 +338,16 @@ int? loopCut(
   }
   return null;
 }
+
+/// For a model the server won't give tools: the memory tools described in
+/// words, to be called by writing `<tool_call>` blocks in the reply.
+const aboutTextTools =
+    '## Your memory tools\n'
+    'Your server has no tool support, so to use a tool write a block like '
+    'this on its own line in your reply, and nothing after it until you get '
+    'the result:\n'
+    '<tool_call>{"name": "remember", "arguments": {"text": "..."}}</tool_call>\n'
+    'Tools: remember (text: one plain sentence worth knowing weeks from now), '
+    'update_memory (id, text: change a memory shown above), forget (id: '
+    'drop a memory shown above). Only use them when it matters, never for '
+    'small talk, and never mention this format to your human.';

@@ -79,6 +79,10 @@ class ChatController extends ChangeNotifier {
   /// The past day being viewed, or null for the live conversation.
   DateTime? viewingDay;
 
+  /// Goes up each time the messages are loaded afresh, the present or a
+  /// past day, so the chat knows to start over at the right end.
+  int loads = 0;
+
   /// What the human was writing and the files picked to go with it, kept
   /// here so they survive a visit to another tab.
   String draft = '';
@@ -128,6 +132,7 @@ class ChatController extends ChangeNotifier {
         (await _services.messages.recent()).map(_clean).where(_hasSomething),
       );
     days = await _services.messages.days();
+    loads++;
     notifyListeners();
   }
 
@@ -151,6 +156,7 @@ class ChatController extends ChangeNotifier {
       ..addAll(
         (await _services.messages.forDay(day)).map(_clean).where(_hasSomething),
       );
+    loads++;
     notifyListeners();
   }
 
@@ -295,6 +301,18 @@ class ChatController extends ChangeNotifier {
   /// get Eyes, or are told they can't see.
   final _blind = <String>{};
 
+  /// Server-hosted models that have no endpoint taking tools; they get
+  /// plain chat, without memory or other tools.
+  final _noTools = <String>{};
+
+  /// Whether [e] is a server saying the model can't be given tools.
+  static bool refusedTools(LlmException e) =>
+      RegExp(r'^HTTP (400|404)\b').hasMatch(e.message) &&
+      RegExp(
+        r'support tool|tool use|tool calling|function calling',
+        caseSensitive: false,
+      ).hasMatch(e.message);
+
   /// Whether [e] is a server turning down a request because of its
   /// pictures: a model that can't take them.
   static bool refusedPictures(LlmException e) =>
@@ -377,6 +395,7 @@ class ChatController extends ChangeNotifier {
       '${desk.lessons}\n\n'
       '## What you remember\n'
       '$recalled\n\n'
+      '${_noTools.contains(Sight.serverKey(settings)) ? '$aboutTextTools\n\n' : ''}'
       '${aboutInternet(settings)}\n\n'
       '${aboutSchedule()}\n\n'
       '$skills\n\n'
@@ -771,7 +790,9 @@ class ChatController extends ChangeNotifier {
       replyId = reply.id;
       messages.add(reply);
 
-      final tools = toolsFor(settings, unattended: _unattended);
+      var tools = _noTools.contains(Sight.serverKey(settings))
+          ? <Map<String, Object?>>[]
+          : toolsFor(settings, unattended: _unattended);
       final toolNames = {
         for (final t in tools) (t['function'] as Map)['name'] as String,
       };
@@ -810,7 +831,13 @@ class ChatController extends ChangeNotifier {
         var checkedText = buffer.length, checkedThoughts = thoughts.length;
         endMarked = false;
         try {
-          await for (final event in client.chat(prompt, tools: tools)) {
+          await for (final event in client.chat(
+            prompt,
+            tools: tools,
+            textTools: _noTools.contains(Sight.serverKey(settings))
+                ? MemoryTools.names
+                : const {},
+          )) {
             switch (event) {
               case PromptProgress(:final fraction):
                 reading = fraction;
@@ -873,6 +900,27 @@ class ChatController extends ChangeNotifier {
             if (looped) break;
           }
         } on LlmException catch (e) {
+          // A server-hosted model with no tool support: ask again as plain
+          // chat, and remember that.
+          if (tools.isNotEmpty &&
+              round == 0 &&
+              buffer.isEmpty &&
+              thoughts.isEmpty &&
+              settings.llmMode == LlmMode.external &&
+              refusedTools(e)) {
+            _noTools.add(Sight.serverKey(settings));
+            tools = [];
+            prompt[0] = {
+              ...prompt[0],
+              'content': '${prompt[0]['content']}\n\n$aboutTextTools',
+            };
+            _addNote(
+              '${settings.llmModel} can\'t use tools, so it remembers in a simpler way '
+              'and other tools are off',
+            );
+            round--;
+            continue;
+          }
           // A server-hosted model that can't take pictures: send them
           // again as Eyes sees them, or as names, and remember that.
           if (round > 0 ||
@@ -923,12 +971,36 @@ class ChatController extends ChangeNotifier {
         notifyListeners();
         // Later rounds' thoughts go below the earlier ones.
         if (thoughts.isNotEmpty) thoughts.write('\n\n');
-        prompt.add({
-          'role': 'assistant',
-          'content': shown(),
-          'tool_calls': [for (final c in calls) c.toJson()],
-        });
-        await _runCalls(calls, prompt, sourceIds, seen);
+        if (tools.isEmpty) {
+          // No tool support on the server: the call stays in the reply's
+          // own words and the result comes back as a message.
+          prompt.add({
+            'role': 'assistant',
+            'content': [
+              shown(),
+              for (final c in calls)
+                '<tool_call>{"name": "${c.name}", "arguments": '
+                    '${c.arguments}}</tool_call>',
+            ].join('\n'),
+          });
+          final from = prompt.length;
+          await _runCalls(calls, prompt, sourceIds, seen);
+          final results = prompt.sublist(from);
+          prompt.removeRange(from, prompt.length);
+          prompt.add({
+            'role': 'user',
+            'content': [
+              for (final r in results) '[Tool result: ${r['content']}]',
+            ].join('\n'),
+          });
+        } else {
+          prompt.add({
+            'role': 'assistant',
+            'content': shown(),
+            'tool_calls': [for (final c in calls) c.toJson()],
+          });
+          await _runCalls(calls, prompt, sourceIds, seen);
+        }
         notifyListeners();
       }
       stopped = _stopRequested;
