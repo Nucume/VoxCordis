@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 import '../../data/message_repository.dart';
 import '../../data/settings.dart';
 import '../../services/llm_client.dart';
+import '../../services/recall/recall.dart';
 import '../../services/runtime/model_catalog.dart';
 
 /// Chat history shaped for strict chat templates. Mistral's (Rocinante,
@@ -35,6 +36,109 @@ List<Map<String, Object?>> alternatingHistory(Iterable<ChatMessage> messages) {
   return [
     for (final t in turns) {'role': t.role, 'content': t.content},
   ];
+}
+
+/// Rough characters per token for [estimateTokens]. English prose runs
+/// nearer four, tool definitions and other languages nearer three; a miss
+/// is corrected from the server's own count (see [promptOverflow]).
+const charsPerToken = 3.5;
+
+/// About how many tokens a picture sent with a message takes.
+const pictureTokens = 1000;
+
+/// A guess at how many tokens [turn] takes in the prompt. Pictures count
+/// as [pictureTokens] each rather than by the size of their data.
+int estimateTokens(Map<String, Object?> turn) {
+  var chars = 16; // role and template marks
+  var pictures = 0;
+  for (final MapEntry(:key, :value) in turn.entries) {
+    if (key == 'content' && value is List) {
+      for (final part in value) {
+        if (part is Map && part['type'] == 'text') {
+          chars += '${part['text']}'.length;
+        } else {
+          pictures++;
+        }
+      }
+    } else if (key != 'role') {
+      chars += value is String ? value.length : jsonEncode(value).length;
+    }
+  }
+  return (chars / charsPerToken).ceil() + pictures * pictureTokens;
+}
+
+/// A guess at the tokens of [prompt] plus the [tools] sent with it.
+int estimatePrompt(
+  List<Map<String, Object?>> prompt,
+  List<Map<String, Object?>> tools,
+) =>
+    prompt.fold(0, (n, t) => n + estimateTokens(t)) +
+    (tools.isEmpty ? 0 : (jsonEncode(tools).length / charsPerToken).ceil());
+
+/// Tokens kept free for the reply in a context of [ctx] tokens.
+int replyRoom(int ctx, int maxReply) => min(maxReply, ctx ~/ 4);
+
+/// Drops the oldest turns of [history] until [prompt] (system message
+/// first, then [history] expanded one to one, then anything added this
+/// reply) and [tools] fit [budget] estimated tokens. The newest turn always
+/// stays, and the rest still starts with the human. Returns how many turns
+/// were dropped.
+int fitPrompt(
+  List<Map<String, Object?>> prompt,
+  List<Map<String, Object?>> history, {
+  required List<Map<String, Object?>> tools,
+  required int budget,
+}) {
+  var total = estimatePrompt(prompt, tools);
+  var dropped = 0;
+  while (total > budget && history.length > 1) {
+    // A human turn goes with the reply after it, so the rest starts with
+    // the human again.
+    final n = history[1]['role'] == 'user' ? 1 : 2;
+    if (history.length - n < 1) break;
+    for (var i = 0; i < n; i++) {
+      total -= estimateTokens(prompt.removeAt(1));
+      history.removeAt(0);
+      dropped++;
+    }
+  }
+  return dropped;
+}
+
+/// The server's own word that the prompt was too long for the model's
+/// context: its token counts when it gave them, or null when [message]
+/// is about something else. Knows llama-server, OpenAI-style and
+/// Anthropic-style wording.
+({int? prompt, int? ctx})? promptOverflow(String message) {
+  if (!RegExp(r'^HTTP (400|413|422)\b').hasMatch(message)) return null;
+  if (!RegExp(
+    r'exceed_context_size|context_length_exceeded|context length|'
+    r'context size|context window|prompt is too long|too many tokens',
+    caseSensitive: false,
+  ).hasMatch(message)) {
+    return null;
+  }
+  int? n(RegExp r) => switch (r.firstMatch(message)) {
+    final m? => int.tryParse(m.group(1)!),
+    null => null,
+  };
+  final llamaPrompt = n(RegExp(r'"n_prompt_tokens"\s*:\s*(\d+)'));
+  final llamaCtx = n(RegExp(r'"n_ctx"\s*:\s*(\d+)'));
+  if (llamaPrompt != null || llamaCtx != null) {
+    return (prompt: llamaPrompt, ctx: llamaCtx);
+  }
+  // OpenAI: "maximum context length is 8192 tokens. However, your
+  // messages resulted in 9000 tokens".
+  final openAiCtx = n(RegExp(r'maximum context length is (\d+)'));
+  if (openAiCtx != null) {
+    return (prompt: n(RegExp(r'resulted in (\d+) tokens')), ctx: openAiCtx);
+  }
+  // Anthropic: "prompt is too long: 210000 tokens > 200000 maximum".
+  if (RegExp(r'(\d+) tokens > (\d+) maximum').firstMatch(message)
+      case final m?) {
+    return (prompt: int.parse(m.group(1)!), ctx: int.parse(m.group(2)!));
+  }
+  return (prompt: null, ctx: null);
 }
 
 final _idChars =
@@ -227,6 +331,39 @@ List<String> requestedApp(String text) {
 String shortNote(String text) {
   final t = text.trim().replaceAll(RegExp(r'\s+'), ' ');
   return t.length <= 80 ? t : '${t.substring(0, 79)}…';
+}
+
+/// The story so far, for the system prompt: what the chat was about
+/// before the recent messages, which the model sees as they are. Empty
+/// when there is none yet.
+String aboutStory(String? story) {
+  final t = story?.trim() ?? '';
+  if (t.isEmpty) return '';
+  return '## The story so far\n'
+      'What this chat was about before the recent messages, in short. It '
+      'already happened: build on it, don\'t retell it.\n$t';
+}
+
+/// Exchanges from earlier in the chat that fit what is being said, for the
+/// system prompt. Dated, so the model knows they are past, and each side
+/// cut short: they are reminders, not a transcript. Empty when there are
+/// none.
+String aboutMoments(List<Moment> moments, AppSettings s) {
+  if (moments.isEmpty) return '';
+  final human = humanName(s);
+  String cut(String text) {
+    final t = text.trim().replaceAll(RegExp(r'\s+'), ' ');
+    if (t.length <= 300) return t;
+    final at = t.lastIndexOf(' ', 300);
+    return '${t.substring(0, at < 200 ? 300 : at)}…';
+  }
+
+  return '## Moments from earlier\n'
+      'Older parts of this chat that fit what is being said now. They '
+      'already happened: build on them, don\'t repeat them.\n'
+      '${[for (final m in moments) '- ${DateFormat('EEEE d MMMM y, HH:mm').format(m.said.ts)}. '
+            '$human: "${cut(m.said.content)}"'
+            '${m.reply == null ? '' : ' You: "${cut(m.reply!.content)}"'}'].join('\n')}';
 }
 
 /// The time, for the companion's sense of the day. Written as a sentence:

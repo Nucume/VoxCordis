@@ -6,6 +6,7 @@ import 'package:companion/data/database.dart';
 import 'package:companion/data/database_key.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/features/chat/chat_controller.dart';
+import 'package:companion/services/logs/app_log.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
 import 'package:companion/services/system/installed_apps.dart';
 import 'package:companion/services/system/system_tools.dart';
@@ -148,6 +149,14 @@ void main() {
     expect((second.last as Map)['tool_call_id'], callId);
     // Nobody set a name for the human yet, so the companion is told to ask.
     expect(system['content'], contains("haven't set a name"));
+
+    // Settings → Logs has the thoughts, the tool call and the reply.
+    final logged = await services.log.entries();
+    String first0(LogKind k) => logged.firstWhere((e) => e.kind == k).toText();
+    expect(first0(LogKind.thinking), contains('I should remember it.'));
+    expect(first0(LogKind.decisions), contains('remember'));
+    expect(first0(LogKind.decisions), contains('Favourite tea is genmaicha'));
+    expect(first0(LogKind.chat), contains('Noted, genmaicha it is.'));
 
     // Next turn, the app recalls the fact without the model asking.
     await chat.send('What tea should I make?');
@@ -296,6 +305,86 @@ void main() {
       (await services.messages.recent()).last.content,
       'Let me think about ',
     );
+  });
+
+  test('a prompt too long for the model is cut down and asked again', () async {
+    // A server with a small context, worded like llama-server.
+    final sizes = <int>[];
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    server.listen((req) async {
+      final body = await utf8.decodeStream(req);
+      final messages = (jsonDecode(body) as Map)['messages'] as List;
+      sizes.add(messages.length);
+      final tokens = body.length ~/ 3;
+      if (tokens > 8000) {
+        req.response.statusCode = 400;
+        req.response.write(
+          jsonEncode({
+            'error': {
+              'code': 400,
+              'message':
+                  'request ($tokens tokens) exceeds the available '
+                  'context size (8192 tokens), try increasing it',
+              'type': 'exceed_context_size_error',
+              'n_prompt_tokens': tokens,
+              'n_ctx': 8192,
+            },
+          }),
+        );
+        await req.response.close();
+        return;
+      }
+      req.response.headers.contentType = ContentType('text', 'event-stream');
+      req.response.write(
+        'data: ${jsonEncode({
+          'choices': [
+            {
+              'delta': {'content': 'Fine.'},
+            },
+          ],
+        })}\n\ndata: [DONE]\n\n',
+      );
+      await req.response.close();
+    });
+    final tmp = await Directory.systemTemp.createTemp('companion_test');
+    final db = await openAppDatabase(inMemoryDatabasePath);
+    final services = AppServices(
+      settings: SettingsStore(
+        File('${tmp.path}/settings.json'),
+        AppSettings(
+          companionFolder: '${tmp.path}/c',
+          llmEndpoint: 'http://127.0.0.1:${server.port}/v1',
+          llmMode: LlmMode.external,
+          llmModel: 'mock',
+        ),
+      ),
+      db: db,
+      dbKey: DatabaseKey(Directory.systemTemp),
+      runtime: RuntimeController(tmp),
+    );
+    addTearDown(() async {
+      await server.close(force: true);
+      await db.close();
+      await tmp.delete(recursive: true);
+    });
+    // A long chat from a model with more room.
+    for (var i = 0; i < 30; i++) {
+      await services.messages.add(i.isEven ? 'user' : 'assistant', 'x' * 3000);
+    }
+
+    final chat = ChatController(services);
+    await chat.load();
+    await chat.send('Still there?');
+    expect(chat.error, isNull);
+    expect(chat.messages.last.content, 'Fine.');
+    expect(sizes.length, 2);
+    expect(sizes.last, lessThan(sizes.first));
+
+    // The limit is remembered: the next message fits the first time.
+    sizes.clear();
+    await chat.send('And now?');
+    expect(chat.error, isNull);
+    expect(sizes.length, 1);
   });
 
   test('deleteFrom removes the message and everything after it', () async {

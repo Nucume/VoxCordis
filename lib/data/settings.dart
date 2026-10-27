@@ -69,6 +69,8 @@ class AppSettings {
     this.searchApiKey = '',
     this.blockedSites = const [],
     this.keepRunning = false,
+    this.keepLogs = true,
+    this.logsOff = const [],
     this.startWithComputer = false,
     this.automationRunsPerDay = 24,
     this.imageEngine = ImageEngineChoice.off,
@@ -196,6 +198,14 @@ class AppSettings {
   /// reminders and automations still happen.
   final bool keepRunning;
 
+  /// Writes what the browser, the web tools, the brain and drawing do to
+  /// Settings → Logs, kept in the companion's database.
+  final bool keepLogs;
+
+  /// The kinds of log line not written (LogKind names), while [keepLogs]
+  /// is on.
+  final List<String> logsOff;
+
   /// Starts VoxCordis in the background when the human logs in.
   final bool startWithComputer;
 
@@ -241,6 +251,30 @@ class AppSettings {
     backgroundLayout: backgroundLayout,
     colorway: colorway,
   );
+
+  /// These settings once the current companion is gone: talking to the
+  /// first of the others, or with no companion at all (which sends the
+  /// app back to setup) when it was the only one.
+  AppSettings withoutCurrent() {
+    if (otherCompanions.isEmpty) {
+      return copyWith(
+        clearFolder: true,
+        clearPortrait: true,
+        clearBackground: true,
+        traits: const [],
+        otherCompanions: const [],
+        companionName: const AppSettings().companionName,
+      );
+    }
+    final next = otherCompanions.first;
+    final s = switchedTo(next);
+    return s.copyWith(
+      otherCompanions: [
+        for (final o in s.otherCompanions)
+          if (o.folder != currentCompanion.folder) o,
+      ],
+    );
+  }
 
   /// Every companion, the current one first.
   List<CompanionProfile> get companions => [
@@ -298,6 +332,8 @@ class AppSettings {
       searchApiKey: searchApiKey,
       blockedSites: blockedSites,
       keepRunning: keepRunning,
+      keepLogs: keepLogs,
+      logsOff: logsOff,
       startWithComputer: startWithComputer,
       automationRunsPerDay: automationRunsPerDay,
       imageEngine: imageEngine,
@@ -357,6 +393,8 @@ class AppSettings {
     String? searchApiKey,
     List<String>? blockedSites,
     bool? keepRunning,
+    bool? keepLogs,
+    List<String>? logsOff,
     bool? startWithComputer,
     int? automationRunsPerDay,
     ImageEngineChoice? imageEngine,
@@ -371,6 +409,7 @@ class AppSettings {
     bool clearMmproj = false,
     bool clearTemperature = false,
     bool clearBackground = false,
+    bool clearFolder = false,
   }) {
     return AppSettings(
       companionName: companionName ?? this.companionName,
@@ -379,7 +418,9 @@ class AppSettings {
       userName: userName ?? this.userName,
       userPronouns: userPronouns ?? this.userPronouns,
       portraitPath: clearPortrait ? null : portraitPath ?? this.portraitPath,
-      companionFolder: companionFolder ?? this.companionFolder,
+      companionFolder: clearFolder
+          ? null
+          : companionFolder ?? this.companionFolder,
       llmMode: llmMode ?? this.llmMode,
       modelPath: modelPath ?? this.modelPath,
       modelsFolder: modelsFolder ?? this.modelsFolder,
@@ -409,7 +450,7 @@ class AppSettings {
       backgroundDim: backgroundDim ?? this.backgroundDim,
       systemAccess: systemAccess ?? this.systemAccess,
       allowedSystemActions: allowedSystemActions ?? this.allowedSystemActions,
-      companionId: companionId,
+      companionId: clearFolder ? null : companionId,
       otherCompanions: otherCompanions ?? this.otherCompanions,
       toldAboutMoreCompanions:
           toldAboutMoreCompanions ?? this.toldAboutMoreCompanions,
@@ -421,6 +462,8 @@ class AppSettings {
       searchApiKey: searchApiKey ?? this.searchApiKey,
       blockedSites: blockedSites ?? this.blockedSites,
       keepRunning: keepRunning ?? this.keepRunning,
+      keepLogs: keepLogs ?? this.keepLogs,
+      logsOff: logsOff ?? this.logsOff,
       startWithComputer: startWithComputer ?? this.startWithComputer,
       automationRunsPerDay: automationRunsPerDay ?? this.automationRunsPerDay,
       imageEngine: imageEngine ?? this.imageEngine,
@@ -472,6 +515,8 @@ class AppSettings {
     'searxngUrl': searxngUrl,
     'blockedSites': blockedSites,
     'keepRunning': keepRunning,
+    'keepLogs': keepLogs,
+    'logsOff': logsOff,
     'startWithComputer': startWithComputer,
     'automationRunsPerDay': automationRunsPerDay,
     'imageEngine': imageEngine.name,
@@ -547,6 +592,9 @@ class AppSettings {
           (json['blockedSites'] as List?)?.whereType<String>().toList() ??
           const [],
       keepRunning: json['keepRunning'] as bool? ?? false,
+      keepLogs: json['keepLogs'] as bool? ?? true,
+      logsOff:
+          (json['logsOff'] as List?)?.whereType<String>().toList() ?? const [],
       startWithComputer: json['startWithComputer'] as bool? ?? false,
       automationRunsPerDay:
           json['automationRunsPerDay'] as int? ?? d.automationRunsPerDay,

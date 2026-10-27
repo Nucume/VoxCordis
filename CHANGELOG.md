@@ -13,6 +13,21 @@ the ids); it is left out of the release page.
 ## Unreleased
 
 ### New
+- **A shorter prompt that keeps the thread.** Each reply used to carry the last 40 messages, which is why your companion sometimes said the same things again. Now it gets the last six exchanges as they are, plus "the story so far": a short summary of what came before, which your companion rewrites in the background as messages age out of that window (right after a reply, so your next message isn't kept waiting). Together with Recall's moments from older chat it keeps the thread without rereading everything. Rewinding the chat drops a story that told of the deleted messages.
+- **Recall by meaning.** Settings → Brain offers Recall, a small embedding model (EmbeddingGemma 300M, a 0.3 GB download) that lets your companion find memories by what they mean rather than by matching words: ask about "that place with the great ramen" and the memory about the restaurant comes up. It also brings up moments from older chats that fit what you're saying, dated, so your companion keeps the thread without rereading everything. It runs on this computer, on the processor, with any brain, server-hosted ones too. Without it, memories are matched by words as before.
+{{action:open-settings}}
+- **Reset a companion.** The Danger zone also has "Reset <name>": they forget every chat, memory and reminder but keep their name, personality and folder. One confirmation, by typing a sentence with their name.
+- **Logs.** Settings → Logs shows what your companion's browser, web searches, thoughts, tool calls, replies and drawing (prompt, tags, LoRAs, seed) did, so you can see why something went wrong. Turn logs off entirely or pick which kinds to keep. They stay on your computer in the companion's database (encrypted like the chat), API keys are blanked out, and the oldest lines go after 7 days, 5,000 lines or 8 MB. Copy them, save them as a file, or clear them.
+- **Delete a companion.** Settings → General has a new Danger zone that deletes the companion you're talking to, chats and memories included. You confirm twice, the second time by typing a sentence with their name exactly as shown, capitals included, and can choose to remove their folder too. You then continue with another companion, or go back to setup if it was the last one.
+- **apt and dnf packages.** On Debian, Ubuntu, Fedora and relatives VoxCordis can now be installed as a `.deb` or `.rpm` from a signed repository (the commands are at https://voxcordisai.com/#download). Your system's updater then keeps it current. A copy installed that way doesn't update itself; the update window shows the command to run instead.
+
+### Fixed
+- **"Exceeds the available context size" errors.** A long chat, or switching to a built-in model with a shorter memory span, could make every message fail because the chat no longer fitted. VoxCordis now leaves out the oldest messages so it always fits the memory span (your companion's rules, personality and memories stay in). If a model still says it's too long, VoxCordis learns its real limit, trims a little more and asks again instead of showing an error.
+- **Companion's browser stopping.** If VoxCordis was closed hard or crashed while the browser was open, that browser kept running in the background and every later start of the browser failed at once. VoxCordis now closes the leftover browser (or uses a fresh profile) and always closes its browser when quitting. Pop-up dialogs on a page no longer freeze it, and a crashed page reopens instead of hanging.
+
+## 0.3.3
+
+### New
 - **Latest button.** Scrolled up in the chat, a Latest button floats in at the bottom and takes you back down to the newest message.
 
 

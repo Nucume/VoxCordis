@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_scope.dart';
@@ -73,7 +74,34 @@ class _UpdateDialog extends StatelessWidget {
                     ),
                   ),
                 ],
-                if (!info.canInstall) ...[
+                if (updater.packageUpdateCommand case final command?) ...[
+                  const SizedBox(height: 12),
+                  const Text(
+                    'This copy of VoxCordis came from your package manager, '
+                    'so it updates there. Run this in a terminal:',
+                  ),
+                  const SizedBox(height: 8),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: context.palette.codeFill,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: SelectableText(
+                      command,
+                      style: const TextStyle(fontFamily: 'monospace'),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  TextButton(
+                    onPressed: () =>
+                        launchUrl(Uri.parse(Updater.packageRepoPage)),
+                    child: const Text(
+                      'Installed the file by hand? Add the repository',
+                    ),
+                  ),
+                ] else if (!info.canInstall) ...[
                   const SizedBox(height: 12),
                   const Text(
                     'This copy of VoxCordis can\'t update itself. Download '
@@ -121,6 +149,13 @@ class _UpdateDialog extends StatelessWidget {
                       ),
                 icon: const Icon(Icons.download_rounded),
                 label: const Text('Update and restart'),
+              )
+            else if (updater.packageUpdateCommand case final command?)
+              FilledButton.icon(
+                onPressed: () =>
+                    Clipboard.setData(ClipboardData(text: command)),
+                icon: const Icon(Icons.copy_rounded),
+                label: const Text('Copy command'),
               )
             else
               FilledButton.icon(

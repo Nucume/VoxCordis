@@ -7,6 +7,7 @@ import 'package:companion/data/database_key.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
 import 'package:companion/services/secret_store.dart';
+import 'package:companion/features/settings/delete_companion_dialog.dart';
 import 'package:companion/shell/companion_switcher.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
@@ -145,5 +146,56 @@ void main() {
     expect(CompanionSwitcher.fitting(9, 184 + 4 * 60.0), 3);
     // A tiny window still lists the current companion.
     expect(CompanionSwitcher.fitting(9, 100), 1);
+  });
+
+  test('deleting the current companion moves on to another', () {
+    final s = first.copyWith(otherCompanions: [second]).withoutCurrent();
+    expect(s.companionName, 'Mira');
+    expect(s.otherCompanions, isEmpty);
+    expect(s.userName, 'Sam');
+  });
+
+  test('deleting the only companion sends the app back to setup', () {
+    final s = first.withoutCurrent();
+    expect(s.companionFolder, isNull);
+    expect(s.companionId, isNull);
+    expect(s.otherCompanions, isEmpty);
+    expect(s.userName, 'Sam');
+    expect(s.modelPath, '/models/a.gguf');
+  });
+
+  test('a folder holding other files is not deleted', () {
+    expect(
+      AppServices.canDeleteFolder(
+        '/h/V/Aria',
+        keep: ['/h/V/Mira'],
+        supportDir: '/s',
+      ),
+      isTrue,
+    );
+    expect(
+      AppServices.canDeleteFolder(
+        '/h/V',
+        keep: ['/h/V/Mira'],
+        supportDir: '/s',
+      ),
+      isFalse,
+    );
+    expect(
+      AppServices.canDeleteFolder('/h', keep: [], supportDir: '/h/.local/app'),
+      isFalse,
+    );
+  });
+
+  test('the delete phrase must match exactly, case included', () {
+    expect(deleteConfirmed('Yes, I want to delete Aria!', 'Aria'), isTrue);
+    expect(deleteConfirmed('yes, i want to delete aria!', 'Aria'), isFalse);
+    expect(deleteConfirmed(' Yes, I want to delete Aria!', 'Aria'), isFalse);
+  });
+
+  test('the reset phrase must match exactly', () {
+    expect(resetConfirmed('Yes, I want to reset Aria!', 'Aria'), isTrue);
+    expect(resetConfirmed('yes, i want to reset aria!', 'Aria'), isFalse);
+    expect(resetConfirmed('Yes, I want to delete Aria!', 'Aria'), isFalse);
   });
 }

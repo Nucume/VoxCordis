@@ -333,6 +333,7 @@ class SdRun {
       );
       throw SdException(
         'The picture couldn\'t be drawn${hint.isEmpty ? '' : ' (${hint.trim()})'}.',
+        output: log.join('\n'),
       );
     }
     return out;
@@ -340,8 +341,11 @@ class SdRun {
 }
 
 class SdException implements Exception {
-  SdException(this.message);
+  SdException(this.message, {this.output = ''});
   final String message;
+
+  /// What sd-cli printed last, for Settings → Logs.
+  final String output;
   @override
   String toString() => message;
 }

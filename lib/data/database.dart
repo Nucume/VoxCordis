@@ -12,7 +12,7 @@ Future<Database> openAppDatabase(String path, {String? key}) async {
   return databaseFactoryFfi.openDatabase(
     path,
     options: OpenDatabaseOptions(
-      version: 4,
+      version: 7,
       onConfigure: (db) async {
         // The key comes first: nothing in the file is readable before it.
         if (key != null) {
@@ -26,6 +26,9 @@ Future<Database> openAppDatabase(String path, {String? key}) async {
         _upgradeToV2(batch);
         _upgradeToV3(batch);
         _upgradeToV4(batch);
+        _upgradeToV5(batch);
+        _upgradeToV6(batch);
+        _upgradeToV7(batch);
         await batch.commit(noResult: true);
       },
       onUpgrade: (db, from, _) async {
@@ -33,6 +36,9 @@ Future<Database> openAppDatabase(String path, {String? key}) async {
         if (from < 2) _upgradeToV2(batch);
         if (from < 3) _upgradeToV3(batch);
         if (from < 4) _upgradeToV4(batch);
+        if (from < 5) _upgradeToV5(batch);
+        if (from < 6) _upgradeToV6(batch);
+        if (from < 7) _upgradeToV7(batch);
         await batch.commit(noResult: true);
       },
     ),
@@ -124,4 +130,48 @@ void _upgradeToV4(Batch b) {
       summary      TEXT NOT NULL DEFAULT ''
     )''');
   b.execute('CREATE INDEX schedule_runs_started ON schedule_runs(started_at)');
+}
+
+/// v5: Settings → Logs: what the browser, the web tools, the brain and
+/// drawing did. In this database so it is encrypted with the chat.
+void _upgradeToV5(Batch b) {
+  b.execute('''
+    CREATE TABLE logs (
+      id       INTEGER PRIMARY KEY AUTOINCREMENT,
+      ts       TEXT NOT NULL,
+      kind     TEXT NOT NULL,
+      message  TEXT NOT NULL,
+      details  TEXT NOT NULL DEFAULT '',
+      error    INTEGER NOT NULL DEFAULT 0
+    )''');
+  b.execute('CREATE INDEX logs_ts ON logs(ts)');
+}
+
+/// v6: what memories and chat moments mean, as vectors from the Recall
+/// embedding model, so they can be found by meaning. One row per memory
+/// (`kind` memory, the memory's id) or per exchange (`kind` moment, the id
+/// of the human's message that started it). `model` names the embedding
+/// model, so vectors from another model are made afresh.
+void _upgradeToV6(Batch b) {
+  b.execute('''
+    CREATE TABLE vectors (
+      kind    TEXT NOT NULL,
+      id      TEXT NOT NULL,
+      model   TEXT NOT NULL,
+      vector  BLOB NOT NULL,
+      PRIMARY KEY (kind, id)
+    )''');
+}
+
+/// v7: the story so far: a short summary of the chat before the recent
+/// messages, kept up by the model as messages age out of the prompt. One
+/// row; `through` is the sort_order of the last message folded in.
+void _upgradeToV7(Batch b) {
+  b.execute('''
+    CREATE TABLE story (
+      id          INTEGER PRIMARY KEY CHECK (id = 1),
+      text        TEXT NOT NULL,
+      through     INTEGER NOT NULL,
+      updated_at  TEXT NOT NULL
+    )''');
 }

@@ -271,4 +271,90 @@ void main() {
       expect(requestedOpen(text), isNull, reason: text);
     }
   });
+
+  group('fitting the context', () {
+    List<Map<String, Object?>> turns(int n, int chars) => [
+      for (var i = 0; i < n; i++)
+        {'role': i.isEven ? 'user' : 'assistant', 'content': 'x' * chars},
+    ];
+
+    test('leaves out the oldest turns and keeps the newest', () {
+      final history = turns(41, 3500); // about 1000 tokens each
+      history.last['content'] = 'newest';
+      final prompt = [
+        {'role': 'system', 'content': 's' * 7000},
+        ...history,
+      ];
+      final dropped = fitPrompt(prompt, history, tools: [], budget: 10000);
+      expect(dropped, greaterThan(0));
+      expect(prompt.length, history.length + 1);
+      expect(prompt.first['role'], 'system');
+      expect(prompt[1]['role'], 'user');
+      expect(prompt.last['content'], 'newest');
+      expect(estimatePrompt(prompt, []), lessThanOrEqualTo(10000));
+    });
+
+    test('leaves a prompt that fits alone', () {
+      final history = turns(5, 100);
+      final prompt = [
+        {'role': 'system', 'content': 'hi'},
+        ...history,
+      ];
+      expect(fitPrompt(prompt, history, tools: [], budget: 10000), 0);
+      expect(prompt.length, 6);
+    });
+
+    test('never drops the newest turn', () {
+      final history = turns(3, 100000);
+      final prompt = [
+        {'role': 'system', 'content': 'hi'},
+        ...history,
+      ];
+      expect(fitPrompt(prompt, history, tools: [], budget: 100), 2);
+      expect(history.single['role'], 'user');
+      expect(fitPrompt(prompt, history, tools: [], budget: 100), 0);
+    });
+
+    test('counts pictures by their number, not their data', () {
+      final t = estimateTokens({
+        'role': 'user',
+        'content': [
+          {'type': 'text', 'text': 'look'},
+          {
+            'type': 'image_url',
+            'image_url': {'url': 'data:image/png;base64,${'A' * 500000}'},
+          },
+        ],
+      });
+      expect(t, lessThan(pictureTokens + 20));
+    });
+
+    test('reads llama-server\'s overflow error', () {
+      final o = promptOverflow(
+        'HTTP 400: {"error":{"code":400,"message":"request (35982 tokens) '
+        'exceeds the available context size (32768 tokens), try increasing '
+        'it","type":"exceed_context_size_error","n_prompt_tokens":35982,'
+        '"n_ctx":32768}}',
+      );
+      expect(o?.prompt, 35982);
+      expect(o?.ctx, 32768);
+    });
+
+    test('reads OpenAI- and Anthropic-style overflow errors', () {
+      final openAi = promptOverflow(
+        'HTTP 400: This model\'s maximum context length is 8192 tokens. '
+        'However, your messages resulted in 9000 tokens.',
+      );
+      expect((openAi?.prompt, openAi?.ctx), (9000, 8192));
+      final anthropic = promptOverflow(
+        'HTTP 400: prompt is too long: 210000 tokens > 200000 maximum',
+      );
+      expect((anthropic?.prompt, anthropic?.ctx), (210000, 200000));
+    });
+
+    test('ignores other errors', () {
+      expect(promptOverflow('HTTP 400: model does not support tools'), isNull);
+      expect(promptOverflow('HTTP 500: context size exceeded'), isNull);
+    });
+  });
 }

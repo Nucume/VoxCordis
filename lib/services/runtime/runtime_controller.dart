@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 
 import '../../data/settings.dart';
 import '../llm_client.dart';
+import '../recall/embedder.dart';
 import 'download.dart';
 import 'gpu_info.dart';
 import 'llama_server.dart';
@@ -186,7 +187,7 @@ class RuntimeController extends ChangeNotifier {
     if (_holds > 0) return;
     _idleTimer = Timer(idleUnload, () {
       _idleTimer = null;
-      if (_holds == 0) unawaited(stopAll());
+      if (_holds == 0) unawaited(freeGpu());
     });
   }
 
@@ -209,7 +210,7 @@ class RuntimeController extends ChangeNotifier {
     final drawing = done.whenComplete(() => _drawing = null);
     _drawing = drawing;
     drawing.ignore();
-    await stopAll();
+    await freeGpu();
   }
 
   /// Whether the models are set to unload when nothing happens.
@@ -221,14 +222,88 @@ class RuntimeController extends ChangeNotifier {
     touch(s);
   }
 
-  /// Stops the chat model and Eyes, when the app closes.
-  Future<void> stopAll() async {
+  /// Stops the chat model and Eyes, which hold graphics memory. Recall
+  /// stays: it runs on the processor and is let go on its own.
+  Future<void> freeGpu() async {
     await stopEyes();
     await stop();
   }
 
+  /// Stops the chat model, Eyes and Recall, when the app closes.
+  Future<void> stopAll() async {
+    await freeGpu();
+    await stopRecall();
+  }
+
   File get _pidFile => File('${installer.installDir.parent.path}/server.pid');
   File get _eyesPidFile => File('${installer.installDir.parent.path}/eyes.pid');
+  File get _recallPidFile =>
+      File('${installer.installDir.parent.path}/recall.pid');
+
+  LlamaServer? _recall;
+  String? _recallConfig;
+  Future<LlamaServer>? _recallStarting;
+  Timer? _recallIdle;
+
+  /// How long Recall stays loaded after its last use. It lives in main
+  /// memory (about half a gigabyte), not on the graphics card.
+  static const recallIdle = Duration(minutes: 10);
+
+  /// Recall's embedding server, loaded on first use and let go again after
+  /// [recallIdle] without one. Throws when Recall isn't downloaded.
+  Future<LlamaServer> ensureRecall(AppSettings s) {
+    final path = ModelCatalog.recallFile(s);
+    if (path == null) throw StateError('Recall is not downloaded.');
+    _recallIdle?.cancel();
+    _recallIdle = Timer(recallIdle, () => unawaited(stopRecall()));
+    final running = _recall;
+    if (running != null && _recallConfig == path) return Future.value(running);
+    return _recallStarting ??= () async {
+      await stopRecall(keepTimer: true);
+      final binary =
+          await installer.find() ?? await installer.ensureInstalled();
+      await _killStale(_recallPidFile);
+      final server = await LlamaServer.start(
+        binary: binary,
+        modelPath: path,
+        embedding: true,
+        // What EmbeddingGemma reads at most; texts are cut to fit.
+        contextSize: Embedder.contextSize,
+        // On the processor: a text embeds in a moment there, and the
+        // graphics card stays the chat model's.
+        useGpu: false,
+        onSpawn: (pid) {
+          _recallPidFile.parent.createSync(recursive: true);
+          _recallPidFile.writeAsStringSync('$pid');
+        },
+      );
+      _recall = server;
+      _recallConfig = path;
+      unawaited(
+        server.exitCode.then((_) {
+          if (_recall != server) return;
+          _recall = null;
+          _recallConfig = null;
+        }),
+      );
+      return server;
+    }().whenComplete(() => _recallStarting = null);
+  }
+
+  /// Unloads Recall.
+  Future<void> stopRecall({bool keepTimer = false}) async {
+    if (!keepTimer) {
+      _recallIdle?.cancel();
+      _recallIdle = null;
+    }
+    final s = _recall;
+    _recall = null;
+    _recallConfig = null;
+    if (s != null) {
+      await s.stop();
+      if (await _recallPidFile.exists()) await _recallPidFile.delete();
+    }
+  }
 
   /// A crash or a killed app can leave a server behind holding GPU memory.
   /// Its pid was written down at start; stop it if it is still running.

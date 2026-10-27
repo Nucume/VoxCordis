@@ -92,8 +92,42 @@ class MessageRepository {
         whereArgs: [id],
       );
 
-  Future<void> delete(String id) =>
-      _db.delete('messages', where: 'id = ?', whereArgs: [id]);
+  Future<void> delete(String id) => _db.transaction((txn) async {
+    await txn.delete(
+      'vectors',
+      where: "kind = 'moment' AND id = ?",
+      whereArgs: [id],
+    );
+    await txn.delete('messages', where: 'id = ?', whereArgs: [id]);
+  });
+
+  /// The messages with [ids], oldest first.
+  Future<List<ChatMessage>> byIds(Iterable<String> ids) async {
+    final list = ids.toList();
+    if (list.isEmpty) return const [];
+    final rows = await _db.query(
+      'messages',
+      where: 'id IN (${List.filled(list.length, '?').join(',')})',
+      whereArgs: list,
+      orderBy: 'sort_order',
+    );
+    return rows.map(ChatMessage.fromRow).toList();
+  }
+
+  /// The companion's reply to [m]: the message right after it, when that is
+  /// a reply; null when [m] got none (yet).
+  Future<ChatMessage?> replyTo(ChatMessage m) async {
+    final rows = await _db.query(
+      'messages',
+      where: 'sort_order > ?',
+      whereArgs: [m.sortOrder],
+      orderBy: 'sort_order',
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final next = ChatMessage.fromRow(rows.single);
+    return next.role == 'assistant' ? next : null;
+  }
 
   /// How many messages came after [m], on any day.
   Future<int> countAfter(ChatMessage m) async {
@@ -104,12 +138,35 @@ class MessageRepository {
     return rows.first['n'] as int;
   }
 
-  /// Deletes [m] and every message after it, on any day.
-  Future<void> deleteFrom(ChatMessage m) => _db.delete(
-    'messages',
-    where: 'sort_order >= ?',
-    whereArgs: [m.sortOrder],
-  );
+  /// Messages after sort order [through], oldest first.
+  Future<List<ChatMessage>> after(int through) async {
+    final rows = await _db.query(
+      'messages',
+      where: 'sort_order > ?',
+      whereArgs: [through],
+      orderBy: 'sort_order',
+    );
+    return rows.map(ChatMessage.fromRow).toList();
+  }
+
+  /// Deletes [m] and every message after it, on any day. A story so far
+  /// that had folded in any of them goes too: it would tell of messages
+  /// that are no more.
+  Future<void> deleteFrom(ChatMessage m) => _db.transaction((txn) async {
+    await txn.delete(
+      'vectors',
+      where:
+          "kind = 'moment' AND id IN "
+          '(SELECT id FROM messages WHERE sort_order >= ?)',
+      whereArgs: [m.sortOrder],
+    );
+    await txn.delete('story', where: 'through >= ?', whereArgs: [m.sortOrder]);
+    await txn.delete(
+      'messages',
+      where: 'sort_order >= ?',
+      whereArgs: [m.sortOrder],
+    );
+  });
 
   /// Latest [limit] messages, oldest first.
   Future<List<ChatMessage>> recent({int limit = 200}) async {

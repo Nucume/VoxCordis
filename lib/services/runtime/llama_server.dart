@@ -31,7 +31,9 @@ class LlamaServer {
 
   int get pid => _process.pid;
 
-  /// Starts the server and waits until the model is loaded.
+  /// Starts the server and waits until the model is loaded. With
+  /// [embedding] it serves `/v1/embeddings` for an embedding model instead
+  /// of chat.
   static Future<LlamaServer> start({
     required String binary,
     required String modelPath,
@@ -39,6 +41,7 @@ class LlamaServer {
     bool useGpu = true,
     String? chatTemplateFile,
     String? mmprojPath,
+    bool embedding = false,
     Duration timeout = const Duration(minutes: 3),
     http.Client? client,
     void Function(int pid)? onSpawn,
@@ -57,7 +60,20 @@ class LlamaServer {
         // much of the model in graphics memory as fits and runs the rest on
         // the CPU, so a model too big for the card is slow rather than broken.
         if (!useGpu) ...['-ngl', '0'],
-        '--jinja', // tool calling (remember, update_memory, forget)
+        if (embedding)
+        // An embedding model reads each text whole, so one batch has to
+        // hold a text as long as the context; mean pooling is what
+        // EmbeddingGemma was trained with.
+        ...[
+          '--embedding',
+          '--pooling',
+          'mean',
+          '-b',
+          '$contextSize',
+          '-ub',
+          '$contextSize',
+        ] else
+          '--jinja', // tool calling (remember, update_memory, forget)
         if (chatTemplateFile != null) ...[
           '--chat-template-file',
           chatTemplateFile,

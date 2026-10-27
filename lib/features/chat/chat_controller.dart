@@ -23,10 +23,12 @@ import '../../data/skills/skills.dart';
 import '../../services/images/draw_tools.dart';
 import '../../services/images/image_engine.dart';
 import '../../services/llm_client.dart';
+import '../../services/logs/app_log.dart';
 import '../../services/runtime/model_catalog.dart';
 import '../../services/schedule/poke.dart';
 import '../../services/schedule/scheduler.dart';
 import '../../services/sight.dart';
+import '../../services/story/story_keeper.dart';
 import '../../services/system/system_tools.dart';
 import '../../services/web/web_tools.dart';
 import 'attachments_prompt.dart';
@@ -103,7 +105,6 @@ class ChatController extends ChangeNotifier {
   double? reading;
 
   static const _maxToolRounds = 3;
-  static const _historyTurns = 40;
 
   /// Most tokens one round may write, thoughts included.
   static const maxReplyTokens = 4096;
@@ -305,6 +306,31 @@ class ChatController extends ChangeNotifier {
   /// plain chat, without memory or other tools.
   final _noTools = <String>{};
 
+  /// Context sizes of server-hosted models, by [Sight.serverKey], learned
+  /// when one turned a prompt down as too long.
+  final _serverCtx = <String, int>{};
+
+  /// How far [estimateTokens] was off for each model, from the server's own
+  /// count when it turned a prompt down.
+  final _tokenScale = <String, double>{};
+
+  static String _modelKey(AppSettings s) => s.llmMode == LlmMode.builtIn
+      ? 'builtin:${s.modelPath}'
+      : Sight.serverKey(s);
+
+  /// Estimated tokens the prompt may take in a context of [ctx] tokens,
+  /// leaving room for the reply.
+  int _budget(AppSettings s, int ctx) =>
+      ((ctx - replyRoom(ctx, maxReplyTokens)) /
+              (_tokenScale[_modelKey(s)] ?? 1))
+          .floor();
+
+  /// The context the prompt has to fit: the memory span the built-in
+  /// runtime was started with, or what a server-hosted model said its
+  /// limit is. Null while a server-hosted model's limit is unknown.
+  int? _contextFor(AppSettings s) =>
+      s.llmMode == LlmMode.builtIn ? s.contextSize : _serverCtx[_modelKey(s)];
+
   /// Whether [e] is a server saying the model can't be given tools.
   static bool refusedTools(LlmException e) =>
       RegExp(r'^HTTP (400|404)\b').hasMatch(e.message) &&
@@ -372,8 +398,18 @@ class ChatController extends ChangeNotifier {
   }
 
   /// Adds [note] to the line under the reply.
-  void _addNote(String note) =>
-      toolNote = toolNote == null ? note : '$toolNote · $note';
+  void _addNote(String note) {
+    toolNote = toolNote == null ? note : '$toolNote · $note';
+    _log(LogKind.chat, note);
+  }
+
+  /// Settings → Logs.
+  void _log(
+    LogKind kind,
+    String message, {
+    String details = '',
+    bool error = false,
+  }) => _services.log.add(kind, message, details: details, error: error);
 
   String _systemPrompt(
     AppSettings settings,
@@ -381,6 +417,8 @@ class ChatController extends ChangeNotifier {
     required String core,
     required ({String personality, String lessons}) desk,
     required String recalled,
+    required String story,
+    required String moments,
     required String skills,
     required String drawing,
   }) =>
@@ -395,6 +433,8 @@ class ChatController extends ChangeNotifier {
       '${desk.lessons}\n\n'
       '## What you remember\n'
       '$recalled\n\n'
+      '${story.isEmpty ? '' : '$story\n\n'}'
+      '${moments.isEmpty ? '' : '$moments\n\n'}'
       '${_noTools.contains(Sight.serverKey(settings)) ? '$aboutTextTools\n\n' : ''}'
       '${aboutInternet(settings)}\n\n'
       '${aboutSchedule()}\n\n'
@@ -458,7 +498,16 @@ class ChatController extends ChangeNotifier {
               sourceIds: sourceIds,
             );
       prompt.add({'role': 'tool', 'tool_call_id': c.id, 'content': result});
-      if ((jsonDecode(result) as Map)['ok'] == true) {
+      final ok = (jsonDecode(result) as Map)['ok'] == true;
+      _log(
+        LogKind.decisions,
+        skip != null
+            ? 'Skipped ${c.name}: $skip'
+            : '${c.name}${ok ? '' : ' (failed)'}',
+        details: 'Arguments: ${c.arguments}\nResult: $result',
+        error: !ok && skip == null,
+      );
+      if (ok) {
         final text = c.parsedArguments['text'];
         final what = text is String ? ': "${shortNote(text)}"' : '';
         final note = switch (c.name) {
@@ -670,6 +719,8 @@ class ChatController extends ChangeNotifier {
     final sourceIds = [?userMsg?.id];
     _readWeb = false;
     _unattended = scheduled?.kind == ScheduleKind.task || poke != null;
+    // A summary being written would keep this reply waiting.
+    _services.storyKeeper.cancel();
     error = null;
     toolNote = null;
     stopped = false;
@@ -685,6 +736,7 @@ class ChatController extends ChangeNotifier {
     final thoughts = StringBuffer();
     var looped = false;
     var lastFinish = '';
+    var started = DateTime.now();
 
     _services.runtime.hold();
     try {
@@ -692,6 +744,16 @@ class ChatController extends ChangeNotifier {
       if (_stopRequested) throw const _Stopped();
       phase = ChatPhase.thinking;
       notifyListeners();
+      started = DateTime.now();
+      _log(
+        LogKind.chat,
+        'Writing a ${switch (scheduled?.kind) {
+          null when poke != null => 'poke',
+          null => 'reply',
+          ScheduleKind.reminder => 'reminder',
+          ScheduleKind.task => 'task',
+        }} with ${target.model}',
+      );
       final client = LlmClient(
         baseUrl: target.baseUrl,
         model: target.model,
@@ -706,9 +768,27 @@ class ChatController extends ChangeNotifier {
       );
       final core = await CoreRules.load(settings);
       final desk = await DeskFiles.load(settings);
-      final recalled = MemoryTools.formatForPrompt(
-        await _services.memory.recall(query),
+      // The prompt carries the story so far and the recent messages, as
+      // they are; what is older is reached by meaning.
+      final sofar = await _services.story.get();
+      final recent = StoryKeeper.recent(messages, sofar?.through);
+      final found = await _services.recall.recall(
+        _recallQuery(query, userMsg),
+        // The recent turns are in the prompt anyway.
+        beforeSortOrder: recent.firstOrNull?.sortOrder,
       );
+      final recalled = MemoryTools.formatForPrompt(found.memories);
+      final story = aboutStory(sofar?.text);
+      final moments = aboutMoments(found.moments, settings);
+      if (found.memories.isNotEmpty || found.moments.isNotEmpty) {
+        _log(
+          LogKind.thinking,
+          found.byMeaning
+              ? 'Recalled by meaning'
+              : 'Recalled by matching words',
+          details: moments.isEmpty ? recalled : '$recalled\n\n$moments',
+        );
+      }
       final skillList = settings.companionFolder == null
           ? const <Skill>[]
           : await Skills.load(settings.companionFolder!);
@@ -732,11 +812,7 @@ class ChatController extends ChangeNotifier {
         images.available(settings),
         images.lorasFor(settings),
       );
-      final history = alternatingHistory(
-        await _withDrawnNotes(
-          messages.skip(max(0, messages.length - _historyTurns)),
-        ),
-      );
+      final history = alternatingHistory(await _withDrawnNotes(recent));
       final note = scheduled != null
           ? _scheduledNote(scheduled, settings, late: late)
           : poke;
@@ -764,6 +840,8 @@ class ChatController extends ChangeNotifier {
             core: core,
             desk: desk,
             recalled: recalled,
+            story: story,
+            moments: moments,
             skills: skills,
             drawing: drawing,
           ),
@@ -796,6 +874,24 @@ class ChatController extends ChangeNotifier {
       final toolNames = {
         for (final t in tools) (t['function'] as Map)['name'] as String,
       };
+      // Older turns are left out so the prompt fits the model's context;
+      // a long chat or a switch to a smaller model would overflow it.
+      if (_contextFor(settings) case final ctx?) {
+        final dropped = fitPrompt(
+          prompt,
+          history,
+          tools: tools,
+          budget: _budget(settings, ctx),
+        );
+        if (dropped > 0) {
+          _log(
+            LogKind.thinking,
+            'Left out the $dropped oldest turns to fit the ${ctx ~/ 1024}k '
+            'memory span',
+          );
+        }
+      }
+      var refits = 0;
       // Repeats are skipped across the whole reply.
       final seen = <String>{};
       var actedFirst = false;
@@ -829,6 +925,7 @@ class ChatController extends ChangeNotifier {
       for (var round = 0; round <= _maxToolRounds; round++) {
         List<ToolCall>? calls;
         var checkedText = buffer.length, checkedThoughts = thoughts.length;
+        final thoughtsFrom = thoughts.length;
         endMarked = false;
         try {
           await for (final event in client.chat(
@@ -894,12 +991,67 @@ class ChatController extends ChangeNotifier {
                   for (final x in c)
                     if (toolNames.contains(x.name)) withShortId(x),
                 ];
+                for (final x in c) {
+                  if (!toolNames.contains(x.name)) {
+                    _log(
+                      LogKind.decisions,
+                      'Asked for a tool it doesn\'t have: ${x.name}',
+                      details: x.arguments,
+                    );
+                  }
+                }
                 if (known.isNotEmpty) calls = known;
             }
             // Leaving the loop closes the stream, which stops the server.
             if (looped) break;
           }
         } on LlmException catch (e) {
+          // Still too long for the model, by the server's own count: learn
+          // how far off the guess was, leave out more and ask again.
+          if (promptOverflow(e.message) case final over? when refits < 2) {
+            refits++;
+            final key = _modelKey(settings);
+            final guess = estimatePrompt(prompt, tools);
+            if (over.prompt case final real? when guess > 0) {
+              _tokenScale[key] = max(
+                _tokenScale[key] ?? 1,
+                real / guess * 1.05,
+              );
+            }
+            if (over.ctx case final ctx?
+                when settings.llmMode == LlmMode.external) {
+              _serverCtx[key] = ctx;
+            }
+            final ctx = over.ctx ?? _contextFor(settings);
+            final dropped = fitPrompt(
+              prompt,
+              history,
+              tools: tools,
+              budget: ctx != null ? _budget(settings, ctx) : guess * 3 ~/ 4,
+            );
+            _log(
+              LogKind.chat,
+              dropped > 0
+                  ? 'The prompt was too long for the model; left out the '
+                        '$dropped oldest turns and asked again'
+                  : 'The prompt was too long for the model, with nothing '
+                        'older left to leave out',
+              details: e.message,
+            );
+            if (dropped > 0) {
+              round--;
+              continue;
+            }
+            throw LlmException(
+              settings.llmMode == LlmMode.builtIn
+                  ? 'This is too long for the ${settings.contextSize ~/ 1024}k '
+                        'memory span. Send something shorter, or pick a '
+                        'longer memory span in Settings → Brain.'
+                  : 'This is too long for ${settings.llmModel}. Send '
+                        'something shorter, or pick a model with a bigger '
+                        'context.',
+            );
+          }
           // A server-hosted model with no tool support: ask again as plain
           // chat, and remember that.
           if (tools.isNotEmpty &&
@@ -943,6 +1095,8 @@ class ChatController extends ChangeNotifier {
                 core: core,
                 desk: desk,
                 recalled: recalled,
+                story: story,
+                moments: moments,
                 skills: skills,
                 drawing: drawing,
               ),
@@ -958,6 +1112,16 @@ class ChatController extends ChangeNotifier {
           continue;
         }
         lastFinish = client.finishReason ?? '';
+        if (thoughts.length > thoughtsFrom) {
+          final t = thoughts.toString().substring(thoughtsFrom).trim();
+          if (t.isNotEmpty) {
+            _log(
+              LogKind.thinking,
+              round == 0 ? 'Thoughts' : 'Thoughts (after tools, round $round)',
+              details: t,
+            );
+          }
+        }
         if (looped ||
             calls == null ||
             round == _maxToolRounds ||
@@ -1027,6 +1191,15 @@ class ChatController extends ChangeNotifier {
               : '$name didn\'t write anything. Try again.',
         );
       }
+      _log(
+        LogKind.chat,
+        '${stopped ? 'Stopped' : 'Replied'} after '
+        '${DateTime.now().difference(started).inSeconds} s: '
+        '${shown().length} characters'
+        '${lastFinish.isEmpty ? '' : ', finish: $lastFinish'}'
+        '${looped ? ', cut short for repeating itself' : ''}',
+        details: shown(),
+      );
       if (messages.any((m) => m.id == reply.id)) {
         await _services.messages.setContent(
           reply.id,
@@ -1040,6 +1213,15 @@ class ChatController extends ChangeNotifier {
         stopped = true;
       } else {
         error = '$e';
+        _log(
+          LogKind.chat,
+          'The reply failed: $e',
+          details: [
+            if (lastFinish.isNotEmpty) 'Finish: $lastFinish',
+            if (buffer.isNotEmpty) 'Written so far:\n${shown()}',
+          ].join('\n'),
+          error: true,
+        );
       }
       // Keep what was written so far, also when the reply failed.
       if (replyId != null && buffer.isNotEmpty) {
@@ -1069,7 +1251,26 @@ class ChatController extends ChangeNotifier {
       _services.runtime.release(_services.settings.value);
       days = await _services.messages.days();
       notifyListeners();
+      // This exchange, and anything remembered, become findable by meaning.
+      _services.recall.update(limit: 32, refresh: userMsg?.id).ignore();
+      // Messages that aged out of the recent window join the story so far,
+      // now that the human is reading the reply.
+      if (!stopped && error == null) {
+        _services.storyKeeper.catchUp().ignore();
+      }
     }
+  }
+
+  /// What Recall looks for: the message, and when that is short ("yes",
+  /// "tell me more") the end of the reply it answers, for what it is about.
+  String _recallQuery(String query, ChatMessage? userMsg) {
+    if (userMsg == null || query.trim().length >= 60) return query;
+    final before = messages
+        .where((m) => m.role == 'assistant' && m.sortOrder < userMsg.sortOrder)
+        .lastOrNull;
+    if (before == null || before.content.trim().isEmpty) return query;
+    final t = before.content.trim();
+    return '${t.length <= 400 ? t : t.substring(t.length - 400)}\n\n$query';
   }
 }
 

@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 
 import '../../data/settings.dart';
 import '../invoke_client.dart';
+import '../logs/app_log.dart';
 import '../runtime/download.dart';
 import '../runtime/runtime_controller.dart';
 import 'image_catalog.dart';
@@ -57,6 +58,9 @@ class ImageEngine extends ChangeNotifier {
   @visibleForTesting
   Future<String> Function(AppSettings s)? findExe;
 
+  /// Settings → Logs; set by the app.
+  AppLog? log;
+
   /// Called with each picture drawn for the chat, to show it there.
   Future<void> Function(DrawJob job, File picture)? onDrawn;
 
@@ -97,6 +101,9 @@ class ImageEngine extends ChangeNotifier {
       invokeCatalog = await invokeFor(s).catalog();
       invokeError = null;
     } catch (e) {
+      if (invokeError != '$e') {
+        log?.add(LogKind.drawing, 'Invoke isn\'t answering: $e', error: true);
+      }
       invokeCatalog = null;
       invokeError = '$e';
     }
@@ -154,11 +161,24 @@ class ImageEngine extends ChangeNotifier {
         progress = null;
         status = 'Waiting for the reply to finish';
         notifyListeners();
+        final started = DateTime.now();
         try {
           final file = await _run(job);
+          log?.add(
+            LogKind.drawing,
+            'Drew ${p.basename(file.path)} in '
+            '${DateTime.now().difference(started).inSeconds} s',
+            details: file.path,
+          );
           job._done.complete(file);
           if (job.forChat) await onDrawn?.call(job, file);
         } catch (e) {
+          log?.add(
+            LogKind.drawing,
+            'Drawing failed: $e',
+            details: e is SdException ? e.output : '',
+            error: true,
+          );
           job._done.completeError(e);
           job.done.ignore();
           if (job.forChat) onFailed?.call(job, e);
@@ -198,6 +218,18 @@ class ImageEngine extends ChangeNotifier {
         out = File(p.join(job.folder, 'images', 'drawn-$stamp-$n.png'));
       }
       final seed = job.request.seed ?? Random().nextInt(1 << 31);
+      final r = job.request;
+      log?.add(
+        LogKind.drawing,
+        'Drawing with ${r.model.name}${viaInvoke ? ' in Invoke' : ''} '
+        '(${r.shape}, seed $seed)',
+        details: [
+          'Prompt: ${r.prompt}',
+          if (r.negative.isNotEmpty) 'Negative: ${r.negative}',
+          if (r.loras.isNotEmpty)
+            'LoRAs: ${r.loras.map((l) => '${l.name} ${l.weight}').join(', ')}',
+        ].join('\n'),
+      );
       if (viaInvoke) {
         status = 'Drawing in Invoke';
         progress = null;

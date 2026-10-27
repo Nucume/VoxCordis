@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
 import '../import/untrusted_text.dart';
+import '../logs/app_log.dart';
 import '../runtime/download.dart';
 import 'web_guard.dart';
 
@@ -19,14 +20,26 @@ import 'web_guard.dart';
 /// human's own browser logins, history or extensions. With no such browser
 /// installed, [download] fetches Chrome's headless shell once.
 class HeadlessBrowser {
-  HeadlessBrowser(this.supportDir, {http.Client? client, this.findInstalled})
-    : _http = client ?? http.Client();
+  HeadlessBrowser(
+    this.supportDir, {
+    http.Client? client,
+    this.findInstalled,
+    this.resolvesPublic = WebGuard.resolvesPublic,
+  }) : _http = client ?? http.Client();
 
   final Directory supportDir;
   final http.Client _http;
 
   /// Finds a browser on the computer; replaced in tests.
   final Future<String?> Function()? findInstalled;
+
+  /// Whether a site's name leads outside the home network; replaced in
+  /// tests, which browse a site on this computer.
+  final Future<bool> Function(String host) resolvesPublic;
+
+  /// Where starting, pages, failures and closing are written; set by the
+  /// app (Settings → Logs).
+  AppLog? log;
 
   /// The browser closes after this long unused, so it holds no memory.
   static const idleClose = Duration(minutes: 5);
@@ -41,6 +54,14 @@ class HeadlessBrowser {
   final _events = StreamController<Map<String, Object?>>.broadcast();
   Timer? _idle;
   Future<void>? _starting;
+  Future<void>? _paging;
+
+  /// A profile of its own for this run, used when the usual one is held by
+  /// a browser that can't be closed; deleted on [close].
+  Directory? _tempProfile;
+
+  /// What the browser printed last, for the log when it fails.
+  final _stderr = <String>[];
 
   /// The page the companion is on, or null before the first visit.
   Uri? get currentUrl => _url;
@@ -187,11 +208,38 @@ class HeadlessBrowser {
     return exe;
   }
 
-  /// Starts the browser if it isn't running.
-  Future<void> _ensure() => _starting ??= _start().catchError((Object e) {
-    _starting = null;
-    throw e;
-  });
+  /// Starts the browser if it isn't running, and opens a page in it if
+  /// the last one crashed or closed.
+  Future<void> _ensure() async {
+    await (_starting ??= _start().catchError((Object e) {
+      _starting = null;
+      _note('Couldn\'t start: $e', error: true, details: _stderrTail());
+      throw e;
+    }));
+    if (_session == null) {
+      await (_paging ??= _newPage().whenComplete(() => _paging = null));
+    }
+  }
+
+  void _note(String message, {String details = '', bool error = false}) =>
+      log?.add(LogKind.browser, message, details: details, error: error);
+
+  /// The browser's last lines on stderr, without the harmless noise about
+  /// D-Bus and GPU that Chromium prints on every start.
+  String _stderrTail() => _stderr
+      .where((l) => !_noise.hasMatch(l))
+      .toList()
+      .reversed
+      .take(25)
+      .toList()
+      .reversed
+      .join('\n');
+
+  static final _noise = RegExp(
+    r'dbus|Fontconfig|gpu_init|viz_main|angle_platform|gles2|vaapi|'
+    r'Failed to connect to the bus|DevTools listening|^\s*$',
+    caseSensitive: false,
+  );
 
   Future<void> _start() async {
     final exe = await executable();
@@ -200,7 +248,60 @@ class HeadlessBrowser {
     }
     final profile = Directory(p.join(supportDir.path, 'browser', 'profile'));
     await profile.create(recursive: true);
+    // A browser left over from an earlier run (VoxCordis was killed or
+    // crashed while it was open) still holds the profile, and a new one
+    // would only hand over to it and quit at once. Close it first.
+    await _closeLeftover(profile);
+    _note('Starting $exe');
+    try {
+      await _launch(exe, profile);
+    } on ProfileInUse {
+      // Still held by something: a fresh profile just for this run.
+      final temp = await Directory.systemTemp.createTemp('voxcordis-browser-');
+      _tempProfile = temp;
+      _note(
+        'Its profile is in use by another browser, so this run uses a '
+        'temporary one',
+        details: profile.path,
+      );
+      await _launch(exe, temp);
+    }
+    _note('Started');
+  }
+
+  /// Closes a browser of ours still running from an earlier session, found
+  /// through the DevTools address it left in [profile].
+  Future<void> _closeLeftover(Directory profile) async {
+    final file = File(p.join(profile.path, 'DevToolsActivePort'));
+    try {
+      if (!await file.exists()) return;
+      final lines = (await file.readAsString()).split('\n');
+      final port = int.tryParse(lines.first.trim());
+      final path = lines.length > 1 ? lines[1].trim() : '';
+      if (port == null || !path.startsWith('/devtools/browser/')) return;
+      final socket = await WebSocket.connect(
+        'ws://127.0.0.1:$port$path',
+      ).timeout(const Duration(seconds: 2));
+      _note('Closing a browser left running by an earlier session');
+      socket.add(jsonEncode({'id': 1, 'method': 'Browser.close'}));
+      await socket.drain<void>().timeout(
+        const Duration(seconds: 5),
+        onTimeout: () {},
+      );
+      // Let it let go of the profile.
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    } catch (_) {
+      // Nothing listening there: an old file from a browser that's gone.
+    } finally {
+      try {
+        if (await file.exists()) await file.delete();
+      } catch (_) {}
+    }
+  }
+
+  Future<void> _launch(String exe, Directory profile) async {
     final shell = p.basenameWithoutExtension(exe) == 'chrome-headless-shell';
+    _stderr.clear();
     final process = await Process.start(exe, [
       if (shell) '--headless' else '--headless=new',
       '--remote-debugging-port=0',
@@ -220,27 +321,60 @@ class HeadlessBrowser {
     ]);
     _process = process;
     final ws = Completer<String>();
+    var handedOver = false;
     process.stderr
-        .transform(utf8.decoder)
+        // Chromium may print paths that aren't valid UTF-8.
+        .transform(const Utf8Decoder(allowMalformed: true))
         .transform(const LineSplitter())
-        .listen((line) {
-          final m = RegExp(
-            r'DevTools listening on (ws://\S+)',
-          ).firstMatch(line);
-          if (m != null && !ws.isCompleted) ws.complete(m[1]!);
-        });
+        .listen(
+          (line) {
+            _stderr.add(line);
+            if (_stderr.length > 200) _stderr.removeAt(0);
+            if (line.contains('Opening in existing browser session')) {
+              handedOver = true;
+            }
+            final m = RegExp(
+              r'DevTools listening on (ws://\S+)',
+            ).firstMatch(line);
+            if (m != null && !ws.isCompleted) ws.complete(m[1]!);
+          },
+          onError: (_) {},
+          cancelOnError: false,
+        );
     process.stdout.drain<void>().ignore();
     unawaited(
-      process.exitCode.then((_) {
+      process.exitCode.then((code) async {
         if (!ws.isCompleted) {
-          ws.completeError('The browser closed as it started.');
+          // Its last words may still be on their way.
+          await Future<void>.delayed(const Duration(milliseconds: 150));
+          if (identical(_process, process)) _process = null;
+          // Exiting at once without an error is a browser handing over to
+          // another one with the same profile.
+          if (!ws.isCompleted) {
+            ws.completeError(
+              handedOver || code == 0 ? const ProfileInUse() : _whyClosed(code),
+            );
+          }
+          return;
         }
-        _reset();
+        // Only when this is still the browser in use: a closed one exiting
+        // late must not reset the next one.
+        if (identical(_process, process)) {
+          _note(
+            'The browser closed unexpectedly (exit code $code)',
+            error: true,
+            details: _stderrTail(),
+          );
+          _reset();
+        }
       }),
     );
     final address = await ws.future.timeout(
       const Duration(seconds: 30),
-      onTimeout: () => throw 'The browser didn\'t start in time.',
+      onTimeout: () {
+        process.kill();
+        throw 'The browser didn\'t start in time.';
+      },
     );
     final socket = await WebSocket.connect(address);
     _socket = socket;
@@ -257,23 +391,108 @@ class HeadlessBrowser {
             c.complete((msg['result'] as Map?)?.cast() ?? {});
           }
         } else {
+          _onEvent(msg);
           _events.add(msg);
         }
       },
-      onDone: _reset,
-      onError: (_) => _reset(),
+      onDone: () {
+        if (identical(_socket, socket)) {
+          _note('Lost the connection to the browser', error: true);
+          _reset();
+        }
+      },
+      onError: (_) {},
     );
+    // Pages can't open windows or download files behind the human's back.
+    await _send('Browser.setDownloadBehavior', {'behavior': 'deny'});
+    await _newPage();
+  }
+
+  /// Why the browser quit while starting, in words for the companion.
+  String _whyClosed(int code) {
+    final tail = _stderrTail();
+    if (tail.contains('No usable sandbox') ||
+        tail.contains('setuid sandbox') ||
+        tail.contains('zygote_host')) {
+      return 'The browser closed as it started: this computer blocks its '
+          'sandbox. Installing Chrome or Chromium from your system\'s '
+          'packages usually fixes it.';
+    }
+    if (tail.contains('error while loading shared libraries')) {
+      return 'The browser closed as it started: a system library it needs '
+          'is missing (see Settings → Logs).';
+    }
+    return 'The browser closed as it started (exit code $code; '
+        'Settings → Logs has what it said).';
+  }
+
+  /// Opens the page the companion uses, in place of one that crashed or
+  /// closed.
+  Future<void> _newPage() async {
     final target = await _send('Target.createTarget', {'url': 'about:blank'});
     final attached = await _send('Target.attachToTarget', {
       'targetId': target['targetId'],
       'flatten': true,
     });
+    _target = target['targetId'] as String?;
     _session = attached['sessionId'] as String;
     await _send('Page.enable', {}, page: true);
     await _send('Runtime.enable', {}, page: true);
-    // Pages can't open windows or download files behind the human's back.
-    await _send('Browser.setDownloadBehavior', {'behavior': 'deny'});
+    await _send('Inspector.enable', {}, page: true);
   }
+
+  String? _target;
+
+  /// Keeps the page going: answers pop-up dialogs, which would otherwise
+  /// stop every script on it, and notices when the page crashes or closes.
+  void _onEvent(Map<String, Object?> msg) {
+    final method = msg['method'];
+    final params = (msg['params'] as Map?)?.cast<String, Object?>() ?? {};
+    final mine = msg['sessionId'] == _session && _session != null;
+    switch (method) {
+      case 'Page.javascriptDialogOpening' when mine:
+        final type = params['type'];
+        _note(
+          'The page showed a pop-up ($type); dismissed it',
+          details: '${params['message'] ?? ''}',
+        );
+        // Leaving a page is allowed; anything else is cancelled.
+        _send('Page.handleJavaScriptDialog', {
+          'accept': type == 'beforeunload',
+        }, page: true).ignore();
+      case 'Inspector.targetCrashed' when mine:
+        _note(
+          'The page crashed${_url == null ? '' : ' on ${_url!.host}'}',
+          error: true,
+        );
+        _pageGone('The page crashed. Open it again, or try another site.');
+      case 'Target.detachedFromTarget'
+          when params['sessionId'] == _session && _session != null:
+        _note('The page closed itself', error: true);
+        _pageGone('The page closed itself. Open it again.');
+      case 'Target.targetCrashed' when params['targetId'] == _target:
+        _note('The page crashed', error: true);
+        _pageGone('The page crashed. Open it again, or try another site.');
+    }
+  }
+
+  /// Forgets the page after it crashed or closed; the next use opens a new
+  /// one. Calls waiting on it fail with [why] instead of hanging.
+  void _pageGone(String why) {
+    final old = _session;
+    _session = null;
+    _target = null;
+    _url = null;
+    for (final e in [..._pending.entries]) {
+      if (_pageCalls.remove(e.key) == old && !e.value.isCompleted) {
+        _pending.remove(e.key);
+        e.value.completeError(why);
+      }
+    }
+  }
+
+  /// The page session of each call waiting for an answer, by its id.
+  final _pageCalls = <int, String?>{};
 
   static bool? _root;
   static Future<bool> _isRoot() async {
@@ -291,10 +510,13 @@ class HeadlessBrowser {
       if (!c.isCompleted) c.completeError('The browser closed.');
     }
     _pending.clear();
+    _pageCalls.clear();
     _socket = null;
     _session = null;
+    _target = null;
     _process = null;
     _starting = null;
+    _paging = null;
     _url = null;
   }
 
@@ -308,6 +530,7 @@ class HeadlessBrowser {
     final id = ++_nextId;
     final c = Completer<Map<String, Object?>>();
     _pending[id] = c;
+    if (page) _pageCalls[id] = _session;
     socket.add(
       jsonEncode({
         'id': id,
@@ -316,13 +539,17 @@ class HeadlessBrowser {
         if (page) 'sessionId': _session,
       }),
     );
-    return c.future.timeout(
-      const Duration(seconds: 40),
-      onTimeout: () {
-        _pending.remove(id);
-        throw 'The browser didn\'t answer.';
-      },
-    );
+    return c.future
+        .timeout(
+          const Duration(seconds: 40),
+          onTimeout: () {
+            _pending.remove(id);
+            _pageCalls.remove(id);
+            _note('No answer to $method within 40 seconds', error: true);
+            throw 'The browser didn\'t answer.';
+          },
+        )
+        .whenComplete(() => _pageCalls.remove(id));
   }
 
   /// Runs [script] in the current page and returns its value.
@@ -345,7 +572,7 @@ class HeadlessBrowser {
 
   void _touch() {
     _idle?.cancel();
-    _idle = Timer(idleClose, close);
+    _idle = Timer(idleClose, () => close(why: 'unused for 5 minutes'));
   }
 
   /// Waits for the page to finish loading after a click or navigation, or
@@ -370,20 +597,28 @@ class HeadlessBrowser {
   Future<BrowserPage> open(Uri url, WebGuard guard) async {
     final why = guard.refuse(url);
     if (why != null) throw why;
-    if (!await WebGuard.resolvesPublic(url.host)) {
+    if (!await resolvesPublic(url.host)) {
       throw 'That site points into the home network, which is off limits.';
     }
     await _ensure();
     _touch();
+    _note('Opening $url');
     await _settle(() async {
       final r = await _send('Page.navigate', {
         'url': url.toString(),
       }, page: true);
       if (r['errorText'] case final String err when err.isNotEmpty) {
+        _note('Could not open $url: $err', error: true);
         throw 'Could not open ${url.host}: $err';
       }
     });
-    return read(guard);
+    final page = await read(guard);
+    _note(
+      'Read ${page.url} (${page.text.length} characters, '
+      '${page.elements.length} items)',
+      details: page.title,
+    );
+    return page;
   }
 
   /// What is on the current page now: its text and the things on it that
@@ -397,6 +632,7 @@ class HeadlessBrowser {
     // A redirect or a click may have led somewhere refused.
     final why = guard.refuse(url);
     if (why != null) {
+      _note('Left $url: $why', error: true);
       await _send('Page.navigate', {'url': 'about:blank'}, page: true);
       _url = null;
       throw why;
@@ -429,6 +665,7 @@ class HeadlessBrowser {
 
   /// Facts about element [ref] on the current page, from the last read.
   Future<PageElement?> element(int ref) async {
+    if (_session == null) throw 'No page is open now: use browse first.';
     final v = await _eval(
       '(() => { const e = document.querySelector(\'[data-vc-ref="$ref"]\'); '
       'return e ? ${_describe('e')} : null; })()',
@@ -452,11 +689,15 @@ class HeadlessBrowser {
       final ok = await _eval(
         '(() => { const e = document.querySelector(\'[data-vc-ref="$ref"]\'); '
         'if (!e) return false; e.scrollIntoView({block: "center"}); '
+        // A link to a new tab would open where nobody reads it.
+        'const a = e.closest("a[target]"); if (a) a.target = "_self"; '
         'e.click(); return true; })()',
       );
       if (ok != true) throw 'There is no item $ref on the page now.';
     });
-    return read(guard);
+    final page = await read(guard);
+    _note('Clicked item $ref, now on ${page.url}');
+    return page;
   }
 
   Future<BrowserPage> type(
@@ -475,6 +716,7 @@ class HeadlessBrowser {
     );
     if (ok != true) throw 'There is no item $ref on the page now.';
     await _send('Input.insertText', {'text': text}, page: true);
+    _note('Typed into item $ref${submit ? ' and pressed Enter' : ''}');
     if (submit) {
       await _settle(() async {
         for (final type in ['keyDown', 'char', 'keyUp']) {
@@ -504,16 +746,34 @@ class HeadlessBrowser {
     return read(guard);
   }
 
-  /// Closes the browser; the next use starts it again.
-  Future<void> close() async {
+  /// Closes the browser; the next use starts it again. Waits until it has
+  /// really gone, so none is left running when VoxCordis quits.
+  Future<void> close({String why = ''}) async {
     _idle?.cancel();
     final process = _process;
-    try {
-      await _send('Browser.close', {}).timeout(const Duration(seconds: 3));
-    } catch (_) {
-      process?.kill();
+    final temp = _tempProfile;
+    _tempProfile = null;
+    if (process != null) {
+      _note(why.isEmpty ? 'Closing' : 'Closing: $why');
+      try {
+        await _send('Browser.close', {}).timeout(const Duration(seconds: 3));
+      } catch (_) {}
     }
+    // From here an exit is expected, not a crash.
     _reset();
+    if (process != null) {
+      try {
+        await process.exitCode.timeout(const Duration(seconds: 3));
+      } on TimeoutException {
+        process.kill(ProcessSignal.sigkill);
+        _note('It didn\'t close by itself, so it was stopped');
+      }
+    }
+    if (temp != null) {
+      try {
+        await temp.delete(recursive: true);
+      } catch (_) {}
+    }
   }
 
   /// A small JS object describing element [e] for the companion.
@@ -550,6 +810,12 @@ class HeadlessBrowser {
     elements,
   };
 })()''';
+}
+
+/// Another browser holds the profile, so a new one handed over to it and
+/// quit.
+class ProfileInUse implements Exception {
+  const ProfileInUse();
 }
 
 /// The browser couldn't start because none is installed or downloaded.

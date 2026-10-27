@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import '../../theme/app_theme.dart';
 import '../folder_service.dart';
 import 'background.dart';
+import 'package_install.dart';
 
 /// Linux: tells the desktop which icon is VoxCordis'. Wayland desktops
 /// (KDE's Alt+Tab, the taskbar) find a window's icon only through a
@@ -20,7 +21,8 @@ class DesktopEntry {
   static const appId = 'com.nucume.companion';
 
   static Future<void> install() async {
-    if (!Platform.isLinux) return;
+    // A .deb or .rpm installs the entry and icon itself.
+    if (!Platform.isLinux || installedPackageType() != null) return;
     try {
       final data =
           Platform.environment['XDG_DATA_HOME'] ??

@@ -1,5 +1,5 @@
 import 'dart:io';
-import 'dart:ui' show AppExitResponse;
+import 'dart:ui' show AppExitResponse, PlatformDispatcher;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_acrylic/flutter_acrylic.dart';
@@ -9,6 +9,7 @@ import 'app_scope.dart';
 import 'data/database_key.dart';
 import 'features/unlock/unlock_app.dart';
 import 'services/changelog.dart';
+import 'services/logs/app_log.dart';
 import 'services/system/background.dart';
 import 'services/system/desktop_entry.dart';
 import 'shell/window_frame.dart';
@@ -36,9 +37,27 @@ Future<void> _start(
 }) async {
   final services = await AppServices.open(dir, key);
   Future<void> beforeQuit() async {
-    services.webTools.close();
+    await services.webTools.close();
     await services.runtime.stopAll();
+    await services.log.flush();
   }
+
+  // Errors nothing else caught go to Settings → Logs as well.
+  final flutterError = FlutterError.onError;
+  FlutterError.onError = (details) {
+    services.log.add(
+      LogKind.errors,
+      details.exceptionAsString(),
+      details: '${details.stack ?? ''}',
+      error: true,
+    );
+    flutterError?.call(details);
+  };
+  final platformError = PlatformDispatcher.instance.onError;
+  PlatformDispatcher.instance.onError = (error, stack) {
+    services.log.add(LogKind.errors, '$error', details: '$stack', error: true);
+    return platformError?.call(error, stack) ?? false;
+  };
 
   // Never leave a llama-server or the browser running after the window
   // closes.
@@ -68,6 +87,9 @@ Future<void> _start(
   runApp(AppScope(services: services, child: const CompanionApp()));
   // One quiet look for a newer release once the window is up.
   Future.delayed(const Duration(seconds: 3), services.updates.check);
+  // Memories and chat that have no vector yet (after an update, or an
+  // import) are embedded once the window is up.
+  Future.delayed(const Duration(seconds: 20), services.recall.update);
 }
 
 /// Real Mica/Acrylic on Windows, vibrancy on macOS. On Linux the runner

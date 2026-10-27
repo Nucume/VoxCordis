@@ -13,11 +13,13 @@ import 'data/memory/memory_repository.dart';
 import 'data/memory/memory_tools.dart';
 import 'data/message_repository.dart';
 import 'data/picture_notes.dart';
+import 'data/recall/recall_index.dart';
 import 'data/desk/desk_files.dart';
 import 'data/desk/pictures.dart';
 import 'data/schedule/schedule_repository.dart';
 import 'data/schedule/schedule_tools.dart';
 import 'data/settings.dart';
+import 'data/story_repository.dart';
 import 'data/skills/skill_tools.dart';
 import 'features/chat/prompt_history.dart';
 import 'services/changelog.dart';
@@ -26,9 +28,13 @@ import 'services/import/personality_rewrite.dart';
 import 'services/images/draw_tools.dart';
 import 'services/images/image_engine.dart';
 import 'services/llm_client.dart';
+import 'services/logs/app_log.dart';
+import 'services/recall/embedder.dart';
+import 'services/recall/recall.dart';
 import 'services/runtime/model_catalog.dart';
 import 'services/runtime/runtime_controller.dart';
 import 'services/secret_store.dart';
+import 'services/story/story_keeper.dart';
 import 'services/system/background.dart';
 import 'services/system/desktop_notifier.dart';
 import 'services/system/system_tools.dart';
@@ -67,6 +73,8 @@ class AppServices {
   late PictureNotes pictureNotes;
   late ScheduleRepository schedules;
   late ScheduleTools scheduleTools;
+  late RecallIndex recallIndex;
+  late StoryRepository story;
 
   void _use(Database next) {
     db = next;
@@ -74,6 +82,8 @@ class AppServices {
     messages = MessageRepository(next);
     memoryTools = MemoryTools(memory);
     pictureNotes = PictureNotes(next);
+    recallIndex = RecallIndex(next);
+    story = StoryRepository(next);
     schedules = ScheduleRepository(next);
     scheduleTools = ScheduleTools(schedules, onChanged: scheduleChanged);
     // What the companion forgot over a month ago goes for good.
@@ -120,6 +130,79 @@ class AppServices {
     await old.close();
     runtime.ensureReady(next).ignore();
     rewriteIfAsked().ignore();
+    recall.update().ignore();
+  }
+
+  /// Removes the current companion: its chats and memories, and with
+  /// [deleteFolder] its folder too. Talks to the next companion, or goes
+  /// back to setup when it was the only one.
+  Future<void> deleteCurrentCompanion({required bool deleteFolder}) async {
+    final s = settings.value;
+    final folder = s.companionFolder;
+    final next = s.withoutCurrent();
+    final gonePath = companionDbPath(runtime.supportDir.path, s.companionId);
+    if (next.companionFolder != null) {
+      await switchCompanion(next);
+    } else {
+      // Nobody left: a fresh database waits for the next first companion.
+      await db.close();
+      await deleteDatabaseFiles(gonePath);
+      _use(await openCompanionDb(null));
+      await settings.update(next);
+      memoryChanged();
+      scheduleChanged();
+    }
+    if (next.companionFolder != null) await deleteDatabaseFiles(gonePath);
+    if (deleteFolder && folder != null) {
+      final keep = [for (final c in next.companions) c.folder];
+      if (canDeleteFolder(
+        folder,
+        keep: keep,
+        supportDir: runtime.supportDir.path,
+      )) {
+        final dir = Directory(folder);
+        if (await dir.exists()) await dir.delete(recursive: true);
+      }
+    }
+  }
+
+  /// Wipes the current companion's chats, memories and reminders. Who they
+  /// are (settings, folder, personality) stays.
+  Future<void> resetCurrentCompanion() async {
+    final path = companionDbPath(
+      runtime.supportDir.path,
+      settings.value.companionId,
+    );
+    await db.close();
+    await deleteDatabaseFiles(path);
+    _use(await openCompanionDb(settings.value.companionId));
+    memoryChanged();
+    scheduleChanged();
+    resets.value++;
+  }
+
+  /// A database file with its write-ahead and journal leftovers.
+  static Future<void> deleteDatabaseFiles(String path) async {
+    for (final suffix in ['', '-wal', '-shm', '-journal']) {
+      final f = File('$path$suffix');
+      if (await f.exists()) await f.delete();
+    }
+  }
+
+  /// Whether [folder] may be deleted with its companion: not when it holds
+  /// another companion's folder, or the app's own files.
+  static bool canDeleteFolder(
+    String folder, {
+    required List<String> keep,
+    required String supportDir,
+  }) {
+    final dir = p.canonicalize(folder);
+    bool overlaps(String other) {
+      final o = p.canonicalize(other);
+      return o == dir || p.isWithin(dir, o);
+    }
+
+    return !keep.any(overlaps) && !overlaps(supportDir);
   }
 
   /// What the rewrite of an imported character is doing: its progress
@@ -222,12 +305,38 @@ class AppServices {
     },
   );
 
+  /// Finds memories and older chat by meaning, with the Recall model, and
+  /// embeds new ones in the background. Replaceable, for tests.
+  late Recall recall = Recall(
+    index: () => recallIndex,
+    memories: () => memory,
+    messages: () => messages,
+    embedder: Embedder(
+      target: () async {
+        final server = await runtime.ensureRecall(settings.value);
+        return (baseUrl: server.baseUrl, apiKey: server.apiKey);
+      },
+    ),
+    available: () => ModelCatalog.recallInstalled(settings.value),
+    paused: () => runtime.busy,
+    log: log,
+  );
+
+  /// Folds messages that aged out of the prompt into the story so far.
+  late final storyKeeper = StoryKeeper(
+    settings: () => settings.value,
+    runtime: runtime,
+    messages: () => messages,
+    story: () => story,
+    log: log,
+  );
+
   /// Draws the companion's pictures with stable-diffusion.cpp.
   late final imageEngine = ImageEngine(
     supportDir: runtime.supportDir,
     runtime: runtime,
     settings: () => settings.value,
-  );
+  )..log = log;
 
   /// draw_picture, which queues a picture on [imageEngine].
   late final drawTools = DrawTools(
@@ -261,10 +370,25 @@ class AppServices {
     settings: () => settings.value,
     browser: browser,
     searchKey: () async => settings.value.searchApiKey,
+    log: log,
   );
 
   /// The browser without a window that the companion browses with.
-  late final browser = HeadlessBrowser(runtime.supportDir);
+  late final browser = HeadlessBrowser(runtime.supportDir)..log = log;
+
+  /// Settings → Logs: what the browser, the web tools, the brain and
+  /// drawing did. Kept in the current companion's database, so encrypted
+  /// with it; API keys are blanked out.
+  late final log = AppLog(
+    db: () => db,
+    enabled: (kind) =>
+        settings.value.keepLogs && !settings.value.logsOff.contains(kind.name),
+    secrets: () => [
+      settings.value.llmApiKey,
+      settings.value.searchApiKey,
+      if (dbKey.unlocked) dbKey.value,
+    ],
+  );
 
   /// Desktop notifications for reminders and finished tasks.
   DesktopNotifier notifier = const DesktopNotifier();
@@ -283,6 +407,10 @@ class AppServices {
   /// Bumped whenever the companion's background picture is set or removed,
   /// so the window repaints it.
   final backgroundRevision = ValueNotifier(0);
+
+  /// Counts resets of the current companion; the window rebuilds on each,
+  /// so no old chat stays on screen.
+  final resets = ValueNotifier(0);
   void backgroundChanged() => backgroundRevision.value++;
 
   /// Settings and the database live in the OS app-support directory, e.g.

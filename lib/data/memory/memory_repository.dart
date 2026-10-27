@@ -191,26 +191,64 @@ class MemoryRepository {
       where: inIds,
       whereArgs: ids.toList(),
     );
+    await txn.delete(
+      'vectors',
+      where: "kind = 'memory' AND $inIds",
+      whereArgs: ids.toList(),
+    );
     return txn.delete('memories', where: inIds, whereArgs: ids.toList());
+  }
+
+  /// The top [n] current facts by priority: in every prompt, whatever is
+  /// being talked about.
+  Future<List<Memory>> pinned(int n) async {
+    final rows = await _db.query(
+      'memories',
+      where: 'valid_to IS NULL',
+      orderBy: 'priority DESC, reinforced_count DESC, recorded_at DESC',
+      limit: n,
+    );
+    return rows.map(Memory.fromRow).toList();
+  }
+
+  /// The current facts with [ids], in that order.
+  Future<List<Memory>> byIds(Iterable<String> ids) async {
+    final list = ids.toList();
+    if (list.isEmpty) return const [];
+    final rows = await _db.query(
+      'memories',
+      where:
+          'valid_to IS NULL AND id IN '
+          '(${List.filled(list.length, '?').join(',')})',
+      whereArgs: list,
+    );
+    final byId = {for (final r in rows) r['id'] as String: Memory.fromRow(r)};
+    return [for (final id in list) ?byId[id]];
+  }
+
+  /// Counts a prompt that brought [ids] up.
+  Future<void> reinforce(Iterable<String> ids) async {
+    final list = ids.toList();
+    if (list.isEmpty) return;
+    await _db.rawUpdate(
+      'UPDATE memories SET reinforced_count = reinforced_count + 1 '
+      'WHERE id IN (${List.filled(list.length, '?').join(',')})',
+      list,
+    );
   }
 
   /// Memories to put in the prompt: the top [pinned] by priority, plus up to
   /// [related] current facts whose text or subject/object mention a word from
   /// [query]. Bumps `reinforced_count` on the related ones.
   ///
-  /// Keyword matching is a stand-in until sqlite-vec search by meaning lands.
+  /// Matching words is what the app does without Recall, the embedding
+  /// model that finds memories by meaning (see `Recall`).
   Future<List<Memory>> recall(
     String query, {
     int pinned = 8,
     int related = 8,
   }) async {
-    final top = await _db.query(
-      'memories',
-      where: 'valid_to IS NULL',
-      orderBy: 'priority DESC, reinforced_count DESC, recorded_at DESC',
-      limit: pinned,
-    );
-    final result = {for (final r in top) r['id'] as String: Memory.fromRow(r)};
+    final result = {for (final m in await this.pinned(pinned)) m.id: m};
 
     final words = query
         .toLowerCase()
@@ -242,13 +280,7 @@ class MemoryRepository {
         result[id] = Memory.fromRow(r);
         hitIds.add(id);
       }
-      if (hitIds.isNotEmpty) {
-        await _db.rawUpdate(
-          'UPDATE memories SET reinforced_count = reinforced_count + 1 '
-          'WHERE id IN (${List.filled(hitIds.length, '?').join(',')})',
-          hitIds,
-        );
-      }
+      await reinforce(hitIds);
     }
     return result.values.toList();
   }

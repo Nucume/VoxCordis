@@ -27,12 +27,53 @@ Workflow in the public repository (`Nucume/VoxCordis`, `release.yml`):
 | --- | --- | --- |
 | Windows | `VoxCordis-<v>-windows-x64-setup.exe` | Inno Setup, per-user install by default, no admin needed |
 | Linux | `VoxCordis-<v>-x86_64.AppImage` | `appimagetool`, uses the system GTK 3 (and WebKitGTK 4.1 when installed) |
+| Debian, Ubuntu | `voxcordis_<v>_amd64.deb` | `dpkg-deb` (`packaging/linux/build-packages.sh`) |
+| Fedora | `voxcordis-<v>-1.x86_64.rpm` | `rpmbuild`, signed with the package key |
 
 macOS (`.dmg`) and Flatpak are not built for now. Their scripts stay in
 `packaging/macos` and `packaging/flatpak`.
 
 Nothing large is bundled: the llama.cpp runtime and models are downloaded by
 the app on first use into the app-support directory.
+
+## The apt and dnf repository
+
+A stable tag (no dash) also updates a signed apt and dnf repository that is
+served from GitHub Pages at `https://voxcordisai.com/repo/` (the site's custom
+domain, read from `CNAME` on `gh-pages`). The
+public `release` job builds it (`packaging/linux/build-repo.sh`) after the
+GitHub Release exists, keeps the newest three versions, and puts the result
+into the `repo/` folder of the `gh-pages` branch (one commit, so old packages
+don't pile up in git history). Everything else on that branch is the website
+and is left alone. Pre-releases never reach the repository.
+
+One-time setup:
+
+1. Settings → Pages in the public repository: *Deploy from a branch*,
+   `gh-pages`, `/ (root)`.
+2. Create the package key on your own computer (RSA, because older rpm
+   versions can't check newer key types), with no passphrase so CI can use
+   it. The user ID is public, so keep it to Nucume:
+
+   ```sh
+   export GNUPGHOME=$(mktemp -d)
+   gpg --batch --passphrase '' --quick-gen-key \
+     'VoxCordis Packages <119841008+Nucume@users.noreply.github.com>' \
+     rsa4096 sign never
+   gpg --armor --export-secret-keys 'VoxCordis Packages'
+   ```
+
+   Save the printed block (including the BEGIN and END lines) as the secret
+   `PACKAGE_SIGNING_KEY` in the public repository's `release` environment.
+   Keep an offline copy: losing it means every user has to import a new key.
+   Users trust the key through `voxcordis.asc` / `voxcordis.gpg` in `repo/`,
+   which the job derives from the secret.
+
+A tag fails to publish when the secret is missing.
+
+Installed from the repository, the app doesn't update itself: the package
+carries a `package-type` file next to the program, the updater sees it and
+shows the apt or dnf command instead of downloading anything.
 
 ## Cutting a release
 

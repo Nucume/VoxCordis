@@ -28,11 +28,16 @@ page:
 
 - **Linux:** `VoxCordis-<version>-x86_64.AppImage`. Make it executable and run
   it.
+- **Debian, Ubuntu, Fedora and relatives:** install from the signed apt or dnf
+  repository at <https://nucume.github.io/VoxCordis/repo/> (the page shows the
+  commands), and updates come with the rest of your system's. The `.deb` and
+  `.rpm` files are on the Releases page too.
 - **Windows:** `VoxCordis-<version>-windows-x64-setup.exe`. The installer is
   not code-signed yet, so SmartScreen may warn the first time ("More info" →
   "Run anyway").
 
-The app updates itself in one click. Every update is checked against the
+The AppImage and the Windows installer update themselves in one click (the
+.deb and .rpm leave that to apt and dnf, and VoxCordis tells you the command). Every update is checked against the
 checksum GitHub lists and against the VoxCordis release signature before it
 is installed.
 
@@ -132,7 +137,7 @@ flutter test
 LLAMA_SERVER_DIR=~/llama.cpp/build/bin TEST_GGUF=~/models/tiny.gguf flutter test
 ```
 
-Installer scripts are in `packaging/` (AppImage, Inno Setup, plus macOS DMG
+Installer scripts are in `packaging/` (AppImage, .deb and .rpm, Inno Setup, plus macOS DMG
 and Flatpak drafts); `docs/RELEASING.md` describes how releases are built and
 signed.
 

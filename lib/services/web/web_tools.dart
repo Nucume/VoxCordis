@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../../data/settings.dart';
 import '../import/untrusted_text.dart';
+import '../logs/app_log.dart';
 import 'headless_browser.dart';
 import 'page_text.dart';
 import 'web_guard.dart';
@@ -41,6 +42,7 @@ class WebTools {
     required this.searchKey,
     http.Client? client,
     WebSearch? search,
+    this.log,
   }) : _http = client ?? http.Client(),
        _search =
            search ??
@@ -53,6 +55,9 @@ class WebTools {
   final WebSearch _search;
 
   WebAsk? ask;
+
+  /// Settings → Logs.
+  final AppLog? log;
 
   static const searchTool = 'web_search';
   static const readTool = 'read_page';
@@ -200,13 +205,58 @@ class WebTools {
         'browse_back' => (await browser.back(_guard)).toToolResult(),
         _ => throw 'unknown tool $name',
       };
+      _logDone(name, args, result);
       return jsonEncode(result);
     } on BrowserMissing catch (e) {
-      return jsonEncode({'ok': false, 'error': '$e'});
+      return _failed(name, args, '$e');
     } on TimeoutException {
-      return jsonEncode({'ok': false, 'error': 'The site took too long.'});
+      return _failed(name, args, 'The site took too long.');
     } catch (e) {
-      return jsonEncode({'ok': false, 'error': '$e'});
+      return _failed(name, args, '$e');
+    }
+  }
+
+  String _failed(String name, Map<String, Object?> args, String error) {
+    log?.add(
+      browseTools.contains(name) ? LogKind.browser : LogKind.web,
+      '$name failed: $error',
+      details: jsonEncode(args),
+      error: true,
+    );
+    return jsonEncode({'ok': false, 'error': error});
+  }
+
+  static String _providerName(SearchProvider p) => switch (p) {
+    SearchProvider.duckDuckGo => 'DuckDuckGo',
+    SearchProvider.brave => 'Brave Search',
+    SearchProvider.tavily => 'Tavily',
+    SearchProvider.searxng => 'SearXNG',
+  };
+
+  void _logDone(
+    String name,
+    Map<String, Object?> args,
+    Map<String, Object?> result,
+  ) {
+    final log = this.log;
+    if (log == null) return;
+    if (name == searchTool) {
+      final hits = (result['results'] as List?) ?? const [];
+      log.add(
+        LogKind.web,
+        'Searched "${args['query']}" with ${_providerName(settings().searchProvider)}: '
+        '${hits.length} results',
+        details: [
+          for (final h in hits.whereType<Map>()) '${h['title']}\n  ${h['url']}',
+        ].join('\n'),
+      );
+    } else if (name == readTool) {
+      log.add(
+        LogKind.web,
+        'Read ${result['url'] ?? args['url']} '
+        '(${'${result['text'] ?? ''}'.length} characters)',
+        details: '${result['title'] ?? ''}',
+      );
     }
   }
 
@@ -237,11 +287,13 @@ class WebTools {
           !settings().companionBrowser) {
         rethrow;
       }
+      log?.add(LogKind.web, 'DuckDuckGo refused the search: $e');
       hits = const [];
     }
     if (hits.isEmpty &&
         settings().searchProvider == SearchProvider.duckDuckGo &&
         settings().companionBrowser) {
+      log?.add(LogKind.web, 'Searching in the browser instead');
       hits = await _searchInBrowser(query);
     }
     return {
@@ -308,6 +360,11 @@ class WebTools {
         res.stream.drain<void>().ignore();
         if (settings().companionBrowser &&
             (res.statusCode == 403 || res.statusCode == 429)) {
+          log?.add(
+            LogKind.web,
+            '${at.host} answered HTTP ${res.statusCode}; opening it in the '
+            'browser instead',
+          );
           return (await browser.open(at, guard)).toToolResult();
         }
         throw '${at.host} answered HTTP ${res.statusCode}.';
@@ -334,6 +391,10 @@ class WebTools {
       final page = PageText.fromHtml(body, at, maxChars: maxPageChars());
       // Pages built by scripts are nearly empty without a browser.
       if (page.text.length < 200 && settings().companionBrowser) {
+        log?.add(
+          LogKind.web,
+          '$at is nearly empty without scripts; opening it in the browser',
+        );
         return (await browser.open(at, guard)).toToolResult();
       }
       return page.toToolResult();
@@ -425,9 +486,12 @@ class WebTools {
     };
   }
 
-  void close() {
+  /// Closes the browser too, and waits until it has gone.
+  Future<void> close() async {
     _http.close();
     _search.close();
-    browser.close().ignore();
+    await browser
+        .close(why: 'VoxCordis is quitting')
+        .timeout(const Duration(seconds: 8), onTimeout: () {});
   }
 }

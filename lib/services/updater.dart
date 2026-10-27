@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import 'release_signature.dart';
+import 'system/package_install.dart';
 import 'runtime/download.dart' show sha256Digest, verifySha256;
 
 /// The version this build was made as. The release workflow passes the tag
@@ -81,12 +82,34 @@ enum UpdateStatus {
 /// the AppImage replaces itself, the Windows installer runs silently. Both
 /// then start the new version.
 class Updater extends ChangeNotifier {
-  Updater({http.Client? client, Map<String, String>? environment})
-    : _client = client ?? http.Client(),
-      _env = environment ?? Platform.environment;
+  Updater({
+    http.Client? client,
+    Map<String, String>? environment,
+    String? packageType,
+  }) : _client = client ?? http.Client(),
+       _env = environment ?? Platform.environment,
+       packageType =
+           packageType ?? (environment == null ? installedPackageType() : null);
 
   final http.Client _client;
   final Map<String, String> _env;
+
+  /// "deb" or "rpm" when a package manager installed this copy. Such a copy
+  /// never updates itself; the apt or dnf repository delivers new versions.
+  final String? packageType;
+
+  /// What updates a package install, or null for other installs.
+  String? get packageUpdateCommand => switch (packageType) {
+    'deb' => 'sudo apt update && sudo apt install --only-upgrade voxcordis',
+    'rpm' => 'sudo dnf upgrade --refresh voxcordis',
+    _ => null,
+  };
+
+  /// Where the apt and dnf repositories (and how to add them) are described.
+  static String get packageRepoPage {
+    final parts = updateRepo.split('/');
+    return 'https://${parts.first.toLowerCase()}.github.io/${parts.last}/repo/';
+  }
 
   UpdateStatus status = UpdateStatus.idle;
   UpdateInfo? available;

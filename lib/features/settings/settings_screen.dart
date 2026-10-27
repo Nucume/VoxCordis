@@ -20,13 +20,16 @@ import '../../services/changelog.dart';
 import '../../services/updater.dart';
 import '../setup/character_pickers.dart';
 import '../update/update_dialog.dart';
+import 'delete_companion_dialog.dart';
 import 'encryption_settings.dart';
 import 'image_settings.dart';
 import 'internet_settings.dart';
+import 'logs_settings.dart';
 import '../update/whats_new_dialog.dart';
 import 'model_picker.dart';
 import '../../shell/window_frame.dart';
 import '../../shell/runtime_status.dart';
+import 'recall_settings.dart';
 import 'sight_settings.dart';
 
 /// Minimal v1 Settings: General, Brain (the model) and Images. Other tabs arrive with the systems
@@ -43,6 +46,7 @@ class SettingsScreen extends StatefulWidget {
   static const brainTab = 3;
   static const internetTab = 5;
   static const privacyTab = 6;
+  static const logsTab = 7;
 
   @override
   State<SettingsScreen> createState() => SettingsScreenState();
@@ -86,6 +90,9 @@ class SettingsScreenState extends State<SettingsScreen> {
     // System access applies at once on its page, and "Always allow" in
     // the chat adds to the list while this page is open.
     systemAccess: current.systemAccess,
+    // Logs turn on and off at once on their page.
+    keepLogs: current.keepLogs,
+    logsOff: current.logsOff,
     allowedSystemActions: current.allowedSystemActions,
     // Switching and adding companions happen outside this page.
     otherCompanions: current.otherCompanions,
@@ -200,7 +207,7 @@ class SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 8,
+      length: 9,
       initialIndex: widget.initialTab,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -219,6 +226,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                 Tab(text: 'Computer'),
                 Tab(text: 'Internet'),
                 Tab(text: 'Privacy'),
+                Tab(text: 'Logs'),
                 Tab(text: 'About'),
               ],
             ),
@@ -246,6 +254,8 @@ class SettingsScreenState extends State<SettingsScreen> {
                     onChanged: (v) => setState(() => _draft = v),
                   ),
                   const SizedBox(height: 28),
+                  RecallSettings(value: _draft),
+                  const SizedBox(height: 28),
                   BrainAdvanced(
                     value: _draft,
                     onChanged: (v) => setState(() => _draft = v),
@@ -259,6 +269,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                   ),
                 ]),
                 _page(const [_Section('Encryption'), EncryptionSettings()]),
+                _page(const [LogsSettings()]),
                 _page(const [_About()]),
               ],
             ),
@@ -444,6 +455,37 @@ class SettingsScreenState extends State<SettingsScreen> {
           await DeskFiles.ensure(_draft);
           await launchUrl(Uri.file(file.path));
         },
+      ),
+      const _Section('Danger zone'),
+      Padding(
+        padding: const EdgeInsets.only(top: 8),
+        child: Wrap(
+          spacing: 12,
+          runSpacing: 8,
+          children: [
+            for (final (label, icon, action) in [
+              (
+                'Reset $name…',
+                Icons.restart_alt_rounded,
+                confirmResetCompanion,
+              ),
+              (
+                'Delete $name…',
+                Icons.delete_forever_rounded,
+                confirmDeleteCompanion,
+              ),
+            ])
+              OutlinedButton.icon(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Theme.of(context).colorScheme.error,
+                  side: BorderSide(color: Theme.of(context).colorScheme.error),
+                ),
+                onPressed: () => action(context),
+                icon: Icon(icon),
+                label: Text(label),
+              ),
+          ],
+        ),
       ),
       // Last on the page, apart from everything that only changes a setting.
       if (AppScope.of(context).background case final background?) ...[

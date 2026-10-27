@@ -379,6 +379,34 @@ class ModelCatalog {
     sampling: {'temperature': 0.3, 'top_p': 0.8, 'top_k': 20},
   );
 
+  /// Recall: a small embedding model that turns memories and chat into
+  /// vectors, so they can be found by meaning rather than by matching
+  /// words. Runs on the processor, for any brain. Never offered as a chat
+  /// model.
+  static const recall = CatalogModel(
+    id: 'recall-embeddinggemma-300m',
+    name: 'Recall (EmbeddingGemma 300M)',
+    blurb: 'Finds memories and older chat by meaning.',
+    sizeGb: 0.33,
+    minMemoryGb: 1,
+    repo: 'ggml-org/embeddinggemma-300M-GGUF',
+    revision: '0f741b5a6585bd53aeb15cd1372c56f2a0f65e12',
+    sha256: {
+      'embeddinggemma-300M-Q8_0.gguf':
+          'b5ce9d77a3fc4b3b39ccb5643c36777911cc4eb46a66962eadfa3f5f60490d63',
+    },
+    file: 'embeddinggemma-300M-Q8_0.gguf',
+  );
+
+  /// The Recall model file in [s]'s models folder, or null when it isn't
+  /// downloaded.
+  static String? recallFile(AppSettings s) {
+    final file = fileFor(dirFor(s), recall);
+    return file.existsSync() ? file.path : null;
+  }
+
+  static bool recallInstalled(AppSettings s) => recallFile(s) != null;
+
   /// The model and vision files of Eyes in [s]'s models folder, or null
   /// when Eyes isn't downloaded.
   static ({String model, String mmproj})? eyesFiles(AppSettings s) {
@@ -487,10 +515,12 @@ class ModelCatalog {
       File(p.join(modelsDir.path, p.posix.basename(path)));
 
   /// Every finished model .gguf in the models folder: not vision files,
-  /// and not Eyes, which isn't a chat model.
+  /// and not Eyes or Recall, which aren't chat models.
   static Future<List<File>> downloaded(Directory modelsDir) async {
     if (!await modelsDir.exists()) return const [];
-    final eyesName = p.posix.basename(eyes.file).toLowerCase();
+    final helpers = {
+      for (final m in [eyes, recall]) p.posix.basename(m.file).toLowerCase(),
+    };
     return modelsDir
         .list()
         .where(
@@ -498,7 +528,7 @@ class ModelCatalog {
               e is File &&
               e.path.toLowerCase().endsWith('.gguf') &&
               !isMmproj(e.path) &&
-              p.basename(e.path).toLowerCase() != eyesName,
+              !helpers.contains(p.basename(e.path).toLowerCase()),
         )
         .cast<File>()
         .toList();

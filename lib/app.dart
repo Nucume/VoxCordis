@@ -63,6 +63,7 @@ class _CompanionAppState extends State<CompanionApp>
         settings,
         services.addingCompanion,
         services.backgroundRevision,
+        services.resets,
       ]),
       builder: (context, _) {
         final adding = services.addingCompanion.value;
@@ -116,7 +117,10 @@ class _CompanionAppState extends State<CompanionApp>
             child: setup
                 ? SetupWizard(key: ValueKey(adding), addingAnother: adding)
                 : HomeShell(
-                    key: ValueKey('companion:${settings.value.companionId}'),
+                    key: ValueKey(
+                      'companion:${settings.value.companionId}:'
+                      '${services.resets.value}',
+                    ),
                   ),
           ),
         );

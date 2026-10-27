@@ -139,4 +139,29 @@ void main() {
     expect(await u.check(), isNull);
     expect(u.status, UpdateStatus.upToDate);
   });
+
+  test('a package install is told to use its package manager', () async {
+    Updater pkg(String? type) => Updater(
+      client: MockClient(
+        (_) async =>
+            http.Response(jsonEncode({...release, 'tag_name': 'v99.0.0'}), 200),
+      ),
+      environment: const {},
+      packageType: type,
+    );
+    final deb = pkg('deb');
+    final info = await deb.check();
+    // Nothing is downloaded or run by the app itself.
+    expect(info?.canInstall, isFalse);
+    expect(deb.packageUpdateCommand, contains('apt'));
+    expect(pkg('rpm').packageUpdateCommand, contains('dnf'));
+    expect(pkg(null).packageUpdateCommand, isNull);
+  });
+
+  test('the repository page follows the update repository', () {
+    expect(
+      Updater.packageRepoPage,
+      'https://nucume.github.io/VoxCordisPR/repo/',
+    );
+  });
 }
