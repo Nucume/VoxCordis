@@ -1,0 +1,188 @@
+# Builds the installers and, for a v* tag, attaches them to a GitHub Release.
+#
+#   Windows  VoxCordis-<v>-windows-x64-setup.exe  (Inno Setup, not code-signed)
+#   Linux    VoxCordis-<v>-x86_64.AppImage
+#
+# A v* tag is pushed here by the maintainer's release pipeline, together with
+# the source commit it points at. A hand run (Actions -> Release -> Run
+# workflow) builds Linux only unless asked, and keeps the files as workflow
+# artifacts without making a release.
+#
+# Only the release job holds a secret: the Ed25519 key that signs each
+# installer's checksum, kept in the "release" environment (see
+# docs/RELEASING.md). The app updates itself from this repository's latest
+# release and installs only files signed by that key.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: Which installers to build (a test build by hand)
+        type: choice
+        options: [all, linux, windows]
+        default: linux
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: 3.47.x
+  UPDATE_REPO: ${{ github.repository }}
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: v
+        name: Version from the tag, else from pubspec.yaml
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v=${GITHUB_REF#refs/tags/v}
+          else
+            v=$(sed -n 's/^version: *\([^+]*\).*/\1/p' pubspec.yaml)-dev.${GITHUB_RUN_NUMBER}
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "Version: $v"
+      # A release must carry the release key, so the next update can be
+      # checked against it (lib/services/release_signature.dart).
+      - name: Release key built in
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          grep -q 'BEGIN PUBLIC KEY' lib/services/release_signature.dart || {
+            echo "::error::releasePublicKey is empty; refusing to publish."; exit 1; }
+
+  linux:
+    needs: [version]
+    # Tags build both; by hand, as chosen.
+    if: inputs.platforms != 'windows'
+    # Oldest supported runner, so the AppImage runs on older glibc too.
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Linux build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev liblzma-dev libstdc++-12-dev desktop-file-utils
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: >-
+          flutter build linux --release --build-name "${VERSION%%-*}"
+          --dart-define=APP_VERSION="$VERSION" --dart-define=UPDATE_REPO="$UPDATE_REPO"
+      - name: AppImage
+        run: packaging/linux/build-appimage.sh build/linux/x64/release/bundle "$VERSION" dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: appimage
+          path: dist/*.AppImage
+
+  windows:
+    needs: [version]
+    if: inputs.platforms != 'linux'
+    runs-on: windows-latest
+    timeout-minutes: 45
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          channel: stable
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          cache: true
+      - run: flutter pub get
+      - run: |
+          $buildName = ($env:VERSION -split '-')[0]
+          flutter build windows --release --build-name $buildName `
+            --dart-define=APP_VERSION=$env:VERSION --dart-define=UPDATE_REPO=$env:UPDATE_REPO
+      - name: Ship the MSVC runtime next to the app
+        # Flutter apps need it and a fresh Windows may not have it installed.
+        run: |
+          $out = 'build\windows\x64\runner\Release'
+          foreach ($dll in 'msvcp140.dll', 'vcruntime140.dll', 'vcruntime140_1.dll') {
+            Copy-Item "$env:WINDIR\System32\$dll" $out
+          }
+      - name: Installer
+        run: |
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (-not (Test-Path $iscc)) { choco install innosetup --no-progress -y }
+          & $iscc /DAppVersion=$env:VERSION "/DSourceDir=$PWD\build\windows\x64\runner\Release" "/DOutputDir=$PWD\dist" packaging\windows\voxcordis.iss
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/*.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, windows]
+    runs-on: ubuntu-latest
+    # Holds RELEASE_SIGNING_KEY; the environment limits it to v* tags and
+    # asks the maintainer to approve each use.
+    environment: release
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: '{appimage,windows}'
+          merge-multiple: true
+      # Ed25519 over each file's SHA-256 (hex), as <file>.sig; the updater
+      # installs only files signed by the key it has built in.
+      - name: Sign the installers
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          if [ -z "$RELEASE_SIGNING_KEY" ]; then
+            echo "::error::RELEASE_SIGNING_KEY is not set; refusing to publish."; exit 1
+          fi
+          key="$RUNNER_TEMP/release-key.pem"
+          umask 077
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > "$key"
+          for f in dist/*; do
+            sha256sum "$f" | cut -d' ' -f1 | tr -d '\n' > "$RUNNER_TEMP/sha"
+            openssl pkeyutl -sign -inkey "$key" -rawin -in "$RUNNER_TEMP/sha" -out "$f.sig"
+          done
+          rm -f "$key"
+      - run: ls -la dist
+      # The release page shows this version's section of CHANGELOG.md, the
+      # same notes the app shows after updating.
+      - name: Release notes
+        id: notes
+        run: |
+          v="${GITHUB_REF_NAME#v}"
+          python3 .github/scripts/changelog.py notes "$v" CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if grep -q '[^[:space:]]' "$RUNNER_TEMP/notes.md"; then
+            echo "generated=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::CHANGELOG.md has no '## $v' or Unreleased notes; the app will show none for it."
+            echo "generated=true" >> "$GITHUB_OUTPUT"
+          fi
+      # Pinned to a commit: this step publishes the release.
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        with:
+          files: dist/*
+          body_path: ${{ runner.temp }}/notes.md
+          generate_release_notes: ${{ steps.notes.outputs.generated == 'true' }}
+          prerelease: ${{ contains(github.ref_name, '-') }}
