@@ -1,0 +1,202 @@
+
+
+<div class="glow" aria-hidden="true"></div>
+
+<header class="intro" id="intro">
+  <div class="heartbox" id="heartbox" title="Back to the top"><div class="heart" id="heart" role="img" aria-label="The VoxCordis heart, beating"><div class="beat"><svg class="hv-art" viewBox="110 125 780 750" aria-hidden="true"><g class="glow" filter="url(#vc-neon)"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg><svg class="hv-pulse" viewBox="110 125 780 750" aria-hidden="true"><use href="#vc-ecg" class="pulse"/></svg></div></div></div>
+  <a class="word" href="#" id="word" aria-label="VoxCordis"><b>VOX</b><span>CORDIS</span></a>
+  <p class="tagline">A private AI companion that lives on your computer. It remembers you, keeps its heart in a folder you can open, and never needs the cloud.</p>
+  <nav class="barnav" id="barnav" aria-label="Sections"><a href="#tour">Tour</a><a href="#private">Privacy</a><a href="#download">Download</a><a href="https://discord.gg/hJCzp7tVaT">Discord</a></nav>
+  <div class="get" id="get">
+    <a class="btn primary" data-get href="https://github.com/Nucume/VoxCordis/releases/latest">Download</a>
+    <a class="btn alt" data-get="alt" href="https://github.com/Nucume/VoxCordis/releases/latest" hidden></a>
+  </div>
+  <p class="ver"><span class="vnum">Latest version</span> · <span data-osnote>free and open source</span> · <a href="https://discord.gg/hJCzp7tVaT">Discord</a></p>
+  <button class="cue" id="cue" type="button" aria-label="Show more"><span>Take the tour</span><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="m6 9 6 6 6-6"/></svg></button>
+</header>
+
+<main class="gutter">
+<div class="wrap">
+
+  <div class="story" id="tour" style="--n: 7">
+   <div class="pin">
+    <div class="steps" id="steps">
+      <article class="step" id="s-chat" data-view="chat">
+        <h2>Meet Voxette</h2>
+        <p>This is VoxCordis, rebuilt for the web and filled with an example companion. Everything in the window works, and what you do in one part shows up in the others.</p>
+        <p class="try">Tap one of the suggestions, or write anything you like.</p>
+      </article>
+      <article class="step" id="s-memory" data-view="memory">
+        <h2>It remembers what matters</h2>
+        <p>Voxette writes down what's worth keeping and updates it when things change. The Memory tab shows all of it. Search, pin, fix or forget anything, and bring back what you forgot.</p>
+        <p class="try">Tell Voxette something in the chat and it lands here.</p>
+      </article>
+      <article class="step" id="s-files" data-view="files">
+        <h2>Its personality is a file you can edit</h2>
+        <p>Every companion has its own folder with its personality, the lessons it has learned and what it keeps private, as plain Markdown. Change a line and Voxette reads it before the next reply. As it gets to know you, it may rewrite its personality itself.</p>
+        <p class="try">Go ahead and edit personality.md.</p>
+      </article>
+      <article class="step" id="s-plans" data-view="plans">
+        <h2>Reminders and routines</h2>
+        <p>Ask in the chat and Voxette sets it up. Reminders and tasks keep running in the background, even with the window closed, if you like.</p>
+      </article>
+      <article class="step" id="s-skills" data-view="skills">
+        <h2>Teach it new skills</h2>
+        <p>A skill tells Voxette how to do one particular thing. It uses one when it fits, or you call it up with <code>/name</code>. Claude skills import as they are.</p>
+      </article>
+      <article class="step" id="s-images" data-view="images">
+        <h2>It draws, on your computer</h2>
+        <p>Built-in Stable Diffusion with SDXL, anime and photo models, or your own <code>.safetensors</code> with LoRAs. Voxette picks the model itself, or you draw by hand. An InvokeAI you run works too.</p>
+        <p class="try">This page paints its pictures itself to show the idea. The app uses a real model on your graphics card.</p>
+      </article>
+      <article class="step" id="s-settings" data-view="settings">
+        <h2>Make it look like home</h2>
+        <p>Light or dark, a Colorway, a background picture of your own. Try a few and the whole page follows. Or let Voxette choose for itself.</p>
+      </article>
+    </div>
+    <div class="dots-nav" id="dotsnav" aria-label="Tour steps"></div>
+
+    <div class="stage">
+      <div class="app" id="app">
+        <div class="titlebar" aria-hidden="true"><svg class="logo" viewBox="110 125 780 750" aria-hidden="true"><g class="mini"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg><span>VoxCordis</span><span class="wc"><svg viewBox="0 0 12 12"><path d="M2 6h8" stroke="currentColor" stroke-width="1.2"/></svg><svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><svg viewBox="0 0 12 12"><path d="m2.5 2.5 7 7m0-7-7 7" stroke="currentColor" stroke-width="1.2"/></svg></span></div>
+        <aside class="pane side" aria-label="Companion">
+          <div class="portrait"><div class="pfp" role="img" aria-label="Voxette's portrait"><svg class="hv-pfp" viewBox="60 75 880 850" aria-hidden="true"><g filter="url(#vc-neon)" style="--vs:url(#vc-gl);--vd:url(#vc-dl)"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg></div><span class="on" title="Ready"></span></div>
+          <div class="name">Voxette <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" d="m7 10 5 5 5-5"/></svg></div>
+          <div class="traits"><span>curious</span><span>warm</span><span>night owl</span></div>
+          <div class="days">DAYS</div>
+          <div class="day">Today</div>
+          <div class="sidefoot"><span class="appmark"><svg class="logo" viewBox="110 125 780 750" aria-hidden="true"><g class="mini"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg><b>VOX</b> CORDIS</span>
+          <button class="open" type="button" id="openfolder" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M3 6h6l2 2h10v11H3z"/></svg>Open folder</button></div>
+        </aside>
+        <div class="pane main">
+          <div class="tabs" role="tablist" aria-label="App tabs">
+            <button role="tab" data-v="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M4 5h16v11H9l-5 4z"/></svg>Chat</button><button role="tab" data-v="images"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="m4 16 4-4 4 4 2-2 6 5"/></svg>Images</button><button role="tab" data-v="memory"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M11 3l1.7 4.8L17.5 9.5l-4.8 1.7L11 16l-1.7-4.8L4.5 9.5l4.8-1.7zM18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>Memory</button><button role="tab" data-v="skills"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="m2 9 10-5 10 5-10 5zM6 11v5c3 2 9 2 12 0v-5"/></svg>Skills</button><button role="tab" data-v="plans"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 9v4l2.5 2M5 3 2 6m17-3 3 3"/></svg>Plans</button><button role="tab" data-v="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h11m4 0h1"/><circle cx="15" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>Settings</button>
+          </div>
+          <div class="views">
+            <div class="view" data-view="chat">
+              <div class="scroll" id="chatscroll"><div class="chat" id="chat" aria-live="polite">
+                <div class="sep">Today</div>
+                <div class="msg me">Hi Voxette! I'm back</div>
+                <div class="msg her">Hey Haru! It's good to see you again. How did the interview go today? I've been wondering all afternoon.</div>
+              </div></div>
+              <div class="chips" id="suggest" aria-label="Things to say"></div>
+              <form class="composer" id="composer">
+                <svg class="clip" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M20 11.5 12.3 19a5 5 0 0 1-7-7l8-8a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/></svg>
+                <input id="say" autocomplete="off" placeholder="Message Voxette…" aria-label="Message Voxette">
+                <button class="send" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
+              </form>
+            </div>
+
+            <div class="view" data-view="memory" hidden>
+              <div class="vh"><h3>Memories</h3></div>
+              <label class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="m20 20-3.5-3.5"/></svg><input id="msearch" placeholder="Search memories" aria-label="Search memories"></label>
+              <div class="scroll"><div class="list" id="mems">
+                <div class="row pinned"><div><b>Takes coffee black, and likes quiet mornings</b><small>Preference · since 3 Oct · confirmed 4 times</small></div><button class="mini" data-a="pin">Unpin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="row"><div><b>Job interview on Tuesday the 27th</b><small>Event · until 29 Oct</small></div><button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="row"><div><b>Calls Mum on Sunday evenings</b><small>Routine · since 12 Oct</small></div><button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="row"><div><b>Would rather not talk about work after 9 pm</b><small>Boundary · since 20 Oct</small></div><button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="row"><div><b>Reading The Left Hand of Darkness, slowly</b><small>Interest · since 22 Oct</small></div><button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="empty" id="mnone" hidden>Nothing matches. Voxette doesn't know that one yet.</div>
+              </div></div>
+            </div>
+
+            <div class="view" data-view="files" hidden>
+              <div class="path">~/VoxCordis/<b>Voxette</b>/</div>
+              <div class="ftabs" role="tablist" aria-label="Voxette's files">
+                <button type="button" role="tab" data-f="personality.md">personality.md</button><button type="button" role="tab" data-f="lessons.md">lessons.md</button><button type="button" role="tab" data-f="privacy.md">privacy.md</button>
+              </div>
+              <textarea class="md" id="md" spellcheck="false" aria-label="File contents"></textarea>
+              <div class="saved" id="saved"></div>
+            </div>
+
+            <div class="view" data-view="plans" hidden>
+              <div class="vh"><h3>Reminders and tasks</h3><p>Ask Voxette in the chat, or pick one here.</p></div>
+              <div class="chips" id="pchips"></div>
+              <div class="said" id="psaid"></div>
+              <div class="scroll"><div class="list" id="plist">
+                <div class="row"><div><b>Ask Haru how the interview went</b><small>Voxette's own note · today, 19:00 · once</small></div><button class="mini" data-a="del">Remove</button></div>
+              </div></div>
+            </div>
+
+            <div class="view" data-view="skills" hidden>
+              <div class="vh"><h3>Skills</h3></div>
+              <div class="scroll"><div class="list" id="skilllist"></div></div>
+            </div>
+
+            <div class="view" data-view="images" hidden>
+              <div class="vh"><h3>Pictures</h3></div>
+              <canvas class="paint" id="paint" width="640" height="400" aria-label="A picture being drawn"></canvas>
+              <div class="chips" id="dchips"></div>
+              <div class="drawbar"><span id="dstep"></span><span class="meter"><i id="dmeter"></i></span></div>
+            </div>
+
+            <div class="view" data-view="settings" hidden>
+              <div class="subtabs" aria-hidden="true"><span>General</span><span class="on">Appearance</span><span>Images</span><span>Brain</span><span>Computer</span><span>Internet</span><span>Privacy</span><span>About</span></div>
+              <div class="scroll">
+                <div class="srow"><span>Look</span><div class="ways" data-ways role="group" aria-label="Colorways"></div></div>
+                <div class="srow"><span>Theme</span><div><div class="seg" data-themes role="group" aria-label="Theme"><button type="button" data-t="system">System</button><button type="button" data-t="light">Light</button><button type="button" data-t="dark">Dark</button></div></div></div>
+                <div class="srow"><span>Background picture</span><div><button class="btn sm" type="button" disabled title="In the app">Choose…</button></div></div>
+                <div class="srow"><span>Voxette's own colours</span><div><button class="btn sm" type="button" id="choose">Let Voxette choose</button><div class="said" id="lsaid" style="margin-top:8px"></div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+   </div>
+  </div>
+
+  <section id="private">
+    <h2>Private by default</h2>
+    <p class="sub">Everything stays on your computer unless you choose a server-hosted brain, and the app tells you when you do.</p>
+    <div class="facts">
+      <div><b>No account</b><span>Nothing to sign up for. It works offline.</span></div>
+      <div><b>Your graphics card</b><span>A built-in llama.cpp brain. Pick a recommended model or bring any .gguf.</span></div>
+      <div><b>Encrypted on disk</b><span>Chats and memories, with a key kept in your keyring.</span></div>
+      <div><b>Online only if you ask</b><span>Web search and its own browser are opt-in. Your home network stays off limits.</span></div>
+    </div>
+  </section>
+
+  <section id="download">
+    <h2>Download</h2>
+    <p class="sub">VoxCordis updates itself in one click. Every update is checked against its checksum and the VoxCordis release signature before it installs.</p>
+    <div class="dl">
+      <div class="card" data-card="win">
+        <h3>Windows</h3>
+        <p>Windows 10 or 11, 64-bit. The installer isn't code-signed yet, so SmartScreen may warn the first time. Choose More info, then Run anyway.</p>
+        <code class="fname" data-f="win">VoxCordis-windows-x64-setup.exe</code>
+        <a class="btn primary" data-dl="win" href="https://github.com/Nucume/VoxCordis/releases/latest">Download for Windows</a>
+      </div>
+      <div class="card" data-card="lin">
+        <h3>Linux AppImage</h3>
+        <p>Runs on almost any distribution, x86-64. Make it executable and run it. KDE gives the nicest see-through glass.</p>
+        <code class="fname" data-f="lin">VoxCordis-x86_64.AppImage</code>
+        <a class="btn" data-dl="lin" href="https://github.com/Nucume/VoxCordis/releases/latest">Download the AppImage</a>
+      </div>
+    </div>
+    <div class="card pkg" id="pkg">
+      <h3>Debian, Ubuntu, Fedora and relatives</h3>
+      <p>Install from the VoxCordis package repository, and updates arrive with the rest of your system.</p>
+      <div class="seg" id="pkgtabs" role="group" aria-label="Package manager"><button type="button" data-p="apt">apt</button><button type="button" data-p="dnf">dnf</button></div>
+      <div class="term"><pre id="pkgcmd"></pre><button type="button" class="btn sm copy">Copy</button></div>
+    </div>
+    <p class="after">macOS builds from source for now. All files and older versions are on the <a href="https://github.com/Nucume/VoxCordis/releases">Releases page</a>.</p>
+  </section>
+
+  <section class="about">
+    <div>
+      <h2>Open source, made with Claude</h2>
+      <p>VoxCordis is free software under the GPL-3.0. You can read every line of what it does, build it yourself and change it.</p>
+      <p>It's written largely by Claude, Anthropic's AI assistant, working from Nucume's direction, testing and decisions.</p>
+    </div>
+    <div>
+      <h2>Early days</h2>
+      <p>VoxCordis is in early development, so bugs happen. The Discord is where to get help, report them and share companions. Bug reports and ideas are welcome in GitHub Issues too.</p>
+      <div class="get"><a class="btn" href="https://discord.gg/hJCzp7tVaT">Join the Discord</a><a class="btn" href="https://github.com/Nucume/VoxCordis/issues">GitHub Issues</a></div>
+    </div>
+  </section>
+
+  <footer><span>© 2026 Nucume · GPL-3.0</span><nav><a href="https://github.com/Nucume/VoxCordis">Source</a><a href="https://github.com/Nucume/VoxCordis/releases">Releases</a><a href="https://github.com/Nucume/VoxCordis/security/policy">Security</a></nav></footer>
+</div>
+</main>
+
