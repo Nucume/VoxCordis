@@ -2,15 +2,20 @@
 #
 #   Windows  VoxCordis-<v>-windows-x64-setup.exe  (Inno Setup, not code-signed)
 #   Linux    VoxCordis-<v>-x86_64.AppImage
+#            voxcordis_<v>_amd64.deb, voxcordis-<v>-1.x86_64.rpm
+#
+# A stable tag also updates the signed apt and dnf repository that GitHub
+# Pages serves under /repo/ (the repo/ folder of the gh-pages branch, see
+# docs/RELEASING.md).
 #
 # A v* tag is pushed here by the maintainer's release pipeline, together with
 # the source commit it points at. A hand run (Actions -> Release -> Run
 # workflow) builds Linux only unless asked, and keeps the files as workflow
 # artifacts without making a release.
 #
-# Only the release job holds a secret: the Ed25519 key that signs each
-# installer's checksum, kept in the "release" environment (see
-# docs/RELEASING.md). The app updates itself from this repository's latest
+# Only the release job holds secrets: the Ed25519 key that signs each
+# installer's checksum and the key that signs the packages, both kept in the
+# "release" environment (see docs/RELEASING.md). The app updates itself from this repository's latest
 # release and installs only files signed by that key.
 name: Release
 
@@ -75,7 +80,7 @@ jobs:
       - name: Linux build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev liblzma-dev libstdc++-12-dev desktop-file-utils
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev libwebkit2gtk-4.1-dev libsoup-3.0-dev liblzma-dev libstdc++-12-dev desktop-file-utils rpm
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
         with:
           channel: stable
@@ -91,6 +96,14 @@ jobs:
         with:
           name: appimage
           path: dist/*.AppImage
+      - name: .deb and .rpm
+        run: packaging/linux/build-packages.sh build/linux/x64/release/bundle "$VERSION" dist/packages
+      - uses: actions/upload-artifact@v4
+        with:
+          name: packages
+          path: |
+            dist/packages/*.deb
+            dist/packages/*.rpm
 
   windows:
     needs: [version]
@@ -141,13 +154,34 @@ jobs:
     environment: release
     permissions:
       contents: write
+      pages: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: '{appimage,windows}'
+          pattern: '{appimage,windows,packages}'
           merge-multiple: true
+      # The .rpm files carry a GPG signature of their own (dnf checks it);
+      # the apt side signs its index instead. Done before the checksums below
+      # are signed, because signing changes the file.
+      - name: Sign the .rpm
+        env:
+          PACKAGE_SIGNING_KEY: ${{ secrets.PACKAGE_SIGNING_KEY }}
+        run: |
+          if [ -z "$PACKAGE_SIGNING_KEY" ]; then
+            echo "::error::PACKAGE_SIGNING_KEY is not set; refusing to publish."; exit 1
+          fi
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends apt-utils createrepo-c rpm
+          export GNUPGHOME="$RUNNER_TEMP/gnupg"
+          mkdir -m 700 "$GNUPGHOME"
+          printf '%s\n' "$PACKAGE_SIGNING_KEY" | gpg --batch --quiet --import
+          fpr=$(gpg --list-secret-keys --with-colons | awk -F: '/^fpr/ {print $10; exit}')
+          [ -n "$fpr" ] || { echo "::error::No key in PACKAGE_SIGNING_KEY."; exit 1; }
+          echo "GNUPGHOME=$GNUPGHOME" >> "$GITHUB_ENV"
+          echo "KEY_FPR=$fpr" >> "$GITHUB_ENV"
+          rpmsign --define "_gpg_name $fpr" --define "_gpg_path $GNUPGHOME" --addsign dist/*.rpm
       # Ed25519 over each file's SHA-256 (hex), as <file>.sig; the updater
       # installs only files signed by the key it has built in.
       - name: Sign the installers
@@ -186,3 +220,49 @@ jobs:
           body_path: ${{ runner.temp }}/notes.md
           generate_release_notes: ${{ steps.notes.outputs.generated == 'true' }}
           prerelease: ${{ contains(github.ref_name, '-') }}
+      # The apt and dnf repository lives in the repo/ folder of the gh-pages
+      # branch (GitHub Pages, "deploy from a branch"). Only repo/ is touched;
+      # the rest of the branch is the website. The branch is one fresh commit
+      # each time so old packages don't pile up in git. A pre-release stays
+      # out.
+      - name: Update the apt and dnf repository
+        if: ${{ !contains(github.ref_name, '-') }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          export BASE_URL="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/repo"
+          mkdir "$RUNNER_TEMP/new"
+          cp dist/*.deb dist/*.rpm "$RUNNER_TEMP/new/"
+          url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          site="$RUNNER_TEMP/site"
+          published=false
+          for attempt in 1 2 3 4; do
+            rm -rf "$site"
+            if git ls-remote --exit-code --heads "$url" gh-pages >/dev/null 2>&1; then
+              git clone -q --depth 1 --branch gh-pages "$url" "$site"
+              lease=$(git -C "$site" rev-parse HEAD)
+            else
+              git init -q -b gh-pages "$site"
+              git -C "$site" remote add origin "$url"
+              lease=
+            fi
+            packaging/linux/build-repo.sh "$RUNNER_TEMP/new" "$site/repo"
+            touch "$site/.nojekyll"
+            git -C "$site" checkout -q --orphan fresh
+            git -C "$site" add -A
+            git -C "$site" -c user.name=Nucume \
+                -c user.email=119841008+Nucume@users.noreply.github.com \
+                commit -q -m "Package repository for ${GITHUB_REF_NAME#v}"
+            # Someone else (the website) may have pushed meanwhile: then the
+            # lease fails and everything is done again on top of theirs.
+            if git -C "$site" push -q --force-with-lease="gh-pages:$lease" origin fresh:gh-pages; then
+              published=true; break
+            fi
+            sleep $((attempt * 10))
+          done
+          $published || { echo "::error::Could not update gh-pages."; exit 1; }
+          # A push made with the workflow token may not start the Pages
+          # build by itself.
+          gh api -X POST "repos/$GITHUB_REPOSITORY/pages/builds" >/dev/null \
+            || echo "::warning::Could not start a Pages build; check Settings > Pages."
