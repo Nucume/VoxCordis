@@ -1,6 +1,7 @@
 # Website
 
-The VoxCordis website, served by GitHub Pages at https://nucume.github.io/VoxCordis/.
+The VoxCordis website, served by GitHub Pages at https://voxcordisai.com/ (the `CNAME` file on
+`gh-pages`; nucume.github.io/VoxCordis redirects there).
 
 It is one page with everything inline (about 120 KB, plus the font and the
 favicon), built by a small script with no packages:
@@ -18,5 +19,5 @@ favicon), built by a small script with no packages:
 
 Publishing happens in the public repository: its Website workflow
 (`.github/workflows/pages.yml`) runs on changes to `website/` on main and puts
-`out/` at the root of the `gh-pages` branch. It never touches `repo/` there,
+`out/` at the root of the `gh-pages` branch. It never touches `repo/` or `CNAME` there,
 which is the apt and dnf repository the release workflow keeps.

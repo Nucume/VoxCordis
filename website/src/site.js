@@ -79,7 +79,9 @@
     paintWay(); paintTheme();
 
     // the package repository's commands (from packaging/linux/build-repo.sh)
-    const PKG = 'https://nucume.github.io/VoxCordis/repo';
+    // served next to the site, so they follow its address (a custom domain, or github.io without one)
+    const PKG = /(^|\.)voxcordisai\.com$|\.github\.io$/.test(location.hostname)
+      ? new URL('repo', location.href).href : 'https://voxcordisai.com/repo';
     const CMDS = {
       apt: `sudo install -d -m 0755 /etc/apt/keyrings\ncurl -fsSL ${PKG}/voxcordis.gpg | sudo tee /etc/apt/keyrings/voxcordis.gpg >/dev/null\necho "deb [signed-by=/etc/apt/keyrings/voxcordis.gpg] ${PKG}/apt stable main" | sudo tee /etc/apt/sources.list.d/voxcordis.list\nsudo apt update\nsudo apt install voxcordis`,
       dnf: `sudo curl -fsSL -o /etc/yum.repos.d/voxcordis.repo ${PKG}/rpm/voxcordis.repo\nsudo dnf install voxcordis`,
