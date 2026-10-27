@@ -231,7 +231,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          export BASE_URL="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/repo"
           mkdir "$RUNNER_TEMP/new"
           cp dist/*.deb dist/*.rpm "$RUNNER_TEMP/new/"
           url="https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
@@ -246,6 +245,14 @@ jobs:
               git init -q -b gh-pages "$site"
               git -C "$site" remote add origin "$url"
               lease=
+            fi
+            # The repository is served from the site's address: its custom
+            # domain when CNAME names one (github.io would redirect there
+            # through plain http, which apt refuses), else github.io.
+            if [ -s "$site/CNAME" ]; then
+              export BASE_URL="https://$(head -n 1 "$site/CNAME" | tr -d '[:space:]')/repo"
+            else
+              export BASE_URL="https://${GITHUB_REPOSITORY_OWNER,,}.github.io/${GITHUB_REPOSITORY#*/}/repo"
             fi
             packaging/linux/build-repo.sh "$RUNNER_TEMP/new" "$site/repo"
             touch "$site/.nojekyll"

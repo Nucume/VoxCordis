@@ -1,7 +1,8 @@
 # Publishes the website (website/, built by website/build.py) to the root of
 # the gh-pages branch, which GitHub Pages serves ("deploy from a branch",
 # gh-pages, /). The release workflow keeps the apt and dnf repository in
-# repo/ on the same branch, so this leaves repo/ exactly as it is.
+# repo/ on the same branch, and CNAME holds the custom domain, so this leaves
+# both exactly as they are.
 #
 # Runs when website/ changes on main (a pull request here, or the source a
 # release brings over), and by hand from Actions -> Website -> Run workflow.
@@ -48,9 +49,10 @@ jobs:
               git -C "$site" remote add origin "$url"
               lease=
             fi
-            # Everything but repo/ is the website: replace it whole, so files
+            # Everything but repo/ and CNAME (the custom domain, set in
+            # Settings > Pages) is the website: replace it whole, so files
             # the site no longer has don't linger.
-            find "$site" -mindepth 1 -maxdepth 1 ! -name .git ! -name repo -exec rm -rf {} +
+            find "$site" -mindepth 1 -maxdepth 1 ! -name .git ! -name repo ! -name CNAME -exec rm -rf {} +
             cp -R website/out/. "$site/"
             touch "$site/.nojekyll"
             git -C "$site" add -A

@@ -189,7 +189,7 @@ if FULL:
     page = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
             '<link rel="icon" href="favicon.svg" type="image/svg+xml">\n<meta name="theme-color" content="#0e0b16">\n'
             '<meta property="og:title" content="VoxCordis">\n<meta property="og:description" content="' + DESC + '">\n'
-            '<meta property="og:url" content="https://nucume.github.io/VoxCordis/">\n'
+            '<meta property="og:url" content="https://voxcordisai.com/">\n'
             + head + '</head>\n<body>\n' + body + '</body>\n</html>\n')
     open(os.path.join(OUT, 'favicon.svg'), 'w', encoding='utf-8').write(favicon())
     shutil.copytree(os.path.join(HERE, 'static'), OUT, dirs_exist_ok=True)
