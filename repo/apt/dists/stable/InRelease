@@ -1,0 +1,42 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Architectures: amd64
+Codename: stable
+Components: main
+Date: Thu, 29 Oct 2026 14:04:15 +0000
+Label: VoxCordis
+Origin: VoxCordis
+Suite: stable
+MD5Sum:
+ d2da5be0c563d2723ecf6f96c8126ece             2010 main/binary-amd64/Packages
+ 8fe38e7383915d0190acb5c2add57ad5              879 main/binary-amd64/Packages.gz
+ 76efd25731f4a9f20d1640e02cfc2d26              952 main/binary-amd64/Packages.xz
+SHA1:
+ ca4a0bf42be5617c7776a08caee84ec082af1718             2010 main/binary-amd64/Packages
+ b42087d8200eac2df60c31bbbeb30e43845c0e27              879 main/binary-amd64/Packages.gz
+ f62fe5f56310feaa19305ccf69a9bd391f0236f2              952 main/binary-amd64/Packages.xz
+SHA256:
+ 2c479c7bdf23a8df1b333dd810f16f99e4e23ca7d6e8b286c0bf71ef0af8841a             2010 main/binary-amd64/Packages
+ 984ef8f2ea35ca9bc9d4ecf8ff9ca4b4010eca5e92a5f25d6234aaa63e217937              879 main/binary-amd64/Packages.gz
+ fb5b2ec732aca2beb72b92ee31305ab71b364232d9ebc4beebdb04385a84f24c              952 main/binary-amd64/Packages.xz
+SHA512:
+ 976807e850ddd9e19d25514a40a36e32300229f9c42ad3e0808fa8b30b626245dfe1f1cd94fe11e15025b0c259722217d2ec191a40209e09cba30a8deccd4d3a             2010 main/binary-amd64/Packages
+ 9d1682146408d62b1d0896f750bc9f2117fddc9dbf37ccb6848abcdb86a4f3aa8eb2f7a7d9e5f32ec3f8f31fa907084777a07b8e2f3fe7625d22b5311f21db98              879 main/binary-amd64/Packages.gz
+ 61526425909a51255d26da0bbd874ab1ba5c4f97d054661902ade2b1c7a190d41722acc9f926fad57bb1134287240dba06820be41ea1d5bd6809f31256340a86              952 main/binary-amd64/Packages.xz
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEEpz9gP7Al0XPY7TNk0Nj3M4020EsFAmrjUl8ACgkQ0Nj3M402
+0EvX5A/9EPmxNJ5KR0DU5y4Dkc6kA8RTUdZQl1So5PIps+PYOz0gdC3v2Mc+oqH8
+/m9y2cJXyrD95nFeEp4/S15/59m4P4HnssboIekutvGNfTXCHccHXaZabzriVM9U
+yHTUMZYRDtRXMN8+KaaaIYuGL19LRT4TzY+BJZ4ceE84DUY7a981A0EzfN7Lx3f6
+wncUxoBzylJSVMzGjPcGzQkhKK+o1PXvgd3Qi9ACdbsGO8vWXVAwgCXrLglqaazs
+dHEycjZFffy7zSTpXpvmU25n3aLeu7JzfYNx7ELHZwOjS0BjG/Sus41ID+UlC53h
+PFBYhSct37jY6KnOwNZzE+MfWOsKCAOdHVDt92l3XN5pE2RFsxiJLhBlr7/jobZr
+dGvu7vO2KCmhQq0App03SqbtXLzd3jQxzY5KT+F6tXANeG98dqwZXmlXCXIUaRYs
+plGhiWAOPjtNtaElNA19riC3Olyq/zpckiYpAKevVzaPpOJKFugswOtz3V2XS33z
+ss7ORJtlsZDhoGNTPnwuxBU8rDj9LikPXbCoSXoMYGw4Jk9XCYN7WG7ghKXsnCUZ
+nDXlOrMSE2cKjZsdmm2/tDkfnsNV9+bF2BjXzBfXCJof6AIxomKh3pbMkzrAXVbP
+KkR2dQrzw4+CJ9gFbawMOvJTS5h/MFxpx9NNh1+7Vl1/wtuhjQo=
+=mi9n
+-----END PGP SIGNATURE-----

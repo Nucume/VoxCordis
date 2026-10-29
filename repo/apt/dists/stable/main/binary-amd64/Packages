@@ -1,0 +1,48 @@
+Package: voxcordis
+Architecture: amd64
+Version: 0.3.4
+Priority: optional
+Section: net
+Maintainer: Nucume <119841008+Nucume@users.noreply.github.com>
+Installed-Size: 33468
+Depends: libc6 (>= 2.35), libstdc++6, liblzma5, libgtk-3-0 | libgtk-3-0t64
+Recommends: libwebkit2gtk-4.1-0
+Filename: pool/main/voxcordis_0.3.4_amd64.deb
+Size: 11575120
+MD5sum: e5c9d3db0362c75f4ca027387b8945af
+SHA1: 46060153240cc084fdfead8dcc2d4ca533292d89
+SHA256: fb0d1e9cbd06e9fb689aae853567776c31b4b487bb5c33e7e38f71f4aac8fc7f
+SHA512: af1db72cd66f23308a92157dcee83f371104531268e33a5c0bc4ca40a664aecd8dd4e425963c022a31e422811c48731425741b701b522820c03d9398fb57a995
+Homepage: https://github.com/Nucume/VoxCordis
+Description: A private AI companion that runs on your computer
+ VoxCordis chats with a local language model it runs itself, keeps its
+ files in a folder you choose, and remembers things in a memory you can read,
+ edit, pin and forget.
+ .
+ libwebkit2gtk-4.1 is only needed for the sign-in windows of character
+ importers.
+
+Package: voxcordis
+Architecture: amd64
+Version: 0.3.5
+Priority: optional
+Section: net
+Maintainer: Nucume <119841008+Nucume@users.noreply.github.com>
+Installed-Size: 33600
+Depends: libc6 (>= 2.35), libstdc++6, liblzma5, libgtk-3-0 | libgtk-3-0t64
+Recommends: libwebkit2gtk-4.1-0
+Filename: pool/main/voxcordis_0.3.5_amd64.deb
+Size: 11615466
+MD5sum: 7693422efce6c0ef29e52c859fb2b3ed
+SHA1: cc1ee38e0fb12c093ce819f59d1612608638959a
+SHA256: c62220cf95744146dba666dc8245a8b7763f37848b833bb1beec121d9597d47b
+SHA512: 4553c1eb3a8284c15d4dec14099e1461bd7a8ff58b8999bc14fe00777ef9103d0f00ff39b56ee12ab70db85a7df519b2459cbb711daf7c164d3ca7fca7408250
+Homepage: https://github.com/Nucume/VoxCordis
+Description: A private AI companion that runs on your computer
+ VoxCordis chats with a local language model it runs itself, keeps its
+ files in a folder you choose, and remembers things in a memory you can read,
+ edit, pin and forget.
+ .
+ libwebkit2gtk-4.1 is only needed for the sign-in windows of character
+ importers.
+

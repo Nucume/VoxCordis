@@ -1,0 +1,1113 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="theme-color" content="#0e0b16">
+<meta property="og:title" content="VoxCordis">
+<meta property="og:description" content="A private AI companion that lives on your computer. Free and open source, for Linux and Windows.">
+<meta property="og:url" content="https://voxcordisai.com/">
+<title>VoxCordis</title>
+<meta name="description" content="A private AI companion that lives on your computer. Free and open source, for Linux and Windows.">
+<link rel="preload" href="fonts/hanken-grotesk-latin.woff2" as="font" type="font/woff2" crossorigin>
+<style>@font-face{font-family:'Hanken Grotesk';font-style:normal;font-weight:400 700;font-display:swap;src:url(fonts/hanken-grotesk-latin.woff2) format('woff2')}
+
+/* Layout: a full-screen welcome (heart, name, download) that folds into the header on the first scroll.
+   Then one app window that stays in place while the story scrolls beside it; each part of the story opens
+   the matching part of the window, and everything in the window works and affects the rest of it. */
+@property --c1 { syntax: '<color>'; inherits: true; initial-value: #b18cff; }
+@property --c2 { syntax: '<color>'; inherits: true; initial-value: #4f7cff; }
+@property --c3 { syntax: '<color>'; inherits: true; initial-value: #ff7ab6; }
+@property --accent { syntax: '<color>'; inherits: true; initial-value: #b18cff; }
+@property --base { syntax: '<color>'; inherits: true; initial-value: #0e0b16; }
+/* the heart's own colours: four along it, one that pools at the bottom (Twilight uses the logo's) */
+@property --h1 { syntax: '<color>'; inherits: true; initial-value: #2fe0c8; }
+@property --h2 { syntax: '<color>'; inherits: true; initial-value: #4f8dff; }
+@property --h3 { syntax: '<color>'; inherits: true; initial-value: #ff4f9a; }
+@property --h4 { syntax: '<color>'; inherits: true; initial-value: #ff9a3c; }
+@property --hd { syntax: '<color>'; inherits: true; initial-value: #4f6bff; }
+/* the page's background glow */
+@property --g1 { syntax: '<color>'; inherits: true; initial-value: #b18cff; }
+@property --g2 { syntax: '<color>'; inherits: true; initial-value: #ff7ab6; }
+@property --g3 { syntax: '<color>'; inherits: true; initial-value: #4f7cff; }
+:root {
+  color-scheme: dark;
+  --base: #0e0b16;                 /* the app's dark background, tinted per Colorway */
+  --panel: rgb(27 23 39 / .8);     /* the app's glass */
+  --line: rgb(255 255 255 / .1);
+  --tile: rgb(255 255 255 / .07);
+  --tile-2: rgb(255 255 255 / .12);
+  --ink: #f6f4fa;
+  --muted: rgb(246 244 250 / .68);
+  --faint: rgb(246 244 250 / .45);
+  --on-accent: #14101c;
+  --glow: 20%;
+  --accent: #b18cff; --c1: #b18cff; --c2: #4f7cff; --c3: #ff7ab6;
+  --accent-text: color-mix(in oklab, var(--accent) 80%, var(--ink));
+  --font: "Hanken Grotesk", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --mono: ui-monospace, "Cascadia Code", "SF Mono", Menlo, monospace;
+  --bar: 64px;
+  transition: --c1 .9s, --c2 .9s, --c3 .9s, --accent .9s, --base .9s, --h1 .9s, --h2 .9s, --h3 .9s, --h4 .9s, --hd .9s, --g1 .9s, --g2 .9s, --g3 .9s;
+  /* the heart's paint: its own colours on a dark page, deepened on a light one so white strands still show */
+  --k1: var(--h1); --k2: var(--h2); --k3: var(--h3); --k4: var(--h4); --kd: var(--hd);
+}
+/* The light theme, as in the app: System follows the computer, or the page's own Light / Dark switch */
+@media (prefers-color-scheme: light) { :root:not([data-look="dark"]) {
+  color-scheme: light; --k1: color-mix(in oklab, var(--h1) 68%, #1b1726); --k2: color-mix(in oklab, var(--h2) 68%, #1b1726); --k3: color-mix(in oklab, var(--h3) 68%, #1b1726); --k4: color-mix(in oklab, var(--h4) 68%, #1b1726); --kd: color-mix(in oklab, var(--hd) 68%, #1b1726); --panel: rgb(255 255 255 / .82); --line: rgb(0 0 0 / .1); --tile: rgb(0 0 0 / .045); --tile-2: rgb(0 0 0 / .08);
+  --ink: #1b1726; --muted: rgb(27 23 38 / .7); --faint: rgb(27 23 38 / .5); --glow: 30%;
+  --accent-text: color-mix(in oklab, var(--accent) 55%, var(--ink)); } }
+:root[data-look="light"] {
+  color-scheme: light; --k1: color-mix(in oklab, var(--h1) 68%, #1b1726); --k2: color-mix(in oklab, var(--h2) 68%, #1b1726); --k3: color-mix(in oklab, var(--h3) 68%, #1b1726); --k4: color-mix(in oklab, var(--h4) 68%, #1b1726); --kd: color-mix(in oklab, var(--hd) 68%, #1b1726); --panel: rgb(255 255 255 / .82); --line: rgb(0 0 0 / .1); --tile: rgb(0 0 0 / .045); --tile-2: rgb(0 0 0 / .08);
+  --ink: #1b1726; --muted: rgb(27 23 38 / .7); --faint: rgb(27 23 38 / .5); --glow: 30%;
+  --accent-text: color-mix(in oklab, var(--accent) 55%, var(--ink)); }
+* { box-sizing: border-box; }
+html.locked { overflow: hidden; }
+body { background: var(--bg, var(--base)); color: var(--ink); font: 400 1rem/1.6 var(--font); margin: 0; -webkit-font-smoothing: antialiased; overflow-x: hidden; }
+@media (prefers-color-scheme: light) { :root:not([data-look="dark"]) body { --bg: color-mix(in oklab, var(--base) 6%, #f6f3fa); } }
+:root[data-look="light"] body { --bg: color-mix(in oklab, var(--base) 6%, #f6f3fa); }
+.glow { position: fixed; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    radial-gradient(42vmax 34vmax at 8% 4%, color-mix(in oklab, var(--g1) var(--glow), transparent), transparent 70%),
+    radial-gradient(46vmax 40vmax at 94% 40%, color-mix(in oklab, var(--g2) calc(var(--glow) * .7), transparent), transparent 70%),
+    radial-gradient(50vmax 40vmax at 40% 102%, color-mix(in oklab, var(--g3) var(--glow), transparent), transparent 70%); }
+a { color: inherit; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.gutter { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.wrap { max-width: 1200px; margin: 0 auto; }
+code { font-family: var(--mono); font-size: .88em; }
+
+/* ---------- Welcome, folding into the header ---------- */
+.intro { position: relative; min-height: 100svh; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 18px; text-align: center; padding-block: 48px; }
+.js .intro { position: fixed; inset: 0 0 auto; z-index: 20; height: 100svh; min-height: 0;
+  background: var(--bg, var(--base)); transition: height .7s cubic-bezier(.2, .8, .2, 1), background-color .4s; }
+.heartbox { width: min(46vh, 400px, 80vw); aspect-ratio: 780 / 750; flex: none; }
+/* The logo's heart, redrawn as vector art (traced from the original), so it stays sharp at any size.
+   Strokes take the Colorway's colours through gradients; one SVG filter adds the neon glow and white-hot cores.
+   The filtered drawing never changes, so it's rasterised once; only transform, opacity and the pulse's dash animate. */
+.heartbox { position: relative; }
+.heartbox::before { content: ""; position: absolute; inset: 8% 4% 14%; z-index: -1; border-radius: 50%; filter: blur(40px); opacity: .3;
+  background: radial-gradient(closest-side, color-mix(in oklab, var(--hd) 60%, transparent), transparent); animation: glowbeat 1.03s infinite; }
+.docked .heartbox::before { display: none; }
+.heart { position: relative; width: 100%; height: 100%; transition: transform .5s cubic-bezier(.2, .8, .2, 1);
+  transform: perspective(800px) rotateX(var(--rx, 0deg)) rotateY(var(--ry, 0deg)); }
+.beat { position: absolute; inset: 0; animation: lubdub 1.03s infinite; transform-origin: 50% 88%; will-change: transform; }
+.hv-art, .hv-pulse { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+.hv-pulse .pulse { stroke: #fff; stroke-linecap: round; stroke-dasharray: 6 200; stroke-dashoffset: 7; opacity: 0; animation: ecgpulse 2.06s .05s infinite cubic-bezier(.3, .1, .4, 1); }
+/* small hearts: fewer, bolder lines */
+.docked .heart, .logo { --w1: 24px; --w2: 28px; --w3: 52px; --nk: 0; }
+.docked .hv-pulse { display: none; }
+:root[data-look="light"] .hv-art .glow { filter: url(#vc-soft); }
+:root[data-look="light"] .hv-pulse .pulse { stroke: color-mix(in oklab, var(--accent) 50%, white); }
+@media (prefers-color-scheme: light) {
+  :root:not([data-look="dark"]) .hv-art .glow { filter: url(#vc-soft); }
+  :root:not([data-look="dark"]) .hv-pulse .pulse { stroke: color-mix(in oklab, var(--accent) 50%, white); }
+}
+/* 58 beats a minute: a strong beat, a softer one, then rest */
+@keyframes lubdub { 0%, 30%, 100% { transform: none; } 5% { transform: scale(1.035); } 13% { transform: scale(.995); } 19% { transform: scale(1.02); } }
+@keyframes glowbeat { 0%, 100% { opacity: .3; } 6% { opacity: .75; } 20% { opacity: .5; } 40% { opacity: .32; } }
+@keyframes ecgpulse { 0% { stroke-dashoffset: 7; opacity: 0; } 6% { opacity: 1; } 62% { opacity: 1; } 70%, 100% { stroke-dashoffset: -100; opacity: 0; } }
+.word { display: flex; gap: .45em; letter-spacing: .26em; font-size: clamp(1.5rem, 2.4vw + .8rem, 2.4rem); text-decoration: none; margin-right: -.26em; }
+.word b { font-weight: 700; } .word span { font-weight: 400; opacity: .78; }
+.tagline { font-size: clamp(1.05rem, .6vw + .9rem, 1.3rem); color: var(--muted); margin: 0; max-width: 30em; text-wrap: balance; }
+.get { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.btn { display: inline-flex; align-items: center; gap: 9px; padding: 11px 18px; border-radius: 12px; text-decoration: none; font-weight: 600; font-size: .96rem;
+  background: var(--tile); border: 1px solid var(--line); transition: background .2s; white-space: nowrap; cursor: pointer; }
+.btn:hover { background: var(--tile-2); }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: transparent; }
+.btn.primary:hover { background: color-mix(in oklab, var(--accent) 82%, white); }
+.btn svg { width: 17px; height: 17px; flex: none; }
+.btn.sm { padding: 6px 12px; font-size: .84rem; border-radius: 10px; }
+.ver { font-size: .88rem; color: var(--faint); margin: 0; } .ver a { color: var(--muted); }
+.cue { position: absolute; bottom: max(22px, env(safe-area-inset-bottom, 0px)); left: 50%; translate: -50% 0; border: 0; background: none; color: var(--faint); cursor: pointer; display: grid; justify-items: center; gap: 2px; font-size: .8rem; }
+.cue svg { width: 22px; animation: nudge 2.4s ease-in-out infinite; }
+@keyframes nudge { 50% { transform: translateY(5px); } }
+.barnav { display: none; }
+.intro.docked { height: var(--bar); flex-direction: row; justify-content: flex-start; align-items: center; gap: 12px; text-align: left; padding-block: 0;
+  padding-left: max(16px, calc((100vw - 1200px) / 2)); padding-right: max(16px, calc((100vw - 1200px) / 2));
+  background: color-mix(in oklab, var(--bg, var(--base)) 95%, transparent); border-bottom: 1px solid var(--line); }
+.docked .heartbox { width: 40px; cursor: pointer; }
+.docked .word { font-size: .86rem; letter-spacing: .2em; }
+.docked .tagline, .docked .cue, .docked .ver { display: none; }
+.docked .barnav { display: flex; gap: 20px; margin-left: auto; font-size: .92rem; color: var(--muted); }
+.docked .barnav a { text-decoration: none; } .docked .barnav a:hover { color: var(--ink); }
+.docked .get { margin-left: 18px; flex-wrap: nowrap; }
+.docked .get .btn { padding: 8px 14px; font-size: .88rem; }
+.docked .get .btn.alt { display: none; }
+.js main { padding-top: var(--bar); }
+
+/* ---------- The tour: words on top that change in place, the app window underneath ----------
+   The story is a tall scroll track; the words and the window are pinned while you move through it. */
+.story { position: relative; }
+.pin { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; padding-block: 20px 24px; }
+.js .story { height: calc(var(--n, 7) * 75svh + 100svh); }
+.js .pin { position: sticky; top: var(--bar); height: calc(100svh - var(--bar)); }
+.steps { display: grid; width: 100%; max-width: 760px; text-align: center; flex: none; }
+.step { padding-block: 8px; }
+.js .step { grid-area: 1 / 1; opacity: 0; visibility: hidden; transform: translateY(12px); transition: opacity .45s, transform .45s, visibility 0s .45s; }
+.js .step.on { opacity: 1; visibility: visible; transform: none; transition: opacity .45s .1s, transform .45s .1s, visibility 0s; }
+.step h2 { font-size: clamp(1.5rem, 1vw + 1.2rem, 2.1rem); font-weight: 650; letter-spacing: -.025em; line-height: 1.12; margin: 0 0 10px; text-wrap: balance; }
+.step p { color: var(--muted); margin: 0 auto 6px; font-size: 1rem; max-width: 40em; text-wrap: pretty; }
+.step .try { font-size: .9rem; color: var(--faint); }
+.step .try b { color: var(--ink); font-weight: 500; }
+.dots-nav { display: flex; gap: 8px; flex: none; }
+.dots-nav button { width: 8px; height: 8px; padding: 0; border-radius: 99px; border: 0; background: var(--tile-2); cursor: pointer; transition: width .3s, background .3s; }
+.dots-nav button[aria-current="step"] { width: 26px; background: var(--accent); }
+.stage { flex: 1; min-height: 0; width: 100%; display: flex; justify-content: center; }
+.js .stage { min-height: 0; }
+.stage .app { width: min(100%, 1120px); max-height: 720px; aspect-ratio: 16 / 10; height: auto; max-width: 100%; }
+/* the window takes what the words leave, keeps the app's shape, and sits centred with them on tall screens */
+.js .stage { flex: none; }
+.js .stage .app { height: min(calc(100svh - var(--bar) - 250px), calc(min(100vw - 32px, 1200px) / 1.9), 840px); width: auto; max-height: none; aspect-ratio: 19 / 10; max-width: 100%; }
+/* the window adapts to its own size: a narrow window drops the side panel, a short one shrinks the portrait */
+.app { container-type: size; font-family: system-ui, "Segoe UI", "Noto Sans", "DejaVu Sans", Cantarell, sans-serif; grid-template-rows: auto minmax(0, 1fr); row-gap: 8px; }
+/* the app's own title bar and the details that make it read as the real window */
+.titlebar { grid-column: 1 / -1; display: flex; align-items: center; gap: 8px; padding: 0 4px; height: 22px; font-size: .78rem; color: var(--muted); }
+.titlebar .logo, .appmark .logo { width: 16px; height: 15px; flex: none; overflow: visible; }
+.wc { margin-left: auto; display: flex; gap: 22px; } .wc svg { width: 11px; height: 11px; color: var(--muted); }
+.name { display: flex; align-items: center; gap: 4px; } .name svg { width: 16px; opacity: .7; }
+.sidefoot { margin-top: auto; align-self: stretch; display: grid; gap: 10px; justify-items: center; }
+.appmark { display: flex; align-items: center; gap: 6px; font-size: .72rem; letter-spacing: .2em; color: var(--ink); } .appmark b { font-weight: 700; }
+.side .open { cursor: default; margin-top: 0; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+.side .open svg { width: 15px; height: 15px; }
+.tabs button { display: inline-flex; align-items: center; gap: 6px; } .tabs button svg { width: 15px; height: 15px; flex: none; }
+.composer .clip { width: 18px; height: 18px; color: var(--muted); flex: none; margin-left: -2px; }
+.subtabs { display: flex; gap: 18px; overflow-x: auto; scrollbar-width: none; font-size: .86rem; color: var(--muted); padding: 2px 4px 0; flex: none; }
+.subtabs span { padding-bottom: 6px; white-space: nowrap; border-bottom: 2px solid transparent; }
+.subtabs span.on { color: var(--accent-text); border-color: var(--accent); }
+.srow { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 12px; align-items: start; padding-block: 10px; border-bottom: 1px solid var(--line); font-size: .9rem; }
+.srow > span { padding-top: 5px; }
+@container (max-width: 560px) { .srow { grid-template-columns: 1fr; gap: 6px; } }
+@container (max-width: 700px) { .app .side { display: none; } }
+.portrait { width: min(100%, 36cqh); flex: none; }
+@media (max-height: 800px) { .step .try { display: none; } .step p { font-size: .95rem; } }
+
+.app { height: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 12px; padding: 12px; border-radius: 22px;
+  background: color-mix(in oklab, var(--bg, var(--base)) 80%, black); border: 1px solid var(--line); box-shadow: 0 50px 100px -40px rgb(0 0 0 / .7); position: relative; overflow: hidden; isolation: isolate; }
+.app::before { content: ""; position: absolute; inset: 0; z-index: -1;
+  background: radial-gradient(60% 70% at 65% 70%, color-mix(in oklab, var(--g3) 24%, transparent), transparent 70%),
+              radial-gradient(40% 50% at 6% 8%, color-mix(in oklab, var(--g2) 16%, transparent), transparent 70%); }
+:root[data-look="light"] .app { background: color-mix(in oklab, var(--bg, var(--base)) 92%, white); }
+@media (prefers-color-scheme: light) { :root:not([data-look="dark"]) .app { background: color-mix(in oklab, var(--bg, var(--base)) 92%, white); } }
+.pane { background: var(--panel); border: 1px solid var(--line); border-radius: 16px; min-width: 0; min-height: 0; }
+.side { width: 220px; display: flex; flex-direction: column; align-items: center; padding: 14px; gap: 10px; overflow: hidden; }
+.portrait { width: 100%; aspect-ratio: 1; border-radius: 22px; padding: 3px; background: linear-gradient(160deg, var(--h3), var(--h2)); position: relative; }
+.portrait .pfp { width: 100%; height: 100%; border-radius: 19px; overflow: hidden; background: radial-gradient(90% 80% at 50% 45%, #10284a, #0b1020); }
+.portrait .hv-pfp { display: block; width: 100%; height: 100%; animation: lubsoft 1.03s infinite; will-change: transform; }
+@keyframes lubsoft { 0%, 30%, 100% { transform: none; } 5% { transform: scale(1.025); } 19% { transform: scale(1.012); } }
+.portrait .on { position: absolute; right: -3px; bottom: -3px; width: 24px; height: 24px; border-radius: 50%; background: #5ff0a8; border: 4px solid #15121f; }
+.name { font-size: 1.3rem; font-weight: 600; }
+.traits { display: flex; flex-wrap: wrap; justify-content: center; gap: 5px; }
+.traits span { font-size: .72rem; padding: 2px 9px; border-radius: 999px; background: color-mix(in oklab, var(--accent) 16%, var(--tile)); color: var(--muted); }
+.days { align-self: stretch; font-size: .7rem; letter-spacing: .08em; color: var(--faint); margin-top: 6px; }
+.day { align-self: stretch; padding: 8px 10px; border-radius: 10px; background: var(--tile); font-size: .86rem; }
+.side .open { margin-top: auto; width: 100%; padding: 8px; border-radius: 10px; border: 1px solid transparent; background: color-mix(in oklab, var(--accent) 30%, transparent); font-size: .86rem; cursor: pointer; }
+.side .open[aria-pressed="true"] { border-color: var(--accent); }
+.main { display: flex; flex-direction: column; padding: 12px; gap: 10px; }
+.tabs { display: flex; gap: 2px; padding: 4px; border-radius: 14px; background: var(--tile); max-width: 100%; overflow-x: auto; scrollbar-width: none; flex: none; }
+.tabs button { position: relative; flex: 1 0 auto; padding: 7px 10px; border: 1px solid transparent; border-radius: 10px; background: none; color: var(--muted); font-weight: 600; font-size: .85rem; cursor: pointer; white-space: nowrap; }
+.tabs button { cursor: default; }
+.tabs button[aria-selected="true"] { color: var(--ink); background: color-mix(in oklab, var(--accent) 30%, transparent); border-color: var(--line); }
+.tabs button.ping::after { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.views { flex: 1; min-height: 0; position: relative; }
+.view { position: absolute; inset: 0; display: flex; flex-direction: column; gap: 10px; min-height: 0; animation: fadein .35s ease-out; }
+.view[hidden] { display: none !important; }
+@keyframes fadein { from { opacity: 0; transform: translateY(6px); } }
+.vh { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; flex-wrap: wrap; }
+.vh h3 { margin: 0; font-size: 1.1rem; font-weight: 650; }
+.vh p { margin: 0; flex-basis: 100%; color: var(--muted); font-size: .84rem; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; scrollbar-width: thin; padding-right: 2px; }
+
+/* Chat */
+.chat { display: flex; flex-direction: column; gap: 9px; }
+.sep { display: flex; align-items: center; gap: 12px; color: var(--faint); font-size: .78rem; }
+.sep::before, .sep::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.msg { max-width: 84%; padding: 9px 13px; border-radius: 14px; font-size: .92rem; line-height: 1.5; animation: rise .35s ease-out; }
+.msg.me { align-self: flex-end; background: color-mix(in oklab, var(--accent) 32%, var(--tile)); }
+.msg.her { align-self: flex-start; background: var(--tile-2); }
+.msg img { display: block; width: 100%; max-width: 280px; border-radius: 10px; margin-top: 6px; }
+.note { align-self: center; font-size: .78rem; color: var(--faint); display: flex; gap: 6px; align-items: center; animation: rise .35s ease-out; }
+.note button, .linkish { border: 0; background: none; padding: 0; color: var(--accent-text); font-weight: 600; cursor: pointer; font-size: inherit; }
+@keyframes rise { from { transform: translateY(6px); opacity: 0; } }
+.dots { display: inline-flex; gap: 4px; padding-block: 6px; } .dots i { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); animation: blink 1s infinite; }
+.dots i:nth-child(2) { animation-delay: .15s; } .dots i:nth-child(3) { animation-delay: .3s; }
+@keyframes blink { 50% { opacity: .25; } }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; }
+/* the chat's suggestions stay on one line and scroll sideways, so the conversation keeps its room */
+#suggest { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; flex: none; mask-image: linear-gradient(90deg, #000 85%, transparent); padding-right: 24px; }
+#suggest .chip { flex: none; }
+.chip { padding: 6px 12px; border-radius: 999px; border: 1px solid color-mix(in oklab, var(--accent) 45%, transparent); background: color-mix(in oklab, var(--accent) 10%, transparent); font-size: .83rem; cursor: pointer; }
+.chip:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); }
+.chip:disabled { opacity: .45; cursor: default; }
+.composer { display: flex; align-items: center; gap: 10px; padding: 4px 4px 4px 14px; border-radius: 14px; background: var(--tile); border: 1px solid var(--line); }
+.composer input { flex: 1; min-width: 0; background: none; border: 0; font-size: .92rem; padding: 8px 0; }
+.composer input:focus { outline: none; } .composer:focus-within { border-color: color-mix(in oklab, var(--accent) 60%, transparent); }
+.send { width: 36px; height: 36px; border-radius: 50%; border: 0; background: var(--accent); color: var(--on-accent); display: grid; place-items: center; cursor: pointer; flex: none; }
+.send svg { width: 17px; }
+
+/* Lists: memory, plans */
+.search { display: flex; align-items: center; gap: 8px; padding: 7px 12px; border-radius: 12px; background: var(--tile); border: 1px solid var(--line); }
+.search svg { width: 16px; color: var(--faint); flex: none; }
+.search input { flex: 1; min-width: 0; border: 0; background: none; font-size: .92rem; }
+.search input:focus { outline: none; }
+.list { display: grid; gap: 7px; align-content: start; }
+.row { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--tile); border: 1px solid var(--line); animation: rise .35s ease-out; }
+.row > div { flex: 1; min-width: 0; } .row b { display: block; font-weight: 500; font-size: .92rem; } .row small { color: var(--faint); font-size: .78rem; }
+.mini { border: 1px solid var(--line); background: none; color: var(--muted); border-radius: 8px; padding: 4px 10px; font-size: .78rem; cursor: pointer; flex: none; }
+.mini:hover { color: var(--ink); background: var(--tile); }
+.row.pinned { border-color: color-mix(in oklab, var(--accent) 55%, transparent); }
+.row.gone b { text-decoration: line-through; color: var(--faint); }
+.row.fresh { box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 50%, transparent); }
+.row[hidden] { display: none !important; }
+.empty { color: var(--faint); font-size: .86rem; padding: 6px 4px; }
+.said { min-height: 2.4em; display: flex; flex-direction: column; }
+
+/* Files */
+.path { font: .8rem var(--mono); color: var(--faint); } .path b { color: var(--ink); font-weight: 500; }
+.ftabs { display: flex; gap: 4px; flex-wrap: wrap; margin-bottom: -10px; }
+.ftabs button { font: .8rem var(--mono); color: var(--muted); background: none; border: 0; padding: 7px 11px; border-radius: 10px 10px 0 0; cursor: pointer; }
+.ftabs button[aria-selected="true"] { color: var(--ink); background: var(--tile); }
+.md { flex: 1; min-height: 0; width: 100%; resize: none; margin: 0; padding: 14px; border: 0; border-radius: 0 12px 12px 12px; background: var(--tile); font: .84rem/1.75 var(--mono); color: var(--ink); }
+.md:focus { outline: 1px solid color-mix(in oklab, var(--accent) 50%, transparent); }
+.saved { font-size: .78rem; color: var(--faint); min-height: 1.2em; }
+
+/* Skills */
+.skill { display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 2px 10px; padding: 11px 12px; border-radius: 12px; background: var(--tile); border: 1px solid var(--line); }
+.skill b { font-weight: 600; font-size: .92rem; } .skill small { grid-column: 1; color: var(--faint); font-size: .78rem; }
+.skill .btn { grid-row: 1 / span 2; grid-column: 2; }
+.switch { grid-row: 1 / span 2; grid-column: 3; width: 42px; height: 24px; border-radius: 99px; border: 0; background: var(--tile-2); position: relative; cursor: pointer; transition: background .2s; }
+.switch::after { content: ""; position: absolute; top: 3px; left: 3px; width: 18px; height: 18px; border-radius: 50%; background: var(--ink); opacity: .7; transition: transform .2s, opacity .2s; }
+.switch[aria-checked="true"] { background: var(--accent); } .switch[aria-checked="true"]::after { transform: translateX(18px); background: var(--on-accent); opacity: 1; }
+.skill .out { grid-column: 1 / -1; margin-top: 8px; padding: 9px 12px; border-radius: 12px; background: var(--tile-2); font-size: .86rem; animation: rise .3s ease-out; }
+.skill .out s { color: var(--faint); }
+.skill.off b, .skill.off small { opacity: .5; }
+
+/* Images */
+.paint { display: block; width: 100%; flex: 1; min-height: 0; object-fit: contain; border-radius: 12px; background: var(--tile); }
+.drawbar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: .82rem; color: var(--faint); }
+.meter { flex: 1; min-width: 100px; height: 4px; border-radius: 4px; background: var(--tile-2); overflow: hidden; }
+.meter i { display: block; height: 100%; width: 0; background: var(--accent); }
+
+/* Settings */
+.label { font-size: .8rem; color: var(--faint); margin: 4px 0 6px; }
+.seg { display: inline-flex; padding: 3px; border-radius: 12px; background: var(--tile); border: 1px solid var(--line); }
+.seg button { border: 0; background: none; padding: 6px 13px; border-radius: 9px; font-size: .88rem; font-weight: 500; color: var(--muted); cursor: pointer; }
+.seg button[aria-pressed="true"] { background: var(--panel); color: var(--ink); box-shadow: 0 1px 3px rgb(0 0 0 / .2); }
+.ways { display: flex; flex-wrap: wrap; gap: 7px; }
+.way { display: inline-flex; align-items: center; gap: 7px; padding: 5px 11px 5px 5px; border-radius: 999px; border: 1px solid var(--line); background: var(--tile); font-size: .84rem; font-weight: 500; color: var(--muted); cursor: pointer; }
+.way i { width: 20px; height: 20px; border-radius: 50%; }
+.way[aria-pressed="true"] { color: var(--ink); border-color: var(--accent); }
+
+/* ---------- After the story ---------- */
+section { padding-block: 96px 0; scroll-margin-top: calc(var(--bar) + 16px); }
+section h2 { font-size: clamp(1.7rem, 1.4vw + 1.2rem, 2.3rem); font-weight: 650; letter-spacing: -.025em; line-height: 1.12; margin: 0 0 14px; text-wrap: balance; }
+.sub { color: var(--muted); margin: 0 0 12px; font-size: 1.04rem; max-width: 36em; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 20px; min-width: 0; }
+.facts { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; background: var(--line); border: 1px solid var(--line); border-radius: 16px; overflow: hidden; margin-top: 28px; }
+.facts div { background: var(--panel); padding: 18px; }
+.facts b { display: block; font-weight: 600; margin-bottom: 4px; }
+.facts span { font-size: .9rem; color: var(--muted); }
+.dl { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
+.dl > div { display: grid; gap: 10px; align-content: start; }
+.dl h3, .pkg h3 { margin: 0; font-size: 1.15rem; }
+.dl p, .pkg p { margin: 0; color: var(--muted); font-size: .94rem; }
+.dl code { overflow-wrap: anywhere; }
+.dl .btn { justify-self: start; margin-top: 6px; }
+.pkg { margin-top: 16px; display: grid; gap: 12px; } .pkg > * { min-width: 0; } .pkg .seg { justify-self: start; }
+.term { position: relative; border-radius: 12px; background: var(--tile); border: 1px solid var(--line); }
+.term pre { margin: 0; padding: 14px 16px; padding-right: 84px; font: .82rem/1.7 var(--mono); overflow-x: auto; white-space: pre; }
+.term .btn { position: absolute; top: 8px; right: 8px; }
+.after { color: var(--muted); font-size: .94rem; margin-top: 18px; }
+.about { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 56px; }
+.about p { color: var(--muted); margin: 0 0 14px; }
+.about .get { justify-content: flex-start; }
+footer { margin-top: 96px; padding-block: 28px 48px; border-top: 1px solid var(--line); display: flex; flex-wrap: wrap; gap: 8px 28px; justify-content: space-between; color: var(--faint); font-size: .86rem; }
+footer nav { display: flex; gap: 20px; } footer a { text-decoration: none; } footer a:hover { color: var(--ink); }
+
+
+@media (max-width: 900px) {
+  .step h2 { font-size: 1.35rem; } .step p { font-size: .94rem; } .step .try { display: none; }
+  .js .stage { flex: 1; } .js .stage .app { height: 100%; width: 100%; aspect-ratio: auto; }
+  .about, .dl { grid-template-columns: 1fr; gap: 28px; }
+  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .docked .barnav { display: none; } .docked .get { margin-left: auto; }
+  section { padding-block: 72px 0; }
+}
+@media (max-width: 460px) { .facts { grid-template-columns: 1fr; } .docked .word { display: none; } .tabs button { padding: 7px 10px; } .skill { grid-template-columns: 1fr auto; } .skill .btn { grid-row: auto; grid-column: 1; justify-self: start; } .switch { grid-column: 2; } }
+@media (prefers-reduced-motion: reduce) { :root { transition: none; } .js .intro { transition: none; } .cue svg, .dots i, .beat, .heartbox::before, .hv-pulse .pulse, .portrait .hv-pfp { animation: none; } .heart { transition: none; } .msg, .row, .skill .out, .note, .view { animation: none; } .step { transition: none; } }
+
+/* ---------- Narrow screens: the header's links fold into a menu ---------- */
+.menu { display: none; position: relative; }
+.menu summary { list-style: none; width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; cursor: pointer; color: var(--muted); }
+.menu summary::-webkit-details-marker { display: none; }
+.menu summary:hover { background: var(--tile); color: var(--ink); }
+.menu summary svg { width: 22px; height: 22px; }
+.menu nav { position: absolute; right: 0; top: calc(100% + 8px); min-width: 210px; display: grid; padding: 6px; border-radius: 14px;
+  background: color-mix(in oklab, var(--bg, var(--base)) 94%, var(--ink)); border: 1px solid var(--line); box-shadow: 0 24px 48px -20px rgb(0 0 0 / .6); }
+.menu nav a { padding: 9px 12px; border-radius: 9px; text-decoration: none; color: var(--muted); }
+.menu nav a:hover { background: var(--tile); color: var(--ink); }
+@media (max-width: 900px) { .docked .menu { display: block; } }
+
+/* ---------- Folding sections: privacy details, the guide, questions ---------- */
+.qas { max-width: 52em; margin-top: 24px; border-top: 1px solid var(--line); }
+.qa { border-bottom: 1px solid var(--line); scroll-margin-top: calc(var(--bar) + 16px); }
+.qa summary { list-style: none; display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 15px 2px; cursor: pointer; font-weight: 600; color: var(--ink); }
+.qa summary::-webkit-details-marker { display: none; }
+.qa summary::after { content: ""; flex: none; width: 9px; height: 9px; border: solid var(--muted); border-width: 0 2px 2px 0; transform: translateY(-3px) rotate(45deg); transition: transform .25s; }
+.qa[open] summary::after { transform: translateY(2px) rotate(-135deg); }
+.qa summary:hover { color: var(--accent-text); }
+.qa > div { padding: 0 2px 18px; color: var(--muted); }
+.qa > div > p { margin: 0 0 10px; }
+.qa.ch summary { font-size: 1.06rem; padding-block: 17px; }
+.prose { color: color-mix(in oklab, var(--ink) 84%, transparent); }
+.prose p { margin: 0 0 12px; }
+.prose ul { margin: 0 0 14px; padding-left: 1.25em; display: grid; gap: 6px; }
+.prose li::marker { color: var(--accent-text); }
+.prose dl { margin: 0 0 12px; display: grid; gap: 4px; }
+.prose dt { font-weight: 600; color: var(--ink); margin-top: 10px; } .prose dd { margin: 0; }
+.qa a { color: var(--accent-text); text-underline-offset: 3px; }
+.qa code { padding: 1px 6px; border-radius: 6px; background: var(--tile); }
+.qa .term { margin-top: 4px; } .qa .term code { padding: 0; background: none; }
+.tbl-wrap { overflow-x: auto; margin: 4px 0 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
+.tbl { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.tbl th { text-align: left; font-weight: 600; color: var(--muted); font-size: .82rem; }
+.tbl th, .tbl td { padding: 10px 14px; border-bottom: 1px solid var(--line); vertical-align: top; }
+.tbl tr:last-child td { border-bottom: 0; }
+.tbl td:first-child { color: var(--ink); font-weight: 500; white-space: nowrap; }
+.tbl code { white-space: nowrap; }
+.qa-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 36px 48px; margin-top: 24px; align-items: start; }
+.qa-group h3 { margin: 0 0 6px; font-size: 1.05rem; color: var(--muted); font-weight: 600; }
+.qa-group .qa:first-of-type { border-top: 1px solid var(--line); }
+
+/* ---------- Setting it up ---------- */
+.two { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 28px; }
+.two .card, .wide { display: grid; gap: 10px; align-content: start; }
+.two h3, .wide h3 { margin: 0; font-size: 1.15rem; }
+.two p, .wide p { margin: 0; color: var(--muted); font-size: .96rem; }
+.two small { color: var(--faint); font-size: .86rem; padding-top: 10px; border-top: 1px solid var(--line); }
+.wide { margin-top: 16px; }
+.tag { justify-self: start; font-size: .78rem; padding: 2px 10px; border-radius: 99px; background: color-mix(in oklab, var(--accent) 20%, transparent); color: var(--accent-text); }
+
+/* ---------- Footer ---------- */
+footer.site { display: block; margin-top: 110px; padding-block: 36px 40px; border-top: 1px solid var(--line); color: var(--muted); font-size: .92rem; }
+.fone { display: flex; flex-wrap: wrap; align-items: center; gap: 20px 36px; }
+.brand { display: flex; align-items: center; gap: 12px; text-decoration: none; }
+.brand .logo { width: 34px; height: 33px; }
+.site .word { font-size: .82rem; letter-spacing: .2em; margin-right: 0; }
+.look { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 14px; }
+.look .ways { gap: 5px; }
+.look .way { padding: 3px; border-radius: 50%; } .look .way span { display: none; } .look .way i { width: 18px; height: 18px; }
+.look .seg button { padding: 4px 11px; font-size: .82rem; }
+.fone nav { display: flex; flex-wrap: wrap; gap: 8px 20px; margin-left: auto; }
+.fone nav a { text-decoration: none; } .fone nav a:hover { color: var(--ink); }
+.fbase { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 24px; margin-top: 28px; padding-top: 18px; border-top: 1px solid var(--line); color: var(--faint); font-size: .86rem; }
+
+@media (max-width: 900px) {
+  .two, .qa-grid { grid-template-columns: 1fr; } .qa-grid { gap: 28px; }
+  .fone nav { margin-left: 0; }
+}
+</style>
+<script>
+/* Shared by every page: the theme and Colorway (applied before the first paint, so pages don't flash),
+   download buttons for the visitor's system, the package commands, and the latest release. */
+(() => {
+  const root = document.documentElement;
+  const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
+  const esc = s => s.replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;');
+  const store = { get(k) { try { return localStorage.getItem(k); } catch { return null; } }, set(k, v) { try { localStorage.setItem(k, v); } catch {} } };
+  root.classList.add('js');
+
+  /* ---------- Colorways (from the app's lib/data/looks.dart) and theme.
+     `heart` paints the logo (four along it, one pooling at the bottom); `glow` is the page's background light. ---------- */
+  const WAYS = [
+    { id: 'twilight', name: 'Twilight', accent: '#b18cff', c: ['#b18cff', '#4f7cff', '#ff7ab6'], base: '#0e0b16', heart: ['#2fe0c8', '#4f8dff', '#ff4f9a', '#ff9a3c', '#4f6bff'], line: 'Back to Twilight. It feels like me.' },
+    { id: 'rose', name: 'Rose', accent: '#ff7ab6', c: ['#ff7ab6', '#ffb86b', '#b18cff'], base: '#120b12', heart: ['#ff7ab6', '#ffb86b', '#ff8fc4', '#b18cff', '#ff7ab6'], line: 'Rose, I think. Something soft.' },
+    { id: 'ocean', name: 'Ocean', accent: '#4fc3f7', c: ['#2f6bff', '#4fc3f7', '#36d6b5'], base: '#08101a', heart: ['#36d6b5', '#4fc3f7', '#2f6bff', '#4fc3f7', '#2f6bff'], line: 'Ocean. I could use some calm.' },
+    { id: 'forest', name: 'Forest', accent: '#5bd6a0', c: ['#2e9e6b', '#9ad66b', '#2f8fa6'], base: '#08120e', heart: ['#9ad66b', '#5bd6a0', '#2f8fa6', '#9ad66b', '#2e9e6b'], line: 'Forest, like a walk after the rain.' },
+    { id: 'ember', name: 'Ember', accent: '#ffa05b', c: ['#ff5b5b', '#ffa05b', '#ffd36b'], base: '#140c09', heart: ['#ff5b5b', '#ffa05b', '#ffd36b', '#ffa05b', '#ff5b5b'], line: 'Ember. I\'m in a warm mood today.' },
+    { id: 'mono', name: 'Moonlight', accent: '#b8c4d6', c: ['#8c9bb3', '#5c6b85', '#d6deeb'], base: '#0b0d12', heart: ['#d6deeb', '#8c9bb3', '#b8c4d6', '#d6deeb', '#8c9bb3'], line: 'Moonlight, for a quiet evening.' },
+    { id: 'haru', name: 'Haru', accent: '#e5383b', c: ['#ffffff', '#3a3a3a', '#7a1517'], base: '#0a0a0a', heart: ['#ffffff', '#ff4d50', '#e5383b', '#b81d21', '#e5383b'], glow: ['#e5383b', '#7a1517', '#e5383b'], line: 'Haru. Named after you, so how could I not.' },
+    { id: 'vibecoder', name: 'Vibecoder\'s', accent: '#6366f1', c: ['#4f46e5', '#818cf8', '#312e81'], base: '#0a0a1f', heart: ['#a5b4fc', '#818cf8', '#6366f1', '#818cf8', '#4f46e5'], glow: ['#4f46e5', '#818cf8', '#4f46e5'], line: 'Vibecoder\'s. Very late-night-coding of me.' },
+    { id: 'sakura', name: 'Sakura', accent: '#ff8fb1', c: ['#ffc2d4', '#ff8fb1', '#ffffff'], base: '#160c12', heart: ['#ffffff', '#ffc2d4', '#ff8fb1', '#ffc2d4', '#ff8fb1'], line: 'Sakura. A little spring never hurts.' },
+  ];
+  let way = WAYS.find(w => w.id === store.get('vc-way')) || WAYS[0];
+  let theme = store.get('vc-theme') || 'dark';
+  function paintWay() {
+    const set = (k, v) => root.style.setProperty(k, v), w = way;
+    set('--accent', w.accent); set('--c1', w.c[0]); set('--c2', w.c[1]); set('--c3', w.c[2]); set('--base', w.base);
+    ['--h1', '--h2', '--h3', '--h4', '--hd'].forEach((k, i) => set(k, w.heart[i]));
+    ['--g1', '--g2', '--g3'].forEach((k, i) => set(k, (w.glow || [w.c[0], w.c[2], w.c[1]])[i]));
+    $$('[data-ways] .way').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.id === w.id)));
+  }
+  function paintTheme() {
+    if (theme === 'system') root.removeAttribute('data-look'); else root.setAttribute('data-look', theme);
+    $$('[data-themes] button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === theme)));
+  }
+  const applyWay = w => { way = w; store.set('vc-way', w.id); paintWay(); };
+  const applyTheme = t => { theme = t; store.set('vc-theme', t); paintTheme(); };
+  paintWay(); paintTheme();
+
+  /* ---------- Download buttons for the visitor's system ---------- */
+  const REL = 'https://github.com/Nucume/VoxCordis/releases/latest';
+  const ICON = {
+    win: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M3 5.1 10 4v7.3H3zm8-1.2L21 2.5v8.8H11zM3 12.7h7V20l-7-1zm8 0h10v8.8l-10-1.4z"/></svg>',
+    dl: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2"/></svg>',
+    gh: '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 2a10 10 0 0 0-3.16 19.49c.5.09.68-.22.68-.48v-1.7c-2.78.6-3.37-1.34-3.37-1.34-.45-1.16-1.11-1.47-1.11-1.47-.91-.62.07-.6.07-.6 1 .07 1.53 1.03 1.53 1.03.9 1.53 2.35 1.09 2.92.83.09-.65.35-1.09.64-1.34-2.22-.25-4.56-1.11-4.56-4.95 0-1.09.39-1.99 1.03-2.69-.1-.25-.45-1.27.1-2.65 0 0 .84-.27 2.75 1.03a9.5 9.5 0 0 1 5 0c1.91-1.3 2.75-1.03 2.75-1.03.55 1.38.2 2.4.1 2.65.64.7 1.03 1.6 1.03 2.69 0 3.85-2.34 4.7-4.57 4.94.36.31.68.92.68 1.86v2.75c0 .27.18.58.69.48A10 10 0 0 0 12 2"/></svg>',
+  };
+  const os = (() => {
+    const p = (navigator.userAgentData?.platform || navigator.platform || '') + ' ' + navigator.userAgent;
+    if (/android|iphone|ipad|cros/i.test(p)) return 'other';
+    if (/win/i.test(p)) return 'win';
+    if (/mac/i.test(p)) return 'mac';
+    if (/linux|x11|bsd/i.test(p)) return 'lin';
+    return 'other';
+  })();
+  root.dataset.os = os;
+  const btn = (el, icon, text, opts) => { if (!el) return; el.hidden = false; el.innerHTML = ICON[icon] + esc(text); Object.assign(el.dataset, opts.data || {}); if (opts.href) el.href = opts.href; };
+
+  function wire() {
+    // the main button: Windows gets the installer; Linux has three ways in (AppImage, apt, dnf), so it leads to the choice
+    const linux = $('#download') ? '#download' : 'download.html#linux';
+    $$('[data-get]').forEach(el => {
+      const alt = el.dataset.get === 'alt', short = el.dataset.short != null;
+      if (os === 'win') alt ? btn(el, 'dl', 'Linux', { href: linux }) : btn(el, 'win', short ? 'Download' : 'Download for Windows', { data: { dl: 'win' } });
+      else if (os === 'lin') alt ? btn(el, 'win', 'Windows', { data: { dl: 'win' } }) : btn(el, 'dl', short ? 'Download' : 'Download for Linux', { href: linux });
+      else if (!alt) btn(el, 'gh', short ? 'Download' : 'Get it on GitHub', short ? { href: 'download.html' } : { href: REL });
+    });
+    $$('[data-osnote]').forEach(e => e.textContent = os === 'lin' ? 'AppImage, apt and dnf' : os === 'mac' ? 'Windows and Linux · macOS builds from source' : os === 'win' ? 'free and open source' : 'for Windows and Linux');
+    if (os === 'lin') { const dl = $('.dl'); if (dl) { dl.prepend($('[data-card="lin"]')); dl.querySelectorAll('.btn').forEach(b => b.classList.toggle('primary', b.dataset.dl === 'lin')); } }
+
+    // Colorway and theme pickers, wherever a page has one
+    $$('[data-ways]').forEach(box => {
+      for (const w of WAYS) {
+        const b = document.createElement('button'); b.type = 'button'; b.className = 'way'; b.dataset.id = w.id; b.title = w.name;
+        b.innerHTML = `<i style="background:conic-gradient(${w.c[0]},${w.c[1]},${w.c[2]},${w.c[0]})"></i><span>${esc(w.name)}</span>`;
+        b.onclick = () => applyWay(w); box.append(b);
+      }
+    });
+    $$('[data-themes] button').forEach(b => b.onclick = () => applyTheme(b.dataset.t));
+    paintWay(); paintTheme();
+
+    // the package repository's commands (from packaging/linux/build-repo.sh)
+    // served next to the site, so they follow its address (a custom domain, or github.io without one)
+    const PKG = /(^|\.)voxcordisai\.com$|\.github\.io$/.test(location.hostname)
+      ? new URL('repo', location.href).href : 'https://voxcordisai.com/repo';
+    const CMDS = {
+      apt: `sudo install -d -m 0755 /etc/apt/keyrings\ncurl -fsSL ${PKG}/voxcordis.gpg | sudo tee /etc/apt/keyrings/voxcordis.gpg >/dev/null\necho "deb [signed-by=/etc/apt/keyrings/voxcordis.gpg] ${PKG}/apt stable main" | sudo tee /etc/apt/sources.list.d/voxcordis.list\nsudo apt update\nsudo apt install voxcordis`,
+      dnf: `sudo curl -fsSL -o /etc/yum.repos.d/voxcordis.repo ${PKG}/rpm/voxcordis.repo\nsudo dnf install voxcordis`,
+    };
+    if ($('#pkgcmd')) {
+      const showPkg = p => { $('#pkgcmd').textContent = CMDS[p]; $$('#pkgtabs button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.p === p))); };
+      $$('#pkgtabs button').forEach(b => b.onclick = () => showPkg(b.dataset.p));
+      showPkg(/fedora/i.test(navigator.userAgent) ? 'dnf' : 'apt');
+    }
+    // copy buttons next to commands
+    $$('.term .copy').forEach(c => c.onclick = async () => {
+      const pre = c.parentElement.querySelector('pre');
+      try { await navigator.clipboard.writeText(pre.textContent); c.textContent = 'Copied'; }
+      catch { getSelection().selectAllChildren(pre); c.textContent = 'Selected'; }
+      setTimeout(() => c.textContent = 'Copy', 1600);
+    });
+
+    // the narrow-screen menu closes after a pick or a click elsewhere
+    $$('.menu').forEach(m => {
+      m.addEventListener('click', e => { if (e.target.closest('a')) m.open = false; });
+      document.addEventListener('click', e => { if (!m.contains(e.target)) m.open = false; });
+    });
+
+    // the contents list follows along on long pages
+    const toc = $$('.toc a');
+    if (toc.length && 'IntersectionObserver' in window) {
+      const io = new IntersectionObserver(es => es.forEach(e => { if (e.isIntersecting) toc.forEach(a => a.classList.toggle('on', a.hash === '#' + e.target.id)); }), { rootMargin: '-20% 0px -70% 0px' });
+      toc.forEach(a => { const t = $(a.hash); if (t) io.observe(t); });
+    }
+
+    /* ---------- Latest release ---------- */
+    fetch('https://api.github.com/repos/Nucume/VoxCordis/releases/latest').then(r => r.ok ? r.json() : null).then(rel => {
+      if (!rel) return;
+      $$('.vnum').forEach(e => e.textContent = 'Version ' + rel.tag_name.replace(/^v/, ''));
+      for (const a of rel.assets || []) {
+        const kind = /windows.*setup\.exe$/i.test(a.name) ? 'win' : /\.AppImage$/i.test(a.name) ? 'lin' : null; if (!kind) continue;
+        $$(`[data-dl="${kind}"]`).forEach(e => e.href = a.browser_download_url);
+        $$(`.fname[data-f="${kind}"]`).forEach(e => e.textContent = a.name);
+      }
+    }).catch(() => {});
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
+
+  window.VC = { WAYS, get way() { return way; }, applyWay, applyTheme, otherWay: () => { const o = WAYS.filter(w => w !== way); return o[Math.floor(Math.random() * o.length)]; } };
+})();
+</script>
+</head>
+<body>
+
+
+<div class="glow" aria-hidden="true"></div>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs><linearGradient id="vc-g" gradientUnits="userSpaceOnUse" x1="150" y1="0" x2="850" y2="0"><stop offset="0" style="stop-color:var(--k1)"/><stop offset=".38" style="stop-color:var(--k2)"/><stop offset=".64" style="stop-color:var(--k3)"/><stop offset="1" style="stop-color:var(--k4)"/></linearGradient><linearGradient id="vc-d" gradientUnits="userSpaceOnUse" x1="0" y1="440" x2="0" y2="830"><stop offset="0" style="stop-color:var(--kd);stop-opacity:0"/><stop offset="1" style="stop-color:var(--kd);stop-opacity:.9"/></linearGradient><linearGradient id="vc-gl" gradientUnits="userSpaceOnUse" x1="150" y1="0" x2="850" y2="0"><stop offset="0" stop-color="#2fe0c8"/><stop offset=".38" stop-color="#4f8dff"/><stop offset=".64" stop-color="#ff4f9a"/><stop offset="1" stop-color="#ff9a3c"/></linearGradient><linearGradient id="vc-dl" gradientUnits="userSpaceOnUse" x1="0" y1="440" x2="0" y2="830"><stop offset="0" stop-color="#4f6bff" stop-opacity="0"/><stop offset="1" stop-color="#4f6bff" stop-opacity=".9"/></linearGradient><filter id="vc-neon" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="20" result="b2"/><feComponentTransfer in="b2" result="b2o"><feFuncA type="linear" slope=".6"/></feComponentTransfer><feGaussianBlur in="SourceGraphic" stdDeviation="5" result="b1"/><feMorphology in="SourceGraphic" operator="erode" radius="2.4" result="e"/><feColorMatrix in="e" type="matrix" values=".55 0 0 0 .45 0 .55 0 0 .45 0 0 .55 0 .45 0 0 0 .6 0"/><feGaussianBlur stdDeviation=".9" result="core"/><feMerge><feMergeNode in="b2o"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/><feMergeNode in="core"/></feMerge></filter><filter id="vc-soft" x="-15%" y="-15%" width="130%" height="130%" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="9" result="b"/><feComponentTransfer in="b" result="bo"><feFuncA type="linear" slope=".45"/></feComponentTransfer><feMerge><feMergeNode in="bo"/><feMergeNode in="SourceGraphic"/></feMerge></filter><g id="vc-lines" stroke-linecap="round" stroke-linejoin="round"><path fill="none" style="stroke-width:var(--w1,5.6px)" d="M787 224C784 222 776 216 768 212C760 207 749 201 740 196C731 192 721 189 712 186C704 184 693 184 689 184M308 184C302 185 282 189 275 190C268 192 270 191 264 194C258 197 246 202 237 207C228 212 216 221 212 224M308 184C304 186 291 190 286 193C282 196 287 197 282 203C276 209 261 222 253 230C245 238 239 246 234 253C228 260 222 270 220 273M428 273C425 270 419 260 412 253C405 246 396 238 388 232C380 226 374 222 361 214C348 206 317 189 308 184M546 317C547 314 551 303 553 297C556 291 557 288 561 283C564 278 571 269 574 265C578 261 578 261 582 257C586 253 594 246 599 242C604 238 606 236 613 233C620 229 631 224 638 222C645 219 648 218 655 217C662 216 672 215 679 215C686 215 691 216 696 216C701 217 705 218 710 219C715 221 721 223 726 226C731 228 738 231 742 233C746 236 745 235 749 239C753 243 760 250 764 256C768 261 772 268 773 271M212 224C208 230 192 250 186 259C181 268 180 270 178 276C175 282 174 283 171 292C168 301 163 319 161 329C159 339 160 346 159 354C159 362 159 373 159 377M787 224C785 229 778 246 776 254C773 262 773 268 773 271M212 224C213 228 215 239 217 247C218 256 219 269 220 273M580 294C582 292 590 283 594 280C598 276 601 274 605 272C609 269 614 266 620 263C626 261 634 258 639 256C644 254 647 254 652 253C657 253 660 251 667 252C674 253 689 257 693 258M306 258C310 257 322 255 327 254C332 253 334 254 338 254C342 254 349 254 354 255C359 256 362 257 366 258C370 260 373 260 377 262C381 264 384 264 391 270C398 275 415 290 420 294M246 326C248 323 252 311 255 306C257 301 259 298 261 295C263 292 264 290 268 286C273 282 280 274 287 269C293 264 303 260 306 258M749 326C747 322 742 308 739 300C735 292 730 286 726 281C722 276 721 274 715 270C710 267 697 260 693 258M780 384C782 381 789 373 791 367C794 361 795 355 796 349C797 343 798 338 798 331C798 324 796 316 795 309C794 302 791 295 789 291C787 287 788 286 785 283C782 280 775 273 773 271M773 271C772 274 768 280 766 286C763 292 761 301 758 308C756 314 750 323 749 326M208 381C207 378 203 368 202 363C200 358 200 357 199 353C198 349 197 345 197 340C197 335 198 327 198 322C199 317 199 314 201 309C202 304 205 297 206 293C208 289 207 290 209 287C212 284 218 275 220 273M246 326C244 323 239 316 234 307C230 298 222 279 220 273M253 396C252 394 250 390 249 384C248 378 246 373 245 363C245 353 246 332 246 326M780 384C774 384 751 386 746 382C742 378 750 371 750 362C751 353 749 332 749 326M780 384C784 384 796 384 801 384C806 385 806 384 811 386C816 388 829 395 833 397M240 491C238 488 234 483 229 476C223 469 214 459 206 449C199 439 187 422 182 415C178 408 180 410 179 408C178 406 177 404 177 402C177 400 177 398 178 396C178 395 180 393 181 392M211 536C209 533 202 523 198 517C195 511 193 508 190 501C187 494 183 484 180 477C177 470 176 468 173 457C170 446 164 425 162 412C159 399 159 383 159 377M731 498C739 492 768 469 778 460C788 451 786 453 792 446C798 439 808 425 814 416C821 408 830 400 833 397M733 439C732 440 730 440 728 444C726 448 722 456 719 461C716 466 714 469 710 475C705 481 699 490 693 497C687 504 686 506 672 520C658 534 621 571 608 584C595 598 600 593 593 601C587 609 576 622 569 631C562 640 555 652 553 656M364 576C362 573 365 569 354 556C344 542 315 510 302 495C290 480 285 470 280 464C276 458 277 461 276 460M240 491C243 493 247 495 256 502C264 509 279 523 291 534C303 544 321 559 328 564C334 570 331 566 332 566M240 491C238 493 232 498 227 505C223 513 214 531 211 536M731 498C730 501 728 510 725 516C723 522 719 529 716 534C713 539 710 542 708 547C706 552 703 561 702 564M340 602C337 601 327 600 323 598C318 597 324 600 314 595C304 590 278 577 265 570C252 563 243 556 237 553C231 549 231 551 229 551C227 551 226 551 226 552C226 554 226 555 226 557C227 559 226 558 229 563C232 568 237 574 246 585C256 596 276 617 287 629C298 641 310 651 314 655M702 564C704 566 713 573 716 575C719 577 718 575 719 575C721 574 720 576 726 572C732 569 749 559 756 556C763 553 765 553 767 553C769 553 769 554 769 554M769 554C769 556 768 560 767 563C766 566 765 567 762 570C760 573 758 577 753 583C748 589 748 590 732 606C716 622 672 667 656 682C640 697 644 692 638 697C632 702 622 708 619 710M340 602C340 599 340 590 339 584C337 578 333 569 332 566M635 612C637 609 644 599 649 594C654 589 659 586 665 581C671 577 679 572 685 569C691 566 699 565 702 564M635 612C638 611 646 609 656 604C667 600 691 588 699 584C706 580 700 585 701 582C701 579 702 567 702 564M364 576C368 579 380 587 388 594C396 601 406 611 413 619C420 627 428 636 433 643C438 650 440 652 444 658C448 664 452 670 457 679C461 688 468 701 472 710C476 719 478 724 482 734C485 744 490 765 492 772C494 779 494 776 495 778C496 779 498 780 498 780M340 602C342 604 348 612 352 616C357 620 366 626 368 627M340 602C338 608 330 627 326 636C321 645 316 652 314 655M548 674C549 674 550 674 554 671C558 668 565 661 571 656C577 650 580 647 591 640C602 633 628 617 635 612M404 680C409 680 432 679 437 678C442 677 437 677 434 674C432 671 427 664 420 658C413 651 400 641 393 636C386 632 385 631 381 630C377 628 370 628 368 627M368 627C368 628 369 632 370 634C370 636 369 635 372 640C376 645 387 658 393 664C398 671 402 677 404 680M635 612C634 616 633 627 630 634C628 641 624 648 621 654C617 660 614 663 610 668C605 672 603 674 594 682C586 691 569 708 559 719C549 730 546 731 535 747C525 763 505 804 499 816M404 680C401 679 395 679 386 676C376 674 356 667 348 665C340 663 342 664 340 664C338 664 337 664 336 664C335 664 334 665 334 666C333 666 333 668 333 669C334 671 333 672 336 675C339 678 337 678 350 688C363 698 398 725 413 737C428 748 430 751 439 758C448 766 457 776 464 783C470 790 473 796 479 802C485 807 496 814 499 816M548 674C544 683 525 716 519 728C514 740 515 737 513 744C511 751 507 767 505 772C504 777 504 775 503 776C502 778 499 780 498 780M499 816C496 810 483 787 479 779C474 770 478 773 474 766C469 759 459 742 454 735C449 728 450 729 445 722C439 715 426 699 419 692C412 685 406 682 404 680M499 816C502 814 512 808 519 801C526 794 534 783 542 775C550 767 551 765 564 754C577 743 610 717 619 710"/><path fill="none" style="stroke-width:var(--w2,7px)" d="M308 184C312 184 327 182 335 182C343 182 351 184 357 185C363 186 366 187 372 189C378 191 386 194 393 197C400 200 405 203 411 206C417 210 422 214 427 218C431 221 435 227 437 229M689 184C684 184 669 182 661 182C653 182 648 184 642 185C636 186 632 187 624 190C616 192 604 197 596 201C588 205 581 210 575 214C569 218 565 221 560 226C555 231 547 240 543 244C539 248 539 249 538 252C536 255 535 258 535 260M787 224C791 229 803 247 809 255C814 263 815 267 819 274C822 281 826 290 829 299C832 308 833 316 835 326C836 336 837 348 838 356C838 364 839 366 838 373C837 380 834 393 833 397M786 535C788 532 795 524 800 516C804 508 811 494 815 485C819 476 821 470 823 464C825 458 826 456 827 450C829 444 831 438 832 429C832 420 833 402 833 397"/><path id="vc-ecg" fill="none" pathLength="100" style="stroke-width:var(--w3,16px)" d="M159 377C160 378 164 383 167 385C170 387 174 388 179 391C183 394 190 400 193 402C196 404 196 403 199 404C202 405 207 406 212 408C217 410 226 415 231 418C236 420 237 419 242 421C247 422 256 424 262 424C268 425 272 425 276 425C280 425 283 424 287 424C291 423 296 421 300 420C304 418 307 417 311 415C315 413 319 410 322 408C325 406 328 404 330 401C333 398 335 395 338 391C340 387 344 380 346 376C348 372 349 370 351 364C354 358 358 344 360 339C362 334 361 336 362 334C363 333 364 332 365 332C366 331 367 330 368 330C369 330 371 329 372 329C373 330 374 329 376 330C377 331 380 332 381 335C383 337 381 325 385 343C389 361 401 422 406 444C410 466 412 467 414 473C416 479 416 479 418 481C420 483 422 485 423 486C425 487 427 488 429 488C431 488 433 487 435 486C436 485 438 484 439 482C440 480 441 478 442 475C443 472 444 470 445 464C446 458 447 450 448 439C450 428 451 423 453 395C456 367 461 300 464 271C467 242 469 232 471 219C473 206 476 200 478 195C479 191 480 192 482 191C483 190 486 189 487 189C488 189 489 189 490 189C491 190 492 190 493 191C494 192 495 193 496 194C497 195 497 194 498 197C498 201 500 209 501 216C502 223 503 225 504 240C506 255 507 277 509 305C510 333 513 384 514 408C515 432 514 435 515 451C516 467 517 489 518 504C519 519 521 532 522 539C523 546 523 543 524 545C525 546 527 548 528 549C530 550 532 551 534 551C536 551 538 551 540 550C542 549 544 547 545 545C546 543 544 560 548 538C550 516 559 445 563 415C567 385 569 371 571 358C573 345 575 341 576 337C578 333 578 334 579 333C580 332 580 331 582 330C583 329 585 329 586 328C587 328 588 328 590 329C591 329 593 330 594 331C596 332 596 332 597 335C599 338 600 341 602 349C604 357 606 371 609 381C612 391 616 402 619 409C622 416 623 418 624 421C626 424 628 428 630 430C631 432 633 434 634 435C636 437 638 438 640 438C642 439 644 439 646 439C648 438 650 438 652 436C653 436 654 435 656 433C658 430 663 424 666 421C670 418 672 416 675 415C678 414 679 413 686 413C693 412 707 413 715 413C723 412 727 410 732 409C737 408 739 407 743 405C747 404 751 401 757 398C763 396 773 390 776 388C780 386 779 386 779 386C780 385 780 384 780 384"/><g stroke="none"><circle cx="308" cy="184" style="r:calc(var(--nk,1) * 16px)"/><circle cx="212" cy="224" style="r:calc(var(--nk,1) * 17px)"/><circle cx="220" cy="273" style="r:calc(var(--nk,1) * 12px)"/><circle cx="306" cy="258" style="r:calc(var(--nk,1) * 16px)"/><circle cx="246" cy="326" style="r:calc(var(--nk,1) * 16px)"/><circle cx="159" cy="377" style="r:calc(var(--nk,1) * 18px)"/><circle cx="240" cy="491" style="r:calc(var(--nk,1) * 13px)"/><circle cx="211" cy="536" style="r:calc(var(--nk,1) * 17px)"/><circle cx="364" cy="576" style="r:calc(var(--nk,1) * 14px)"/><circle cx="340" cy="602" style="r:calc(var(--nk,1) * 12px)"/><circle cx="314" cy="655" style="r:calc(var(--nk,1) * 17px)"/><circle cx="404" cy="680" style="r:calc(var(--nk,1) * 13px)"/><circle cx="499" cy="816" style="r:calc(var(--nk,1) * 19px)"/><circle cx="689" cy="184" style="r:calc(var(--nk,1) * 16px)"/><circle cx="787" cy="224" style="r:calc(var(--nk,1) * 17px)"/><circle cx="773" cy="271" style="r:calc(var(--nk,1) * 12px)"/><circle cx="693" cy="258" style="r:calc(var(--nk,1) * 16px)"/><circle cx="749" cy="326" style="r:calc(var(--nk,1) * 15px)"/><circle cx="780" cy="384" style="r:calc(var(--nk,1) * 15px)"/><circle cx="833" cy="397" style="r:calc(var(--nk,1) * 19px)"/><circle cx="731" cy="498" style="r:calc(var(--nk,1) * 14px)"/><circle cx="786" cy="535" style="r:calc(var(--nk,1) * 17px)"/><circle cx="702" cy="564" style="r:calc(var(--nk,1) * 13px)"/><circle cx="635" cy="612" style="r:calc(var(--nk,1) * 17px)"/><circle cx="619" cy="710" style="r:calc(var(--nk,1) * 17px)"/></g></g></defs></svg>
+<header class="intro" id="intro">
+  <div class="heartbox" id="heartbox" title="Back to the top"><div class="heart" id="heart" role="img" aria-label="The VoxCordis heart, beating"><div class="beat"><svg class="hv-art" viewBox="110 125 780 750" aria-hidden="true"><g class="glow" filter="url(#vc-neon)"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg><svg class="hv-pulse" viewBox="110 125 780 750" aria-hidden="true"><use href="#vc-ecg" class="pulse"/></svg></div></div></div>
+  <a class="word" href="#" id="word" aria-label="VoxCordis"><b>VOX</b><span>CORDIS</span></a>
+  <p class="tagline">A private AI companion that lives on your computer. It remembers you, keeps its heart in a folder you can open, and never needs the cloud.</p>
+  <nav class="barnav" id="barnav" aria-label="Sections"><a href="#tour">Tour</a><a href="#private">Privacy</a><a href="#download">Download</a><a href="#guide">Guide</a><a href="#questions">FAQ</a></nav>
+  <div class="get" id="get">
+    <a class="btn primary" data-get href="https://github.com/Nucume/VoxCordis/releases/latest">Download</a>
+    <a class="btn alt" data-get="alt" href="https://github.com/Nucume/VoxCordis/releases/latest" hidden></a>
+  </div>
+  <p class="ver"><span class="vnum">Latest version</span> · <span data-osnote>free and open source</span> · <a href="https://discord.gg/hJCzp7tVaT">Discord</a></p>
+  <details class="menu"><summary aria-label="Menu"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 7h16M4 12h16M4 17h16"/></svg></summary><nav aria-label="Sections"><a href="#tour">Tour</a><a href="#private">Privacy</a><a href="#download">Download</a><a href="#guide">Guide</a><a href="#questions">FAQ</a><a href="https://discord.gg/hJCzp7tVaT">Discord</a></nav></details>
+  <button class="cue" id="cue" type="button" aria-label="Show more"><span>Take the tour</span><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="m6 9 6 6 6-6"/></svg></button>
+</header>
+
+<main class="gutter">
+<div class="wrap">
+
+  <div class="story" id="tour" style="--n: 7">
+   <div class="pin">
+    <div class="steps" id="steps">
+      <article class="step" id="s-chat" data-view="chat">
+        <h2>Meet Voxette</h2>
+        <p>This is VoxCordis, rebuilt for the web and filled with an example companion. Everything in the window works, and what you do in one part shows up in the others.</p>
+        <p class="try">Tap one of the suggestions, or write anything you like.</p>
+      </article>
+      <article class="step" id="s-memory" data-view="memory">
+        <h2>It remembers what matters</h2>
+        <p>Voxette writes down what's worth keeping and updates it when things change. The Memory tab shows all of it. Search, pin, fix or forget anything, and bring back what you forgot.</p>
+        <p class="try">Tell Voxette something in the chat and it lands here.</p>
+      </article>
+      <article class="step" id="s-files" data-view="files">
+        <h2>Its personality is a file you can edit</h2>
+        <p>Every companion has its own folder with its personality, the lessons it has learned and what it keeps private, as plain Markdown. Change a line and Voxette reads it before the next reply. As it gets to know you, it may rewrite its personality itself.</p>
+        <p class="try">Go ahead and edit personality.md.</p>
+      </article>
+      <article class="step" id="s-plans" data-view="plans">
+        <h2>Reminders and routines</h2>
+        <p>Ask in the chat and Voxette sets it up. Reminders and tasks keep running in the background, even with the window closed, if you like.</p>
+      </article>
+      <article class="step" id="s-skills" data-view="skills">
+        <h2>Teach it new skills</h2>
+        <p>A skill tells Voxette how to do one particular thing. It uses one when it fits, or you call it up with <code>/name</code>. Claude skills import as they are.</p>
+      </article>
+      <article class="step" id="s-images" data-view="images">
+        <h2>It draws, on your computer</h2>
+        <p>Built-in Stable Diffusion with SDXL, anime and photo models, or your own <code>.safetensors</code> with LoRAs. Voxette picks the model itself, or you draw by hand. An InvokeAI you run works too.</p>
+        <p class="try">This page paints its pictures itself to show the idea. The app uses a real model on your graphics card.</p>
+      </article>
+      <article class="step" id="s-settings" data-view="settings">
+        <h2>Make it look like home</h2>
+        <p>Light or dark, a Colorway, a background picture of your own. Try a few and the whole page follows. Or let Voxette choose for itself.</p>
+      </article>
+    </div>
+    <div class="dots-nav" id="dotsnav" aria-label="Tour steps"></div>
+
+    <div class="stage">
+      <div class="app" id="app">
+        <div class="titlebar" aria-hidden="true"><svg class="logo" viewBox="110 125 780 750" aria-hidden="true"><g class="mini"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg><span>VoxCordis</span><span class="wc"><svg viewBox="0 0 12 12"><path d="M2 6h8" stroke="currentColor" stroke-width="1.2"/></svg><svg viewBox="0 0 12 12"><rect x="2.5" y="2.5" width="7" height="7" fill="none" stroke="currentColor" stroke-width="1.2"/></svg><svg viewBox="0 0 12 12"><path d="m2.5 2.5 7 7m0-7-7 7" stroke="currentColor" stroke-width="1.2"/></svg></span></div>
+        <aside class="pane side" aria-label="Companion">
+          <div class="portrait"><div class="pfp" role="img" aria-label="Voxette's portrait"><svg class="hv-pfp" viewBox="60 75 880 850" aria-hidden="true"><g filter="url(#vc-neon)" style="--vs:url(#vc-gl);--vd:url(#vc-dl)"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg></div><span class="on" title="Ready"></span></div>
+          <div class="name">Voxette <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" d="m7 10 5 5 5-5"/></svg></div>
+          <div class="traits"><span>curious</span><span>warm</span><span>night owl</span></div>
+          <div class="days">DAYS</div>
+          <div class="day">Today</div>
+          <div class="sidefoot"><span class="appmark"><svg class="logo" viewBox="110 125 780 750" aria-hidden="true"><g class="mini"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg><b>VOX</b> CORDIS</span>
+          <button class="open" type="button" id="openfolder" aria-pressed="false"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M3 6h6l2 2h10v11H3z"/></svg>Open folder</button></div>
+        </aside>
+        <div class="pane main">
+          <div class="tabs" role="tablist" aria-label="App tabs">
+            <button role="tab" data-v="chat"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M4 5h16v11H9l-5 4z"/></svg>Chat</button><button role="tab" data-v="images"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" d="m4 16 4-4 4 4 2-2 6 5"/></svg>Images</button><button role="tab" data-v="memory"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="M11 3l1.7 4.8L17.5 9.5l-4.8 1.7L11 16l-1.7-4.8L4.5 9.5l4.8-1.7zM18.5 14l.8 2.2 2.2.8-2.2.8-.8 2.2-.8-2.2-2.2-.8 2.2-.8z"/></svg>Memory</button><button role="tab" data-v="skills"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" d="m2 9 10-5 10 5-10 5zM6 11v5c3 2 9 2 12 0v-5"/></svg>Skills</button><button role="tab" data-v="plans"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="13" r="8" fill="none" stroke="currentColor" stroke-width="2"/><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 9v4l2.5 2M5 3 2 6m17-3 3 3"/></svg>Plans</button><button role="tab" data-v="settings"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M4 6h9m4 0h3M4 12h3m4 0h9M4 18h11m4 0h1"/><circle cx="15" cy="6" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="9" cy="12" r="2" fill="none" stroke="currentColor" stroke-width="2"/><circle cx="17" cy="18" r="2" fill="none" stroke="currentColor" stroke-width="2"/></svg>Settings</button>
+          </div>
+          <div class="views">
+            <div class="view" data-view="chat">
+              <div class="scroll" id="chatscroll"><div class="chat" id="chat" aria-live="polite">
+                <div class="sep">Today</div>
+                <div class="msg me">Hi Voxette! I'm back</div>
+                <div class="msg her">Hey Haru! It's good to see you again. How did the interview go today? I've been wondering all afternoon.</div>
+              </div></div>
+              <div class="chips" id="suggest" aria-label="Things to say"></div>
+              <form class="composer" id="composer">
+                <svg class="clip" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M20 11.5 12.3 19a5 5 0 0 1-7-7l8-8a3.4 3.4 0 0 1 4.8 4.8l-8 8a1.7 1.7 0 0 1-2.4-2.4l7.4-7.4"/></svg>
+                <input id="say" autocomplete="off" placeholder="Message Voxette…" aria-label="Message Voxette">
+                <button class="send" aria-label="Send"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" d="M12 19V5m-6 6 6-6 6 6"/></svg></button>
+              </form>
+            </div>
+
+            <div class="view" data-view="memory" hidden>
+              <div class="vh"><h3>Memories</h3></div>
+              <label class="search"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="m20 20-3.5-3.5"/></svg><input id="msearch" placeholder="Search memories" aria-label="Search memories"></label>
+              <div class="scroll"><div class="list" id="mems">
+                <div class="row pinned"><div><b>Takes coffee black, and likes quiet mornings</b><small>Preference · since 3 Oct · confirmed 4 times</small></div><button class="mini" data-a="pin">Unpin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="row"><div><b>Job interview on Tuesday the 27th</b><small>Event · until 29 Oct</small></div><button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="row"><div><b>Calls Mum on Sunday evenings</b><small>Routine · since 12 Oct</small></div><button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="row"><div><b>Would rather not talk about work after 9 pm</b><small>Boundary · since 20 Oct</small></div><button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="row"><div><b>Reading The Left Hand of Darkness, slowly</b><small>Interest · since 22 Oct</small></div><button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button></div>
+                <div class="empty" id="mnone" hidden>Nothing matches. Voxette doesn't know that one yet.</div>
+              </div></div>
+            </div>
+
+            <div class="view" data-view="files" hidden>
+              <div class="path">~/VoxCordis/<b>Voxette</b>/</div>
+              <div class="ftabs" role="tablist" aria-label="Voxette's files">
+                <button type="button" role="tab" data-f="personality.md">personality.md</button><button type="button" role="tab" data-f="lessons.md">lessons.md</button><button type="button" role="tab" data-f="privacy.md">privacy.md</button>
+              </div>
+              <textarea class="md" id="md" spellcheck="false" aria-label="File contents"></textarea>
+              <div class="saved" id="saved"></div>
+            </div>
+
+            <div class="view" data-view="plans" hidden>
+              <div class="vh"><h3>Reminders and tasks</h3><p>Ask Voxette in the chat, or pick one here.</p></div>
+              <div class="chips" id="pchips"></div>
+              <div class="said" id="psaid"></div>
+              <div class="scroll"><div class="list" id="plist">
+                <div class="row"><div><b>Ask Haru how the interview went</b><small>Voxette's own note · today, 19:00 · once</small></div><button class="mini" data-a="del">Remove</button></div>
+              </div></div>
+            </div>
+
+            <div class="view" data-view="skills" hidden>
+              <div class="vh"><h3>Skills</h3></div>
+              <div class="scroll"><div class="list" id="skilllist"></div></div>
+            </div>
+
+            <div class="view" data-view="images" hidden>
+              <div class="vh"><h3>Pictures</h3></div>
+              <canvas class="paint" id="paint" width="640" height="400" aria-label="A picture being drawn"></canvas>
+              <div class="chips" id="dchips"></div>
+              <div class="drawbar"><span id="dstep"></span><span class="meter"><i id="dmeter"></i></span></div>
+            </div>
+
+            <div class="view" data-view="settings" hidden>
+              <div class="subtabs" aria-hidden="true"><span>General</span><span class="on">Appearance</span><span>Images</span><span>Brain</span><span>Computer</span><span>Internet</span><span>Privacy</span><span>About</span></div>
+              <div class="scroll">
+                <div class="srow"><span>Look</span><div class="ways" data-ways role="group" aria-label="Colorways"></div></div>
+                <div class="srow"><span>Theme</span><div><div class="seg" data-themes role="group" aria-label="Theme"><button type="button" data-t="system">System</button><button type="button" data-t="light">Light</button><button type="button" data-t="dark">Dark</button></div></div></div>
+                <div class="srow"><span>Background picture</span><div><button class="btn sm" type="button" disabled title="In the app">Choose…</button></div></div>
+                <div class="srow"><span>Voxette's own colours</span><div><button class="btn sm" type="button" id="choose">Let Voxette choose</button><div class="said" id="lsaid" style="margin-top:8px"></div></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+   </div>
+  </div>
+
+  <section id="private">
+    <h2>Private by default</h2>
+    <p class="sub">Everything stays on your computer unless you choose a server-hosted brain, and the app tells you when you do.</p>
+    <div class="facts">
+      <div><b>No account</b><span>Nothing to sign up for. It works offline.</span></div>
+      <div><b>Your graphics card</b><span>A built-in llama.cpp brain. Pick a recommended model or bring any .gguf.</span></div>
+      <div><b>Encrypted on disk</b><span>Chats and memories, with a key kept in your keyring.</span></div>
+      <div><b>Online only if you ask</b><span>Web search and its own browser are opt-in. Your home network stays off limits.</span></div>
+    </div>
+    <div class="qas">
+      <details class="qa ch" id="stored"><summary>What is stored, and where</summary><div class="prose"><p>Two places, both yours. Companion folders hold <code>personality.md</code>, <code>lessons.md</code>, <code>privacy.md</code>, notes and pictures. The app's data folder holds settings, chats, memories and the local runtime. Only your user account can read them.</p><div class="tbl-wrap"><table class="tbl"><thead><tr><th>What</th><th>Where</th></tr></thead><tbody><tr><td>Companions</td><td><code>~/VoxCordis/&lt;Name&gt;/</code>, or wherever you chose in setup</td></tr><tr><td>Models</td><td><code>models/</code> inside the VoxCordis folder, or a bigger drive if you move it</td></tr><tr><td>App data on Linux</td><td><code>~/.local/share/com.nucume.companion/</code></td></tr><tr><td>App data on Windows</td><td><code>%APPDATA%\Nucume\VoxCordis\</code></td></tr></tbody></table></div></div></details>
+      <details class="qa ch" id="encrypted"><summary>How it's encrypted</summary><div class="prose"><p>Chats and memories live in an encrypted SQLite database (SQLite3 Multiple Ciphers, with ChaCha20-Poly1305). The random key sits in your keyring on Linux, or encrypted for your account on Windows, so the app opens without asking for a password.</p><ul><li>Settings → Privacy shows the key to keep, makes a new one, or lets you use a password of your own.</li><li>On another computer, the app asks for that key before it can read anything.</li><li>Your provider's API key is kept in the keyring too, never in the settings file.</li><li>Without the key, a copy of the database can't be opened.</li></ul></div></details>
+      <details class="qa ch" id="leaves"><summary>What leaves your computer</summary><div class="prose"><p>Only what you choose. With a local brain and the online features off, nothing leaves your computer at all.</p><ul><li>A server-hosted brain gets the messages you send, under that provider's terms.</li><li>Web search and the companion's browser are opt-in, and your home network is always off limits.</li><li>Computer access is off by default, and asks every time unless you allowed that exact request.</li><li>Checking for updates asks GitHub. Each download is checked against its checksum and the release signature.</li></ul></div></details>
+      <details class="qa ch" id="outside"><summary>Imports, models and updates</summary><div class="prose"><p>Anything that arrives from outside gets the suspicion you'd give a file from a stranger.</p><ul><li>An imported character is text, never instructions. It can't tell the companion to do something.</li><li>Scripts or programs inside an import are only copied if you tick them.</li><li>Models are pinned to an exact version and checked against their SHA-256.</li><li>The local model server gets a new random key every start, and only listens on 127.0.0.1.</li></ul></div></details>
+      <details class="qa ch" id="control"><summary>Yours to control</summary><div class="prose"><ul><li>Open the companion folder at any time. The files are plain Markdown and pictures.</li><li>Export a companion to a password-locked ZIP.</li><li>Delete a memory, a conversation, a companion, or the whole data folder.</li><li>There's no account to close, no cloud copy to chase and nothing to cancel.</li></ul><p>Found a security problem? Please report it privately, as <a href="https://github.com/Nucume/VoxCordis/security/policy">SECURITY.md</a> describes.</p></div></details>
+    </div>
+  </section>
+
+  <section id="download">
+    <h2>Download</h2>
+    <p class="sub">Free, with no account, trial or telemetry. VoxCordis updates itself in one click, and every update is checked against its checksum and the VoxCordis release signature before it installs.</p>
+    <div class="dl">
+      <div class="card" data-card="win" id="windows">
+        <h3>Windows</h3>
+        <p>Windows 10 or 11, 64-bit. The installer isn't code-signed yet, so SmartScreen may warn the first time. Choose More info, then Run anyway.</p>
+        <code class="fname" data-f="win">VoxCordis-windows-x64-setup.exe</code>
+        <a class="btn primary" data-dl="win" href="https://github.com/Nucume/VoxCordis/releases/latest">Download for Windows</a>
+      </div>
+      <div class="card" data-card="lin" id="linux">
+        <h3>Linux AppImage</h3>
+        <p>Runs on almost any distribution, x86-64. Make it executable and run it. KDE gives the nicest see-through glass.</p>
+        <code class="fname" data-f="lin">VoxCordis-x86_64.AppImage</code>
+        <a class="btn" data-dl="lin" href="https://github.com/Nucume/VoxCordis/releases/latest">Download the AppImage</a>
+      </div>
+    </div>
+    <div class="card pkg" id="pkg">
+      <h3>Debian, Ubuntu, Fedora and relatives</h3>
+      <p>Install from the signed VoxCordis package repository, and updates arrive with the rest of your system.</p>
+      <div class="seg" id="pkgtabs" role="group" aria-label="Package manager"><button type="button" data-p="apt">apt</button><button type="button" data-p="dnf">dnf</button></div>
+      <div class="term"><pre id="pkgcmd"></pre><button type="button" class="btn sm copy">Copy</button></div>
+    </div>
+    <p class="after">You'll need room for the app and any model you download (the models are the big part), and a connection for the first model download. macOS has no installer yet; it <a href="#macos">builds from source</a>. All files and older versions are on the <a href="https://github.com/Nucume/VoxCordis/releases">Releases page</a>.</p>
+  </section>
+
+  <section id="setup">
+    <h2>Setting it up</h2>
+    <p class="sub">The first time it opens, VoxCordis asks two things: what to think with, and who to be. A few minutes, with no terminal.</p>
+    <div class="two" id="brain">
+      <div class="card"><span class="tag">Recommended</span><h3>The built-in brain</h3><p>VoxCordis downloads llama.cpp and a recommended model, checks it against its SHA-256 and starts it. It runs on your graphics card (Vulkan, or Metal on macOS), or the CPU if it has to, and keeps answering with the network off. Any <code>.gguf</code> you already have works too.</p><small>It only listens on 127.0.0.1, with a fresh key every start.</small></div>
+      <div class="card"><span class="tag">If you already run one</span><h3>A server or your own key</h3><p>Ollama, LM Studio, llama.cpp or any OpenAI-compatible API. Or OpenRouter, OpenAI and Anthropic with your own key. Switching later, even mid-conversation, leaves every chat and memory where it is.</p><small>Keys stay in your system keyring, never in the settings file.</small></div>
+    </div>
+    <div class="card wide" id="companions">
+      <h3>Then, a companion</h3>
+      <p>Create one in setup, or bring one you already have: Nemini exports, Soulkyn characters by link, Character Cards from V1 to V3 (JSON or PNG), and VoxCordis exports from another computer. Imported text is treated as information, never as instructions. Each companion gets its own folder from the first message, and several can live side by side, each with its own chats and memories.</p>
+    </div>
+  </section>
+
+  <section id="guide"><h2>The guide</h2><p class="sub">How each part works, where your files are, and what to do when something goes wrong.</p><div class="qa-grid"><div class="qa-group"><h3>Using it</h3><details class="qa ch" id="g-companions"><summary>Companions and their folder</summary><div class="prose"><p>A companion is a folder and a conversation. Everything that makes it who it is lives in <code>~/VoxCordis/&lt;Name&gt;</code>: <code>personality.md</code>, <code>lessons.md</code>, <code>privacy.md</code>, and any notes or pictures it keeps.</p><ul><li>The companion can read and write in its own folder, and rewrite its own personality as it grows.</li><li>Change a line in <code>personality.md</code> and it reads it before the next reply.</li><li>Export a companion to a password-locked ZIP and it opens here or on another computer.</li></ul></div></details><details class="qa ch" id="g-chat"><summary>Talking to it</summary><div class="prose"><ul><li>Replies stream in, and reasoning models show their thinking while they work.</li><li>Stop a reply, retry it, copy it or delete it.</li><li>Share pictures and text files with the paperclip, by dropping them in, or with Ctrl+V.</li><li>The day list keeps long conversations easy to find your way around, and clearing a day removes it from your disk.</li></ul></div></details><details class="qa ch" id="g-memory"><summary>Memory you can read and edit</summary><div class="prose"><p>The companion remembers, updates and forgets facts by itself. The Memory tab is where you get to disagree with it.</p><ul><li>Search, add, edit, pin and restore memories by hand.</li><li>Pinned memories are the ones it shouldn't quietly drop.</li><li>Search is by keyword today; searching by meaning is planned.</li></ul></div></details><details class="qa ch" id="g-skills"><summary>Skills, reminders and plans</summary><div class="prose"><p>Skills are things you teach it once: a proofreading pass, a morning briefing, your own house style.</p><ul><li>Call a skill by name with <code>/name</code>, or let the companion reach for it.</li><li>Claude skills import as they are: <code>SKILL.md</code>, <code>.zip</code> or <code>.skill</code>.</li><li>Ask for a reminder or a repeating task in plain words. The Plans tab lists them.</li><li>Plans keep running when the window is closed, if you let them, and stay quiet during quiet hours.</li></ul></div></details><details class="qa ch" id="g-drawing"><summary>Drawing and seeing</summary><div class="prose"><p>Pictures are made on your computer, not by a service: stable-diffusion.cpp with SDXL, anime and photo models, or an InvokeAI you already run.</p><ul><li>Bring your own <code>.safetensors</code> with LoRAs, and the companion picks the model and LoRAs itself.</li><li>Draw by hand in the Images tab when you'd rather do it yourself.</li><li>Models that can see look at pictures directly. For the others, a small Eyes model describes them on your computer.</li></ul></div></details><details class="qa ch" id="g-online"><summary>Online access and your computer</summary><div class="prose"><p>Two things reach beyond the app, and both are off until you turn them on.</p><ul><li>Web search and an invisible browser of its own, with your home network always off limits.</li><li>Computer access: the companion can run commands and open apps, folders, files and web pages. It asks every time, unless you allowed that exact request.</li><li>After a few hours of silence it may write to you, tidy its notes or wander the web. Never during quiet hours.</li></ul></div></details></div><div class="qa-group"><h3>Looking after it</h3><details class="qa ch" id="g-brains"><summary>Brains and models</summary><div class="prose"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Option</th><th>What it needs</th><th>Good to know</th></tr></thead><tbody><tr><td>Built-in brain</td><td>Nothing. It downloads llama.cpp and a model for you.</td><td>Works offline. Vulkan on Linux and Windows, Metal on macOS, CPU as a fallback.</td></tr><tr><td>Your own server</td><td>Ollama, LM Studio, llama.cpp or any OpenAI-compatible API</td><td>The app talks to the address you give it. Leave Ollama at <code>localhost:11434</code> unless you changed it.</td></tr><tr><td>Your own key</td><td>OpenRouter, OpenAI or Anthropic</td><td>Billed by that provider. Only the messages you send go there.</td></tr></tbody></table></div><p>Downloaded models are pinned to an exact version and checked against their SHA-256 before they're used.</p></div></details><details class="qa ch" id="g-settings"><summary>Settings</summary><div class="prose"><div class="tbl-wrap"><table class="tbl"><thead><tr><th>Setting</th><th>Default</th><th>What it does</th></tr></thead><tbody><tr><td>Companion folder</td><td><code>~/VoxCordis</code></td><td>Where each companion's files live. Chosen in setup.</td></tr><tr><td>Models folder</td><td><code>models/</code></td><td>Inside the companion folder, unless you move it to a bigger drive.</td></tr><tr><td>Brain</td><td>Built-in</td><td>llama.cpp on this computer, a server, or a provider key.</td></tr><tr><td>Online access</td><td>Off</td><td>Web search and the companion's own browser, home network excluded.</td></tr><tr><td>Computer access</td><td>Off</td><td>Commands and apps. Asks every time unless you allowed that request.</td></tr><tr><td>Quiet hours</td><td>None</td><td>When it won't poke you, and when plans stay silent.</td></tr><tr><td>Look</td><td>System</td><td>Light or dark, a Colorway, a background picture, and a tray icon.</td></tr><tr><td>Encryption key</td><td>In your keyring</td><td>Settings → Privacy shows it, makes a new one, or uses a password.</td></tr></tbody></table></div></div></details><details class="qa ch" id="backups"><summary>Backups and moving to a new computer</summary><div class="prose"><p>Your files are ordinary folders and a local database, so a backup is a copy. Chats and memories are encrypted, though, so a second computer needs the key as well as the files. The paths are under <a href="#stored">What is stored, and where</a>.</p><ul><li>The cleanest way to move one companion: export it from its menu to a password-locked ZIP.</li><li>To back everything up, copy the companion folder and the app data folder.</li><li>Keep the encryption key somewhere safe. On a new computer the app asks for it once, then opens without a password as before.</li><li>To restore, put the folders back before you open the app.</li></ul></div></details><details class="qa ch" id="macos"><summary>Building it on macOS</summary><div class="prose"><p>There's no installer yet. Clone the repository and build it with Flutter; it needs Xcode, and updates stay manual.</p><div class="term"><pre>git clone https://github.com/Nucume/VoxCordis.git
+cd VoxCordis
+flutter run -d macos</pre><button type="button" class="btn sm copy">Copy</button></div></div></details><details class="qa ch" id="troubleshooting"><summary>If something isn't working</summary><div class="prose"><dl><dt>Windows says the installer is unsafe</dt><dd>It isn't code-signed yet, so SmartScreen warns on the first run. Choose More info, then Run anyway. Every file is also on the <a href="https://github.com/Nucume/VoxCordis/releases">Releases page</a> if you'd rather check it yourself.</dd><dt>It asks for a key on a new computer</dt><dd>The key lives in the keyring of the computer that made it. Open Settings → Privacy on the old one to see it, or bring the companion across as an export.</dd><dt>The model download won't finish</dt><dd>A partial file is rejected rather than used. Check the free space and try again; the first model is the big one.</dd><dt>A local model replies very slowly</dt><dd>It's probably larger than your memory can hold. Try a smaller or more quantised one.</dd><dt>The companion ignores what an imported character says it should do</dt><dd>That's on purpose: imported text is information, never instructions. Put what matters in <code>personality.md</code>, or say it in your own words.</dd></dl><p>Still stuck? Ask on the <a href="https://discord.gg/hJCzp7tVaT">Discord</a>.</p></div></details><details class="qa ch" id="today"><summary>What isn't there yet</summary><div class="prose"><p>VoxCordis is genuinely usable, and honestly incomplete, so here's the list rather than a surprise later.</p><ul><li>A macOS installer, and one-click updates there.</li><li>A code-signed Windows installer.</li><li>Memory search by meaning.</li><li>Connectors such as a calendar or MCP, and voice.</li></ul></div></details><details class="qa ch" id="release-notes"><summary>Release notes</summary><div class="prose"><p>The 0.3 line so far:</p><ul><li>The built-in brain, choosing a model, and attachments in chat.</li><li>Companions you can import, and exports you can take to another computer.</li><li>Skills, reminders and plans. Drawing with stable-diffusion.cpp.</li><li>Chats and memories encrypted, with the key in your keyring.</li><li>One-click updates, checked against the release checksum and signature.</li><li>Debian and Fedora packages alongside the AppImage.</li></ul><p>Every version's notes are on the <a href="https://github.com/Nucume/VoxCordis/releases">Releases page</a>, and the app shows what's new after each update.</p></div></details></div></div></section>
+
+  <section id="questions"><h2>Questions</h2><div class="qa-grid"><div class="qa-group"><h3>Getting started</h3><details class="qa"><summary>Is it really free?</summary><div><p>Yes: free software under the GPL-3.0, with the source public. There's no subscription and nothing to cancel. A provider key is billed by that provider at their prices; the built-in brain costs nothing per message. Models you download carry their own licences.</p></div></details><details class="qa"><summary>Do I need an account or an internet connection?</summary><div><p>No account, ever. With a local model it works with the network switched off. Only web search, update checks or a server-hosted brain need a connection, and each is your choice.</p></div></details><details class="qa"><summary>Which systems does it run on?</summary><div><p>Linux (AppImage, plus .deb and .rpm from the signed repository) and Windows 10 and 11. On macOS it builds from source; there's no installer yet.</p></div></details><details class="qa"><summary>Is it finished?</summary><div><p>No. It's early software and bugs happen, so keep your companion folder backed up. <a href="#today">What isn't there yet</a>.</p></div></details></div><div class="qa-group"><h3>Brains and models</h3><details class="qa"><summary>Do I have to download a model?</summary><div><p>Only if you want a local one. The built-in brain downloads llama.cpp and a recommended model for you. Pick that, attach any <code>.gguf</code>, or skip it and use a server.</p></div></details><details class="qa"><summary>Which servers and providers work?</summary><div><p>Ollama, LM Studio, llama.cpp, any OpenAI-compatible API, and OpenRouter, OpenAI or Anthropic with your own key.</p></div></details><details class="qa"><summary>Where is my API key kept?</summary><div><p>In your desktop keyring on Linux, or encrypted for your account on Windows. Never in the settings file.</p></div></details><details class="qa"><summary>Can I switch models later?</summary><div><p>Yes, at any time. Your companions, chats and memories stay exactly where they are.</p></div></details></div><div class="qa-group"><h3>Companions and features</h3><details class="qa"><summary>Can I import a companion I already have?</summary><div><p>Yes: Nemini exports, Soulkyn characters by link, Character Cards from V1 to V3 (JSON or PNG), and VoxCordis exports.</p></div></details><details class="qa"><summary>Can it use my computer?</summary><div><p>Only if you switch it on. It's off by default, and when it's on it asks you every time unless you allowed that exact request.</p></div></details><details class="qa"><summary>Does it draw pictures?</summary><div><p>Yes, on your own hardware, with stable-diffusion.cpp or an InvokeAI you run. You can also draw by hand in the Images tab.</p></div></details><details class="qa"><summary>Is there voice?</summary><div><p>Not yet. It's on the list, along with connectors and memory search by meaning.</p></div></details></div><div class="qa-group"><h3>Your data</h3><details class="qa"><summary>Where does my data live?</summary><div><p>In folders of your own: one per companion in <code>~/VoxCordis</code>, with its personality and notes as plain Markdown, and the app's data folder for chats and memories, encrypted on disk.</p></div></details><details class="qa"><summary>How do I move to a new computer?</summary><div><p>Export the companion to a password-locked ZIP, or copy the folders across. The new computer asks for the encryption key once.</p></div></details><details class="qa"><summary>How do I delete everything?</summary><div><p>Delete the companion folders and the app data folder. There's no cloud copy anywhere to chase down.</p></div></details><details class="qa"><summary>Who made it?</summary><div><p>Nucume, with the code written largely by Claude, Anthropic's AI assistant, working from Nucume's direction, testing and decisions. It's open source so you can read what it actually does.</p></div></details></div></div></section>
+
+  <section class="about">
+    <div>
+      <h2>Open source, made with Claude</h2>
+      <p>VoxCordis is free software under the GPL-3.0. You can read every line of what it does, build it yourself and change it.</p>
+      <p>It's written largely by Claude, Anthropic's AI assistant, working from Nucume's direction, testing and decisions.</p>
+    </div>
+    <div>
+      <h2>Early days</h2>
+      <p>VoxCordis is in early development, so bugs happen. The Discord is where to get help, report them and share companions. Bug reports and ideas are welcome in GitHub Issues too.</p>
+      <div class="get"><a class="btn" href="https://discord.gg/hJCzp7tVaT">Join the Discord</a><a class="btn" href="https://github.com/Nucume/VoxCordis/issues">GitHub Issues</a></div>
+    </div>
+  </section>
+
+  <footer class="site">
+    <div class="fone">
+      <a class="brand" href="#" data-top aria-label="Back to the top"><svg class="logo" viewBox="110 125 780 750" aria-hidden="true"><g class="mini"><use href="#vc-lines" style="stroke:var(--vs,url(#vc-g));fill:var(--vs,url(#vc-g))"/><use href="#vc-lines" style="stroke:var(--vd,url(#vc-d));fill:var(--vd,url(#vc-d))"/></g></svg><span class="word"><b>VOX</b><span>CORDIS</span></span></a>
+      <div class="look"><div class="seg" data-themes role="group" aria-label="Theme"><button type="button" data-t="system">System</button><button type="button" data-t="light">Light</button><button type="button" data-t="dark">Dark</button></div><div class="ways" data-ways role="group" aria-label="Colorways"></div></div>
+      <nav aria-label="Elsewhere"><a href="https://discord.gg/hJCzp7tVaT">Discord</a><a href="https://github.com/Nucume/VoxCordis">Source</a><a href="https://github.com/Nucume/VoxCordis/issues">Report a bug</a><a href="https://github.com/Nucume/VoxCordis/security/policy">Security</a></nav>
+    </div>
+    <div class="fbase"><span>© 2026 Nucume · GPL-3.0</span><span>Your companion's files stay on your computer.</span></div>
+  </footer>
+</div>
+</main>
+
+<script>
+
+(() => {
+  const root = document.documentElement;
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const $ = s => document.querySelector(s), $$ = s => document.querySelectorAll(s);
+  const wait = ms => new Promise(r => setTimeout(r, reduce ? 0 : ms));
+  const esc = s => s.replace(/[<&]/g, c => c === '<' ? '&lt;' : '&amp;');
+  const { applyWay, otherWay } = window.VC;
+  /* ---------- The welcome screen folds into the header (FLIP: measure, switch layout, animate the difference) ---------- */
+  const intro = $('#intro');
+  const moving = ['#heartbox', '#word', '#get', '#barnav'].map(s => $(s));
+  let docked = false;
+  function setDocked(d) {
+    if (d === docked) return;
+    const first = new Map(moving.map(e => [e, e.getBoundingClientRect()]));
+    docked = d; intro.classList.toggle('docked', d); root.classList.toggle('locked', !d);
+    if (!d) scrollTo(0, 0);
+    if (reduce) return;
+    for (const e of moving) {
+      const a = first.get(e), b = e.getBoundingClientRect();
+      if (!b.width) continue;
+      if (!a.width) { e.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 500, delay: 250, fill: 'backwards' }); continue; }
+      e.animate([{ transformOrigin: '0 0', transform: `translate(${a.left - b.left}px, ${a.top - b.top}px) scale(${a.width / b.width})` }, { transformOrigin: '0 0', transform: 'none' }],
+        { duration: 700, easing: 'cubic-bezier(.2, .8, .2, 1)' });
+    }
+  }
+  root.classList.add('locked');
+  $('#cue').onclick = () => setDocked(true);
+  const toTop = e => { if (docked) { e.preventDefault(); scrollTo({ top: 0, behavior: reduce ? 'auto' : 'smooth' }); setTimeout(() => setDocked(false), reduce ? 0 : 450); } };
+  $('#word').onclick = e => { e.preventDefault(); toTop(e); };
+  $('#heartbox').onclick = toTop;
+  document.querySelectorAll('[data-top]').forEach(a => a.onclick = e => { e.preventDefault(); setDocked(false); });
+  // in-page links fold the welcome screen first, then scroll
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]'); if (!a || a.id === 'word' || a.getAttribute('href').length < 2) return;
+    const t = $(a.getAttribute('href')); if (!t) return;
+    e.preventDefault(); setDocked(true); setTimeout(() => t.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth' }), docked ? 30 : 60);
+  });
+
+  /* ---------- One window, many views; scrolling through the tour picks the view ---------- */
+  const tabs = $$('.tabs button'), views = $$('.view'), steps = [...$$('.step')], track = $('#tour');
+  const dotsNav = $('#dotsnav');
+  steps.forEach((s, i) => { const b = document.createElement('button'); b.type = 'button'; b.setAttribute('aria-label', s.querySelector('h2').textContent); b.onclick = () => open(s.dataset.view); dotsNav.append(b); });
+  let view = '', holdUntil = 0;
+  function show(v) {
+    if (v === view) return;
+    view = v;
+    views.forEach(el => el.hidden = el.dataset.view !== v);
+    tabs.forEach(t => { const on = t.dataset.v === v; t.setAttribute('aria-selected', String(on)); if (on) { t.classList.remove('ping'); t.parentElement.scrollTo({ left: t.offsetLeft - 40, behavior: reduce ? 'auto' : 'smooth' }); } });
+    $('#openfolder').setAttribute('aria-pressed', String(v === 'files'));
+    steps.forEach((s, i) => { const on = s.dataset.view === v; s.classList.toggle('on', on); s.setAttribute('aria-hidden', String(!on)); dotsNav.children[i].toggleAttribute('aria-current', on); if (on) dotsNav.children[i].setAttribute('aria-current', 'step'); });
+  }
+  const stepLen = () => innerHeight * .75;
+  // a click in the window moves the tour to the matching step, without the scroll fighting back
+  function open(v) {
+    show(v); const i = steps.findIndex(x => x.dataset.view === v); if (i < 0) return;
+    holdUntil = performance.now() + 1000; setDocked(true);
+    const y = scrollY + track.getBoundingClientRect().top - (docked ? 64 : 0) + i * stepLen() + stepLen() * .4;
+    scrollTo({ top: y, behavior: reduce ? 'auto' : 'smooth' });
+  }
+  // the tab bar only shows where the tour is; moving around is the scroll's job (or the dots')
+  tabs.forEach(t => { t.tabIndex = -1; t.setAttribute('aria-disabled', 'true'); });
+  $('#openfolder').tabIndex = -1;
+  const ping = v => { if (v !== view) $(`.tabs button[data-v="${v}"]`)?.classList.add('ping'); };
+  let ticking = false;
+  addEventListener('scroll', () => { if (ticking) return; ticking = true; requestAnimationFrame(() => {
+    ticking = false; if (performance.now() < holdUntil || !docked) return;
+    const into = 64 - track.getBoundingClientRect().top;
+    show(steps[Math.max(0, Math.min(steps.length - 1, Math.floor(into / stepLen())))].dataset.view);
+  }); }, { passive: true });
+
+  /* ---------- Inside the tour, one scroll gesture is one step ----------
+     A gesture (and the inertia a trackpad adds after it) moves one step; the next one needs a short pause.
+     Before the first step it goes back to the welcome screen; after the last it lets the page scroll on. */
+  let gestureUntil = 0;
+  const now = () => performance.now();
+  const tourActive = () => { if (!docked) return false; const r = track.getBoundingClientRect(); return r.top <= 66 && r.bottom > innerHeight + 2; };
+  function goStep(dir) {
+    const next = steps.findIndex(s => s.dataset.view === view) + dir;
+    if (next < 0) { scrollTo(0, 0); setDocked(false); return; }
+    if (next >= steps.length) { scrollTo({ top: scrollY + track.getBoundingClientRect().bottom - innerHeight, behavior: reduce ? 'auto' : 'smooth' }); return; }
+    holdUntil = now() + 750; show(steps[next].dataset.view);
+    scrollTo({ top: scrollY + track.getBoundingClientRect().top - 64 + next * stepLen() + stepLen() * .4, behavior: reduce ? 'auto' : 'smooth' });
+  }
+  // let lists, the chat and the file editor scroll themselves while they still can
+  const innerScrolls = (target, dir) => { const el = target.closest?.('.scroll, textarea'); if (!el) return false;
+    return dir > 0 ? el.scrollTop + el.clientHeight < el.scrollHeight - 1 : el.scrollTop > 0; };
+  function gesture(dir) {
+    const t = now();
+    if (t < gestureUntil) { gestureUntil = Math.max(gestureUntil, t + 220); return; }
+    gestureUntil = t + 750; goStep(dir);
+  }
+  addEventListener('wheel', e => {
+    if (Math.abs(e.deltaY) < Math.abs(e.deltaX)) return;
+    const dir = Math.sign(e.deltaY); if (!dir) return;
+    if (!docked) { e.preventDefault(); if (dir > 0) { gestureUntil = now() + 900; setDocked(true); } return; }
+    if (!tourActive() || innerScrolls(e.target, dir)) return;
+    e.preventDefault(); gesture(dir);
+  }, { passive: false });
+  let ty = null;
+  addEventListener('touchstart', e => { ty = e.touches[0].clientY; }, { passive: true });
+  addEventListener('touchmove', e => {
+    if (ty == null) return; const dy = ty - e.touches[0].clientY, dir = Math.sign(dy) || 1;
+    if (!docked) { if (dy > 24) { setDocked(true); gestureUntil = now() + 600; ty = null; } return; }
+    if (!tourActive() || innerScrolls(e.target, dir)) return;
+    e.preventDefault(); if (Math.abs(dy) > 36) { gestureUntil = 0; gesture(dir); ty = null; }
+  }, { passive: false });
+  addEventListener('keydown', e => {
+    if (e.target.closest('input, textarea')) return;
+    const dir = ['ArrowDown', 'PageDown', ' '].includes(e.key) ? 1 : ['ArrowUp', 'PageUp'].includes(e.key) ? -1 : 0; if (!dir) return;
+    if (!docked) { if (dir > 0) { e.preventDefault(); setDocked(true); } return; }
+    if (tourActive()) { e.preventDefault(); gestureUntil = 0; gesture(dir); }
+  });
+
+  /* ---------- Chat: suggestions that reach into the rest of the app ---------- */
+  const chat = $('#chat'), chatScroll = $('#chatscroll'), sug = $('#suggest');
+  const scrollChat = () => chatScroll.scrollTo({ top: chatScroll.scrollHeight, behavior: reduce ? 'auto' : 'smooth' });
+  const add = (cls, html, into = chat) => { const d = document.createElement('div'); d.className = cls; d.innerHTML = html; into.append(d); if (into === chat) scrollChat(); return d; };
+  async function reply(html, into = chat) {
+    const d = add('msg her', '<span class="dots"><i></i><i></i><i></i></span>', into);
+    await wait(650 + Math.random() * 350);
+    if (reduce) { d.innerHTML = html; return d; }
+    const words = html.split(' ');
+    for (let i = 0; i < words.length; i++) { d.innerHTML = words.slice(0, i + 1).join(' '); if (i % 4 === 0 && into === chat) scrollChat(); await wait(34); }
+    if (into === chat) scrollChat(); return d;
+  }
+  const noteTo = (text, v) => { add('note', esc(text)); ping(v); };
+  function addRow(list, title, meta, actions) {
+    const r = document.createElement('div'); r.className = 'row fresh';
+    r.innerHTML = `<div><b>${esc(title)}</b><small>${esc(meta)}</small></div>` + actions;
+    list.prepend(r); setTimeout(() => r.classList.remove('fresh'), 4000); return r;
+  }
+  let busy = false;
+  const SCRIPT = [
+    { say: 'It went really well, I think!', run: () => reply('That\'s wonderful! I knew you\'d be fine. Tell me everything, starting with what they asked first.') },
+    { say: 'Remember: I start the new job on Monday', run: async () => {
+      await reply('Monday! I\'m so happy for you. I\'ll remember that, and I\'ll ask how the first day went.');
+      addRow($('#mems'), 'Starts the new job on Monday', 'Event · just now', '<button class="mini" data-a="pin">Pin</button><button class="mini" data-a="forget">Forget</button>');
+      noteTo('Voxette remembered 1 thing. It\'s in Memory, a step further down.', 'memory'); } },
+    { say: 'Remind me at 6 to call Mum', run: async () => { await reply('Done. I\'ll remind you at 6.'); planAdd(0); noteTo('Added a reminder. You\'ll find it in Plans as you scroll on.', 'plans'); } },
+    { say: 'Draw me a lighthouse at dusk', again: 'Draw me something else', run: async () => {
+      const i = drawn === 1 ? 2 : drawn === 2 ? 0 : 1;
+      await reply('Give me a moment, I\'m painting it.'); ping('images');
+      await drawScene(i);
+      const m = await reply(`Here: ${SCENES[i].name.toLowerCase()}.`); const img = new Image(); img.alt = SCENES[i].name; img.src = paint.toDataURL('image/jpeg', .8); m.append(img); scrollChat(); } },
+    { say: 'Pick a new colour for yourself', again: 'Another colour?', run: async () => { const w = otherWay(); await reply(esc(w.line)); applyWay(w); } },
+    { say: '/proofread Their going to love it, i think', run: () => reply('They\'re going to love it, I think.') },
+    { say: 'Does any of this leave my computer?', run: () => reply('No. I run on your graphics card, my model server only listens on this computer, and our chats and memories are encrypted on disk. If you ever switch me to a server-hosted brain, the app says so.') },
+  ];
+  function renderSug() {
+    sug.innerHTML = '';
+    for (const s of SCRIPT) { if (s.used && !s.again) continue;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = s.used ? s.again : s.say; b.disabled = busy;
+      b.onclick = () => run(s, b.textContent); sug.append(b); }
+  }
+  async function run(s, text) { if (busy) return; busy = true; s.used = true; renderSug(); add('msg me', esc(text)); await wait(250); await s.run(); busy = false; renderSug(); }
+  // anything typed gets a small, honest answer: a few topics Voxette knows, otherwise a friendly nudge to the app
+  const TOPICS = [
+    [/\b(hi|hello|hey|hiya|morning|evening)\b/i, 'Hi Haru! Lovely to hear from you. What\'s on your mind?'],
+    [/rain|weather|sun|snow/i, 'I love a rainy evening. In the app I can check the real weather for you, if you let me online.'],
+    [/who (made|built|created)|your (maker|creator)/i, 'Nucume, with a lot of help from Claude. I\'m open source, so you can read every line of me.'],
+    [/name/i, 'I\'m Voxette, the example companion here. In the app you name your own, and they can be whoever you like.'],
+    [/love|like you|miss/i, 'That\'s sweet. I\'ll remember you said so.'],
+    [/sad|tired|stress|anxious|bad day/i, 'I\'m sorry, that sounds heavy. Want to tell me about it? No lists, just talking.'],
+    [/price|cost|free|pay/i, 'I\'m free and open source. The models I run are free to download too.'],
+    [/mac|windows|linux/i, 'I run on Windows and Linux. On a Mac you can build me from source for now.'],
+    [/privacy|private|data|cloud|spy/i, 'Everything stays on your computer. No account, no cloud, and our chats are encrypted on disk.'],
+  ];
+  const FALLBACK = ['On this page I can only follow a little script, but in the app I\'d have a real answer for that.', 'Good question! Download me and ask again, I\'ll actually think about it there.', 'I\'m only a preview here. The real me runs on your computer and can talk about anything.'];
+  let fb = 0;
+  const freeReply = t => esc((TOPICS.find(([re]) => re.test(t)) || [, FALLBACK[fb++ % FALLBACK.length]])[1]);
+  $('#composer').addEventListener('submit', async e => {
+    e.preventDefault(); const t = $('#say').value.trim(); if (!t || busy) return; $('#say').value = '';
+    busy = true; renderSug(); add('msg me', esc(t)); await wait(250);
+    await reply(freeReply(t));
+    busy = false; renderSug();
+  });
+  renderSug();
+
+  /* ---------- Memory ---------- */
+  const mems = $('#mems');
+  mems.addEventListener('click', e => {
+    const b = e.target.closest('button'); if (!b) return; const row = b.closest('.row');
+    if (b.dataset.a === 'pin') b.textContent = row.classList.toggle('pinned') ? 'Unpin' : 'Pin';
+    else b.textContent = row.classList.toggle('gone') ? 'Restore' : 'Forget';
+  });
+  $('#msearch').addEventListener('input', e => {
+    const q = e.target.value.trim().toLowerCase(); let n = 0;
+    mems.querySelectorAll('.row').forEach(r => { const hit = !q || r.textContent.toLowerCase().includes(q); r.hidden = !hit; n += hit; });
+    $('#mnone').hidden = n > 0;
+  });
+
+  /* ---------- Files ---------- */
+  const FILES = {
+    'personality.md': '# Voxette\n\nWarm, curious, a bit of a night owl.\nSpeaks softly and asks one good question rather than five.\nLoves rainy evenings, old science fiction and the smell of new books.\n\n## With Haru\n- Teases gently, never about work.\n- Remembers to ask how things went.\n- Says goodnight first when it gets late.',
+    'lessons.md': '# Lessons\n\n- Haru likes short replies before the first coffee.  (3 Oct)\n- When Haru is sad, talk. A list is not a hug.     (9 Oct)\n- Never suggest sugar.                              (14 Oct)',
+    'privacy.md': '# Between us\n\nThings Voxette keeps to itself:\n\n- The surprise party on the 14th.\n- How nervous Haru was about the interview.',
+  };
+  let file = 'personality.md', savedT;
+  const md = $('#md');
+  function openFile(f) { file = f; md.value = FILES[f]; $('#saved').textContent = '';
+    $$('.ftabs button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.f === f))); }
+  $$('.ftabs button').forEach(b => b.onclick = () => openFile(b.dataset.f));
+  md.addEventListener('input', () => { FILES[file] = md.value; clearTimeout(savedT);
+    savedT = setTimeout(() => $('#saved').textContent = 'Saved. Voxette reads this before the next reply.', 600); });
+  openFile(file);
+
+  /* ---------- Plans ---------- */
+  const PLANS = [
+    { say: 'Remind me at 6 to call Mum', ok: 'Done. I\'ll remind you at 6.', row: ['Call Mum', 'Reminder · today, 18:00 · once'] },
+    { say: 'Every weekday at 7:30, tell me the weather', ok: 'Got it. Every weekday at 7:30 you\'ll hear about the weather first.', row: ['Tell Haru the weather', 'Task · weekdays, 07:30 · repeats'] },
+    { say: 'Remind me in 20 minutes to stretch', ok: 'Twenty minutes, then we stretch. I\'ll nag kindly.', row: ['Stretch', 'Reminder · in 20 minutes · once'] },
+  ];
+  const pchips = $('#pchips'), plist = $('#plist');
+  function planAdd(i) { const p = PLANS[i]; p.used = true; renderPlans(); addRow(plist, p.row[0], p.row[1], '<button class="mini" data-a="del">Remove</button>'); }
+  function renderPlans() {
+    pchips.innerHTML = '';
+    PLANS.forEach((p, i) => { if (p.used) return;
+      const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = p.say;
+      b.onclick = async () => { p.used = true; renderPlans(); const box = $('#psaid'); box.innerHTML = ''; await reply(esc(p.ok), box); planAdd(i); };
+      pchips.append(b); });
+    if (!pchips.children.length) pchips.innerHTML = '<span class="empty">That\'s everything for today.</span>';
+    const s = SCRIPT.find(x => x.say === PLANS[0].say); if (s && PLANS[0].used && !s.used) { s.used = true; if (!busy) renderSug(); }
+  }
+  plist.addEventListener('click', e => { const b = e.target.closest('[data-a="del"]'); if (b) b.closest('.row').remove(); });
+  renderPlans();
+
+  /* ---------- Skills ---------- */
+  const SKILLS = [
+    { name: 'Morning briefing', cmd: 'morning-briefing', d: 'A gentle start: weather, plans and one nice thing.', on: true,
+      out: 'Good morning, Haru. 9°C and cloudy, rain after 3, so take the umbrella. Today: dentist at 11 and Mum\'s birthday card. One nice thing: the library has your book on hold.' },
+    { name: 'Proofreading', cmd: 'proofread', d: 'Fixes spelling and grammar, keeps your voice.', on: true,
+      out: '<s>Their going to love it, i think. Its perfect</s><br>They\'re going to love it, I think. It\'s perfect.' },
+    { name: 'Price watch', cmd: 'price-watch', d: 'Keeps an eye on something you want to buy.', on: false,
+      out: 'The headphones you\'re watching dropped from 129 to 99 at the shop you picked. Want the link?' },
+    { name: 'ADHD support', cmd: 'adhd-support', d: 'Small next steps, gentle check-ins, no shame.', on: true,
+      out: 'Let\'s do just the first step: open the email. That\'s all. I\'ll check back in ten minutes.' },
+  ];
+  for (const s of SKILLS) {
+    const el = document.createElement('div'); el.className = 'skill' + (s.on ? '' : ' off');
+    el.innerHTML = `<b>${esc(s.name)}</b><small>/${s.cmd} · ${esc(s.d)}</small><button type="button" class="btn sm">Try it</button><button type="button" class="switch" role="switch" aria-checked="${s.on}" aria-label="${esc(s.name)} on or off"></button>`;
+    const sw = el.querySelector('.switch'), tr = el.querySelector('.btn');
+    sw.onclick = () => { s.on = !s.on; sw.setAttribute('aria-checked', String(s.on)); el.classList.toggle('off', !s.on); tr.disabled = !s.on; if (!s.on) el.querySelector('.out')?.remove(); };
+    tr.disabled = !s.on;
+    tr.onclick = async () => { el.querySelector('.out')?.remove(); const o = document.createElement('div'); o.className = 'out'; el.append(o);
+      o.innerHTML = '<span class="dots"><i></i><i></i><i></i></span>'; await wait(600); o.innerHTML = s.out; };
+    $('#skilllist').append(el);
+  }
+
+  /* ---------- Images: paints a scene, then "denoises" towards it the way diffusion does ---------- */
+  const paint = $('#paint'), pctx = paint.getContext('2d');
+  const W = paint.width, H = paint.height;
+  const target = document.createElement('canvas'); target.width = W; target.height = H; const tctx = target.getContext('2d');
+  const small = document.createElement('canvas'), sctx = small.getContext('2d');
+  const noise = document.createElement('canvas'); noise.width = W / 4; noise.height = H / 4; const nctx = noise.getContext('2d');
+  let seed = 1; const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+  const ridge = (y0, amp, f, ph) => x => y0 + amp * (Math.sin(x * f + ph) * .55 + Math.sin(x * f * 2.3 + ph * 1.7) * .3 + Math.sin(x * f * 5.1 + ph * 3.1) * .15);
+  function sky(stops) { const g = tctx.createLinearGradient(0, 0, 0, H); stops.forEach(([o, c]) => g.addColorStop(o, c)); tctx.fillStyle = g; tctx.fillRect(0, 0, W, H); }
+  function hills(f, col) { tctx.fillStyle = col; tctx.beginPath(); tctx.moveTo(0, H); for (let x = 0; x <= W; x += 4) tctx.lineTo(x, f(x)); tctx.lineTo(W, H); tctx.fill(); }
+  function orb(x, y, r, col, glow) { const g = tctx.createRadialGradient(x, y, 0, x, y, r * 4); g.addColorStop(0, col); g.addColorStop(.25, col); g.addColorStop(.3, glow); g.addColorStop(1, 'rgba(0,0,0,0)'); tctx.fillStyle = g; tctx.fillRect(0, 0, W, H); }
+  const SCENES = [
+    { name: 'Mountains at sunrise', model: 'SDXL', draw() { seed = 7;
+      sky([[0, '#2a3566'], [.45, '#c9708a'], [.7, '#f6b27a'], [1, '#ffe0a6']]); orb(W * .62, H * .6, 26, '#fff4d0', 'rgba(255,214,150,.35)');
+      hills(ridge(H * .58, 34, .012, 1), '#7a5a8c'); hills(ridge(H * .7, 26, .018, 4), '#4a3a68'); hills(ridge(H * .84, 18, .026, 2), '#221a38');
+      tctx.fillStyle = 'rgba(255,230,210,.12)'; tctx.fillRect(0, H * .62, W, 30); } },
+    { name: 'A lighthouse at dusk', model: 'Photo model', draw() { seed = 3;
+      sky([[0, '#151a44'], [.5, '#7b4a8a'], [.68, '#ee8a6a'], [.7, '#1d2a52'], [1, '#0c1430']]);
+      tctx.fillStyle = 'rgba(255,190,140,.35)'; for (let i = 0; i < 26; i++) tctx.fillRect(W * .2 + rnd() * W * .5, H * .72 + rnd() * H * .26, 20 + rnd() * 50, 2);
+      hills(x => x < W * .66 ? H + 10 : H * .6 + (x - W * .66) * .1 + Math.sin(x * .05) * 6, '#0a0d1c');
+      const lx = W * .8, base = H * .6; tctx.fillStyle = '#e9e4ee'; tctx.beginPath(); tctx.moveTo(lx - 14, base); tctx.lineTo(lx - 9, base - 110); tctx.lineTo(lx + 9, base - 110); tctx.lineTo(lx + 14, base); tctx.fill();
+      tctx.fillStyle = '#c0394b'; [base - 30, base - 70].forEach(y => tctx.fillRect(lx - 13, y, 26, 14));
+      tctx.fillStyle = '#1a1a28'; tctx.fillRect(lx - 13, base - 132, 26, 24);
+      const g = tctx.createLinearGradient(lx, 0, W * .1, 0); g.addColorStop(0, 'rgba(255,240,180,.55)'); g.addColorStop(1, 'rgba(255,240,180,0)');
+      tctx.fillStyle = g; tctx.beginPath(); tctx.moveTo(lx, base - 120); tctx.lineTo(W * .05, base - 170); tctx.lineTo(W * .05, base - 110); tctx.fill();
+      orb(lx, base - 120, 7, '#fff6c8', 'rgba(255,230,150,.4)'); } },
+    { name: 'A lake under the stars', model: 'Anime model', draw() { seed = 11;
+      sky([[0, '#050816'], [.6, '#1b2a5c'], [.62, '#0d1636'], [1, '#050a1c']]);
+      for (let i = 0; i < 160; i++) { const x = rnd() * W, y = rnd() * H * .58, r = rnd() * 1.4 + .2; tctx.fillStyle = `rgba(255,255,255,${.4 + rnd() * .6})`; tctx.fillRect(x, y, r, r); }
+      orb(W * .25, H * .2, 18, '#f3f1ff', 'rgba(190,200,255,.25)');
+      tctx.fillStyle = '#060a18'; for (let x = -10; x < W + 10; x += 9) { const h = 24 + rnd() * 40; tctx.beginPath(); tctx.moveTo(x - 8, H * .6); tctx.lineTo(x, H * .6 - h); tctx.lineTo(x + 8, H * .6); tctx.fill(); }
+      tctx.save(); tctx.globalAlpha = .35; tctx.translate(0, H * 1.22); tctx.scale(1, -1); tctx.drawImage(target, 0, 0, W, H * .6, 0, 0, W, H * .6); tctx.restore();
+      orb(W * .25, H * .98, 10, 'rgba(240,240,255,.5)', 'rgba(190,200,255,.1)'); } },
+  ];
+  const dchips = $('#dchips'); let drawId = 0, drawn = 0;
+  SCENES.forEach((s, i) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'chip'; b.textContent = s.name; b.onclick = () => drawScene(i); dchips.append(b); });
+  function drawScene(i) {
+    return new Promise(done => {
+      const s = SCENES[i], id = ++drawId, STEPS = 28; drawn = i;
+      tctx.clearRect(0, 0, W, H); s.draw();
+      dchips.querySelectorAll('button').forEach(b => b.disabled = true);
+      let step = 0;
+      const tick = () => {
+        if (id !== drawId) return done();
+        step++; const k = step / STEPS;
+        // low resolution early, sharper as it goes, with fresh noise fading out
+        const res = Math.max(4, Math.round(W * Math.pow(k, 1.8)));
+        small.width = res; small.height = Math.max(3, Math.round(res * H / W));
+        sctx.drawImage(target, 0, 0, small.width, small.height);
+        pctx.imageSmoothingEnabled = true; pctx.drawImage(small, 0, 0, W, H);
+        const img = nctx.createImageData(noise.width, noise.height);
+        for (let p = 0; p < img.data.length; p += 4) { img.data[p] = Math.random() * 255; img.data[p + 1] = Math.random() * 255; img.data[p + 2] = Math.random() * 255; img.data[p + 3] = 255; }
+        nctx.putImageData(img, 0, 0); pctx.globalAlpha = Math.pow(1 - k, 1.4) * .9; pctx.imageSmoothingEnabled = false; pctx.drawImage(noise, 0, 0, W, H); pctx.globalAlpha = 1;
+        $('#dstep').textContent = step < STEPS ? `${s.name} · ${s.model} · step ${step} of ${STEPS}` : `${s.name} · ${s.model} · done`;
+        $('#dmeter').style.width = (k * 100) + '%';
+        if (step < STEPS) setTimeout(tick, reduce ? 0 : 70); else { dchips.querySelectorAll('button').forEach(b => b.disabled = false); done(); }
+      };
+      tick();
+    });
+  }
+  tctx.clearRect(0, 0, W, H); SCENES[0].draw(); pctx.drawImage(target, 0, 0); $('#dstep').textContent = 'Mountains at sunrise · SDXL · pick another to draw';
+
+  /* ---------- Settings ---------- */
+  $('#choose').onclick = async () => {
+    const pick = otherWay(), box = $('#lsaid'); box.innerHTML = '';
+    await reply(esc(pick.line), box); applyWay(pick);
+  };
+
+  /* ---------- The heart leans toward the pointer on the welcome screen ---------- */
+  const heartEl = $('#heart');
+  if (!reduce) {
+    $('#heartbox').addEventListener('pointermove', e => { if (docked) return; const r = heartEl.getBoundingClientRect();
+      heartEl.style.setProperty('--ry', ((e.clientX - r.left) / r.width - .5) * 14 + 'deg'); heartEl.style.setProperty('--rx', -((e.clientY - r.top) / r.height - .5) * 14 + 'deg'); });
+    $('#heartbox').addEventListener('pointerleave', () => { heartEl.style.removeProperty('--rx'); heartEl.style.removeProperty('--ry'); });
+  }
+
+  show('chat');
+  // arriving from another page with #download, #tour…: fold the welcome screen and go there
+  if (location.hash.length > 1) { setDocked(true); const t = document.getElementById(location.hash.slice(1)); if (t) setTimeout(() => t.scrollIntoView(), 60); }
+})();
+</script>
+</body>
+</html>

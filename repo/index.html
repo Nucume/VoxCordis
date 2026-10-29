@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>VoxCordis for apt and dnf</title>
+<style>
+  :root { color-scheme: light dark; --bg: #fbf9f7; --fg: #26211f; --muted: #6f6762; --card: #fff; --line: #e4ddd8; --accent: #b4456b; }
+  @media (prefers-color-scheme: dark) { :root { --bg: #17131a; --fg: #ece6ea; --muted: #a399a3; --card: #211b25; --line: #352d3a; --accent: #e07aa0; } }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, sans-serif; }
+  main { max-width: 46rem; margin: 0 auto; padding: 3rem 1rem 4rem; }
+  h1 { font-size: 1.9rem; margin: 0 0 .25rem; } h2 { font-size: 1.15rem; margin: 2.2rem 0 .5rem; }
+  p { margin: .4rem 0; } .muted { color: var(--muted); } a { color: var(--accent); }
+  pre { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .9rem 1rem; overflow-x: auto; font-size: .86rem; line-height: 1.5; }
+  code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+</style>
+</head>
+<body>
+<main>
+<h1>VoxCordis for apt and dnf</h1>
+<p class="muted">Version 0.3.5. Updates arrive through your package manager like any other package. The repository and every package in it are signed.</p>
+
+<h2>Debian, Ubuntu, Mint and relatives (apt)</h2>
+<pre><code>sudo install -d -m 0755 /etc/apt/keyrings
+curl -fsSL https://voxcordisai.com/repo/voxcordis.gpg | sudo tee /etc/apt/keyrings/voxcordis.gpg &gt;/dev/null
+echo "deb [signed-by=/etc/apt/keyrings/voxcordis.gpg] https://voxcordisai.com/repo/apt stable main" | sudo tee /etc/apt/sources.list.d/voxcordis.list
+sudo apt update
+sudo apt install voxcordis</code></pre>
+
+<h2>Fedora and relatives (dnf)</h2>
+<pre><code>sudo curl -fsSL -o /etc/yum.repos.d/voxcordis.repo https://voxcordisai.com/repo/rpm/voxcordis.repo
+sudo dnf install voxcordis</code></pre>
+
+<h2>Good to know</h2>
+<p>64-bit x86 only, glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later). The key's fingerprint is <code>A73F603FB025D173D8ED3364D0D8F7338D36D04B</code>; the key itself is <a href="voxcordis.asc">voxcordis.asc</a>.</p>
+<p>Installed this way, VoxCordis does not update itself; it tells you when a new version is out and the command to run. Prefer a single file? The AppImage and the Windows installer are on the <a href="https://github.com/Nucume/VoxCordis/releases">releases page</a>.</p>
+</main>
+</body>
+</html>
