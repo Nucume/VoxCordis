@@ -5,6 +5,7 @@ import 'package:companion/app_scope.dart';
 import 'package:companion/data/database.dart';
 import 'package:companion/data/database_key.dart';
 import 'package:companion/data/settings.dart';
+import 'package:companion/data/skills/skills.dart';
 import 'package:companion/features/chat/chat_controller.dart';
 import 'package:companion/services/logs/app_log.dart';
 import 'package:companion/services/recall/recall.dart';
@@ -97,7 +98,10 @@ void main() {
     expect(system, contains('Favourite tea is genmaicha')); // pinned
     final logged = await services.log.entries();
     expect(
-      logged.where((e) => e.kind == LogKind.thinking).first.toText(),
+      logged
+          .where((e) => e.kind == LogKind.thinking)
+          .map((e) => e.toText())
+          .join('\n'),
       contains('Recalled by meaning'),
     );
 
@@ -107,5 +111,62 @@ void main() {
       embedder.seen.last,
       startsWith('Any good restaurant to try?\n\nSure.'),
     );
+  });
+
+  test('the skill that fits what was said is put in the prompt', () async {
+    final (server, requests) = await _mockLlm();
+    final tmp = await Directory.systemTemp.createTemp('companion_test');
+    final db = await openAppDatabase(inMemoryDatabasePath);
+    final folder = '${tmp.path}/Aria';
+    final services = AppServices(
+      settings: SettingsStore(
+        File('${tmp.path}/settings.json'),
+        AppSettings(
+          companionName: 'Aria',
+          companionFolder: folder,
+          llmEndpoint: 'http://127.0.0.1:${server.port}/v1',
+          llmMode: LlmMode.external,
+          llmModel: 'mock',
+        ),
+      ),
+      db: db,
+      dbKey: DatabaseKey(Directory.systemTemp),
+      runtime: RuntimeController(tmp),
+    );
+    services.recall = Recall(
+      index: () => services.recallIndex,
+      memories: () => services.memory,
+      messages: () => services.messages,
+      embedder: FakeEmbedder(),
+      available: () => true,
+      log: services.log,
+    );
+    addTearDown(() async {
+      await server.close(force: true);
+      await db.close();
+      await tmp.delete(recursive: true);
+    });
+    await Skills.load(folder);
+    // The morning briefing mentions the weather too.
+    await Skills.setOn(folder, 'morning-briefing', false);
+
+    final chat = ChatController(services);
+    await chat.load();
+    await chat.send('Do I need an umbrella today?');
+    expect(chat.error, isNull);
+    String system(int i) =>
+        ((requests[i]['messages'] as List).first as Map)['content'] as String;
+    expect(system(0), contains('## A skill that fits: Weather'));
+    expect(system(0), contains('wttr.in'));
+    // The best fit is listed first.
+    expect(system(0), contains('On (4 of ${Skills.maxOn}):\n- weather:'));
+    final logged = await services.log.entries();
+    expect(
+      logged.map((e) => e.toText()).join('\n'),
+      contains('Offered the Weather skill'),
+    );
+
+    await chat.send('My cat says hi');
+    expect(system(1), isNot(contains('A skill that fits')));
   });
 }

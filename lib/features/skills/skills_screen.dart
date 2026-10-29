@@ -48,7 +48,8 @@ class _SkillsScreenState extends State<SkillsScreen> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(text)));
 
   Future<void> _setOn(Skill s, bool on) async {
-    await Skills.setOn(_folder!, s.id, on);
+    final problem = await Skills.setOn(_folder!, s.id, on);
+    if (problem != null) _say(problem);
     await _reload();
   }
 
@@ -182,9 +183,12 @@ class _SkillsScreenState extends State<SkillsScreen> {
         const SizedBox(height: 6),
         Text(
           'Skills teach $name how to do particular things. While a skill is '
-          'on, $name uses it whenever it fits. Any skill can also be called '
-          'up by typing its command in the chat, like /weather Bern. Claude '
-          'skills (SKILL.md, .zip or .skill) can be imported as they are.',
+          'on, $name uses it whenever it fits. Up to ${Skills.maxOn} can be '
+          'on at once (${_skills.where((s) => s.on).length} are now), and '
+          '$name may switch them too or write new ones, which wait here for '
+          'your OK. Any skill can also be called up by typing its command in '
+          'the chat, like /weather Bern. Claude skills (SKILL.md, .zip or '
+          '.skill) can be imported as they are.',
           style: TextStyle(fontSize: 12.5, color: palette.textMuted),
         ),
         const SizedBox(height: 16),

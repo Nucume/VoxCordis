@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart' show ChangeNotifier, DateUtils;
 import 'package:http/http.dart' as http;
@@ -24,6 +25,7 @@ import '../../services/images/draw_tools.dart';
 import '../../services/images/image_engine.dart';
 import '../../services/llm_client.dart';
 import '../../services/logs/app_log.dart';
+import '../../services/recall/recall.dart';
 import '../../services/runtime/model_catalog.dart';
 import '../../services/schedule/poke.dart';
 import '../../services/schedule/scheduler.dart';
@@ -438,11 +440,61 @@ class ChatController extends ChangeNotifier {
       '${_noTools.contains(Sight.serverKey(settings)) ? '$aboutTextTools\n\n' : ''}'
       '${aboutInternet(settings)}\n\n'
       '${aboutSchedule()}\n\n'
+      '$aboutChoices\n\n'
       '$skills\n\n'
       // Last before the clock: small models follow what they read most
       // recently.
       '${aboutComputer(settings)}\n\n'
       '## Right now\n${timeNote(DateTime.now())}';
+
+  /// The skills with those that are on ordered by how well they fit what
+  /// was said, and the one that fits well enough to go in the prompt
+  /// whole: small models seldom think of asking for a skill themselves.
+  Future<({List<Skill> order, Skill? fits})> _rankSkills(
+    List<Skill> skills,
+    Float32List? query,
+  ) async {
+    final on = [
+      for (final s in skills)
+        if (s.on && s.problem == null && !s.always) s,
+    ];
+    if (query == null || on.isEmpty) return (order: skills, fits: null);
+    try {
+      final scores = await _services.recall.similarity(query, [
+        for (final s in on) s.searchText,
+      ]);
+      final ranked = [for (var i = 0; i < on.length; i++) (on[i], scores[i])]
+        ..sort((a, b) => b.$2.compareTo(a.$2));
+      final best = ranked.first;
+      final fits = best.$2 >= Recall.skillMinScore ? best.$1 : null;
+      _log(
+        LogKind.thinking,
+        fits == null
+            ? 'No skill fits closely'
+            : 'Offered the ${fits.displayTitle} skill',
+        details: [
+          for (final (s, score) in ranked)
+            '${s.id}: ${score.toStringAsFixed(2)}',
+        ].join('\n'),
+      );
+      return (
+        order: [
+          for (final (s, _) in ranked) s,
+          for (final s in skills)
+            if (!on.contains(s)) s,
+        ],
+        fits: fits,
+      );
+    } on Object catch (e) {
+      _log(
+        LogKind.errors,
+        'Couldn\'t compare skills by meaning',
+        details: '$e',
+        error: true,
+      );
+      return (order: skills, fits: null);
+    }
+  }
 
   /// What the human plainly asked to have opened: a usual folder, an
   /// address, or one of their installed apps by name ("open Vivaldi
@@ -529,6 +581,12 @@ class ChatController extends ChangeNotifier {
           'schedule_task' => 'Planned a task',
           'cancel_schedule' => 'Cancelled a reminder',
           SkillTools.useTool => 'Used the ${c.parsedArguments['name']} skill',
+          SkillTools.switchTool =>
+            'Turned ${'${c.parsedArguments['on']}' == 'false' ? 'off' : 'on'} '
+                'the '
+                '${c.parsedArguments['name']} skill',
+          SkillTools.writeTool =>
+            'Wrote the ${c.parsedArguments['name']} skill',
           DrawTools.drawTool => 'Drawing a picture',
           _ => WebTools.noteFor(c.name, c.parsedArguments),
         };
@@ -795,9 +853,11 @@ class ChatController extends ChangeNotifier {
       // "/weather in Bern" calls up a skill for this reply.
       final called = Skills.called(query, skillList);
       if (called != null) _addNote('Used the ${called.displayTitle} skill');
+      final ranked = await _rankSkills(skillList, found.query);
       final skills = Skills.forPrompt(
-        skillList,
+        ranked.order,
         called: called,
+        fits: ranked.fits,
         contextSize: settings.contextSize,
       );
       final images = _services.imageEngine;

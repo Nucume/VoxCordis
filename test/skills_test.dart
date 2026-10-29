@@ -205,7 +205,11 @@ void main() {
     final tools = SkillTools(settings: () => settings);
     final off = jsonDecode(await tools.call('use_skill', {'name': 'knitting'}));
     expect(off['ok'], isFalse);
-    expect(off['error'], contains('switched off'));
+    expect(off['error'], contains('waits for your human'));
+    final self = jsonDecode(
+      await tools.call('switch_skill', {'name': 'knitting', 'on': true}),
+    );
+    expect(self['ok'], isFalse);
 
     await Skills.setOn(folder, 'knitting', true);
     knitting = byId(await Skills.load(folder), 'knitting');
@@ -219,6 +223,107 @@ void main() {
 
     final missing = jsonDecode(await tools.call('use_skill', {'name': 'nope'}));
     expect(missing['error'], contains('weather'));
+  });
+
+  test('the companion writes, switches and reads skills itself', () async {
+    final settings = AppSettings(
+      companionName: 'Mira',
+      companionFolder: folder,
+    );
+    final tools = SkillTools(settings: () => settings);
+    Future<Map> call(String name, Map<String, Object?> args) async =>
+        jsonDecode(await tools.call(name, args)) as Map;
+
+    var r = await call('write_skill', {
+      'name': 'Plant Care',
+      'description': 'Keeping houseplants alive.',
+      'instructions': 'Water weekly.',
+    });
+    expect(r['ok'], isTrue);
+    expect(r['skill'], 'plant-care');
+    expect(r['note'], contains('waits for your human'));
+    var plant = byId(await Skills.load(folder), 'plant-care');
+    expect(plant.review, isTrue);
+    expect(plant.on, isFalse);
+
+    // Improving it keeps it waiting; one the human approved keeps its
+    // switch and title.
+    r = await call('write_skill', {
+      'name': 'plant-care',
+      'description': 'Keeping houseplants alive.',
+      'instructions': 'Water weekly, less in winter.',
+    });
+    expect(byId(await Skills.load(folder), 'plant-care').review, isTrue);
+    await Skills.setOn(folder, 'plant-care', true);
+    r = await call('write_skill', {
+      'name': 'weather',
+      'description': 'Weather, in Celsius.',
+      'instructions': 'Use wttr.in with ?m.',
+    });
+    final weather = byId(await Skills.load(folder), 'weather');
+    expect(weather.on, isTrue);
+    expect(weather.review, isFalse);
+    expect(weather.body, 'Use wttr.in with ?m.');
+    expect(
+      (await call('write_skill', {'name': 'x', 'description': ''}))['ok'],
+      isFalse,
+    );
+
+    // Off skills can still be read, and switched on and off.
+    r = await call('switch_skill', {'name': 'weather', 'on': false});
+    expect(r['ok'], isTrue);
+    r = await call('use_skill', {'name': 'weather'});
+    expect(r['ok'], isTrue);
+    expect(r['note'], contains('switch_skill'));
+    expect(byId(await Skills.load(folder), 'weather').on, isFalse);
+    r = await call('switch_skill', {'name': 'weather', 'on': true});
+    expect(byId(await Skills.load(folder), 'weather').on, isTrue);
+
+    // Always-on ones are the human's.
+    r = await call('switch_skill', {'name': 'adhd-support', 'on': true});
+    expect(r['ok'], isFalse);
+    expect(byId(await Skills.load(folder), 'adhd-support').on, isFalse);
+  });
+
+  test('at most ${Skills.maxOn} skills are on at once', () async {
+    final settings = AppSettings(
+      companionName: 'Mira',
+      companionFolder: folder,
+    );
+    final tools = SkillTools(settings: () => settings);
+    var on = (await Skills.load(folder)).where((s) => s.on).length;
+    for (var i = 0; on < Skills.maxOn; i++, on++) {
+      expect(
+        await Skills.save(
+          folder,
+          id: 'extra-$i',
+          description: 'Extra.',
+          always: false,
+          body: 'Do it.',
+        ),
+        isNull,
+      );
+    }
+    expect((await Skills.load(folder)).where((s) => s.on).length, Skills.maxOn);
+    // A new one the human makes now starts off, and can't be turned on.
+    await Skills.save(
+      folder,
+      id: 'one-more',
+      description: 'One more.',
+      always: false,
+      body: 'Do it.',
+    );
+    expect(byId(await Skills.load(folder), 'one-more').on, isFalse);
+    expect(await Skills.setOn(folder, 'one-more', true), Skills.tooMany);
+    final r = jsonDecode(
+      await tools.call('switch_skill', {'name': 'one-more', 'on': true}),
+    );
+    expect(r['ok'], isFalse);
+    expect(r['error'], contains('Turn one off first: '));
+    expect(r['error'], contains('weather'));
+    // Turning one off makes room.
+    expect(await Skills.setOn(folder, 'weather', false), isNull);
+    expect(await Skills.setOn(folder, 'one-more', true), isNull);
   });
 
   test('imports a SKILL.md folder, a Markdown file and a .skill zip', () async {
@@ -285,13 +390,29 @@ void main() {
         called: byId(skills, 'proofreading'),
         contextSize: 8192,
       );
+      expect(text, contains('On (6 of ${Skills.maxOn}):'));
       expect(text, contains('- weather: Look up the weather'));
+      expect(text, contains('write_skill'));
+      expect(text, isNot(contains('A skill that fits')));
       // Always-on ones are there in full, not to pick.
       expect(text, isNot(contains('- adhd-support')));
       expect(text, contains('### ADHD support (always on)'));
       expect(text, contains('One thing at a time'));
       expect(text, contains('Skill called up now: Proofreading'));
       expect(text, contains('Keep their voice and meaning'));
+
+      // Off ones by name; one that fits what was said in full.
+      await Skills.setOn(folder, 'price-watch', false);
+      final now = await Skills.load(folder);
+      final fits = Skills.forPrompt(
+        now,
+        fits: byId(now, 'weather'),
+        contextSize: 8192,
+      );
+      expect(fits, contains('Off for now: price-watch.'));
+      expect(fits, isNot(contains('- price-watch')));
+      expect(fits, contains('## A skill that fits: Weather'));
+      expect(fits, contains('wttr.in'));
     },
   );
 

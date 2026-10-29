@@ -54,6 +54,42 @@ void main() {
     expect(req.headers['anthropic-version'], isNotEmpty);
   });
 
+  test('Test this key asks OpenRouter about the key itself', () async {
+    final req = await sent(
+      'https://openrouter.ai/api/v1',
+      (c) async => expect(await c.testKey(), isNull),
+    );
+    expect(req.method, 'GET');
+    expect(req.url.path, '/api/v1/key');
+    expect(req.headers['Authorization'], 'Bearer k');
+  });
+
+  test('Test this key lists one model elsewhere', () async {
+    final req = await sent(
+      'https://api.anthropic.com/v1',
+      (c) async => expect(await c.testKey(), isNull),
+    );
+    expect(req.url.toString(), 'https://api.anthropic.com/v1/models?limit=1');
+    expect(req.headers['x-api-key'], 'k');
+    final oa = await sent(
+      'https://api.openai.com/v1',
+      (c) async => expect(await c.testKey(), isNull),
+    );
+    expect(oa.url.path, '/v1/models');
+  });
+
+  test('Test this key explains what went wrong', () async {
+    LlmClient answering(int status, {String key = 'k'}) => LlmClient(
+      baseUrl: 'https://api.openai.com/v1',
+      model: '',
+      apiKey: key,
+      client: MockClient((_) async => http.Response('', status)),
+    );
+    expect(await answering(401).testKey(), contains('did not accept'));
+    expect(await answering(500).testKey(), contains('HTTP 500'));
+    expect(await answering(200, key: '').testKey(), contains('Paste your'));
+  });
+
   test('OpenAI lists only models that can chat', () async {
     final ids = [
       'gpt-4o',

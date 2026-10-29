@@ -57,6 +57,9 @@ class Skill {
 
   String get command => '/$id';
 
+  /// What Recall compares with what the human said.
+  String get searchText => '$displayTitle: $description';
+
   String get displayTitle {
     final t = title?.trim();
     if (t != null && t.isNotEmpty) return t;
@@ -85,6 +88,10 @@ class Skills {
   /// the companion's file tools refuse to change it.
   static const stateFile = 'skills.json';
   static String get statePath => '$folderName/$stateFile';
+
+  /// Most skills on at once, always-on ones included: each one on costs
+  /// room in every prompt.
+  static const maxOn = 8;
 
   static const maxIdChars = 40;
   static const maxDescriptionChars = 400;
@@ -175,7 +182,7 @@ class Skills {
       }
       if (!await file.exists()) await _writeBuiltIn(dir, b);
       state.seen.add(b.id);
-      if (b.on) state.on.add(b.id);
+      if (b.on && state.on.length < maxOn) state.on.add(b.id);
       changed = true;
     }
     final skills = <Skill>[];
@@ -356,11 +363,70 @@ class Skills {
   // --------------------------------------------------------------- change
 
   /// Turns [id] on or off; either way the human has now looked at it.
-  static Future<void> setOn(String folder, String id, bool on) async {
+  /// Null when done, else why not: [maxOn] are on already.
+  static Future<String?> setOn(String folder, String id, bool on) async {
     final state = await _state(folder);
+    if (on && !state.on.contains(id) && state.on.length >= maxOn) {
+      return tooMany;
+    }
     on ? state.on.add(id) : state.on.remove(id);
     state.review.remove(id);
     await _saveState(folder, state);
+    return null;
+  }
+
+  static const tooMany =
+      '$maxOn skills are on, the most at once. Turn one off first.';
+
+  /// Null when a skill with these can be written, else what is wrong.
+  static String? _check(String id, String description, String body) =>
+      checkId(id) ??
+      (description.trim().isEmpty
+          ? 'Say in a line what the skill is for and when to use it.'
+          : description.trim().length > maxDescriptionChars
+          ? 'Keep the description under $maxDescriptionChars characters.'
+          : body.trim().isEmpty
+          ? 'Write the instructions.'
+          : body.length > maxBodyChars
+          ? 'Keep the instructions under $maxBodyChars characters.'
+          : null);
+
+  /// Writes a skill the companion made or changed. A new one waits for
+  /// the human's OK, off; a changed one keeps its switch. Null when
+  /// saved, else why not.
+  static Future<String?> write(
+    String folder, {
+    required String id,
+    String? title,
+    required String description,
+    required String body,
+  }) async {
+    final problem = _check(id, description, body);
+    if (problem != null) return problem;
+    final target = Directory(p.join(dirIn(folder).path, id));
+    final state = await _state(folder);
+    final file = File(p.join(target.path, fileName));
+    var always = false;
+    if (await file.exists()) {
+      final header = parse(await file.readAsString()).header;
+      title ??= header['title'];
+      always = header['always']?.toLowerCase() == 'true';
+    }
+    await target.create(recursive: true);
+    await file.writeAsString(
+      markdown(
+        id: id,
+        title: title,
+        description: description,
+        always: always,
+        body: body,
+      ),
+    );
+    if (state.seen.add(id)) {
+      state.review.add(id);
+      await _saveState(folder, state);
+    }
+    return null;
   }
 
   /// Writes a skill the human made or changed. [previousId] is the one it
@@ -374,17 +440,7 @@ class Skills {
     required bool always,
     required String body,
   }) async {
-    final problem =
-        checkId(id) ??
-        (description.trim().isEmpty
-            ? 'Say in a line what the skill is for and when to use it.'
-            : description.trim().length > maxDescriptionChars
-            ? 'Keep the description under $maxDescriptionChars characters.'
-            : body.trim().isEmpty
-            ? 'Write the instructions.'
-            : body.length > maxBodyChars
-            ? 'Keep the instructions under $maxBodyChars characters.'
-            : null);
+    final problem = _check(id, description, body);
     if (problem != null) return problem;
     final dir = dirIn(folder);
     final target = Directory(p.join(dir.path, id));
@@ -411,8 +467,9 @@ class Skills {
     state.review
       ..remove(id)
       ..remove(previousId);
-    // A new skill starts on: its human made it to be used.
-    if (previousId == null) state.on.add(id);
+    // A new skill starts on, if there is room: its human made it to be
+    // used.
+    if (previousId == null && state.on.length < maxOn) state.on.add(id);
     await _saveState(folder, state);
     return null;
   }
@@ -499,7 +556,7 @@ class Skills {
     }
     final state = await _state(folder);
     state.seen.add(unique);
-    state.on.add(unique);
+    if (state.on.length < maxOn) state.on.add(unique);
     state.review.remove(unique);
     await _saveState(folder, state);
     return unique;
@@ -598,45 +655,72 @@ class Skills {
       body.length <= max ? body : '${body.substring(0, max)}\n[…cut short]';
 
   /// What the prompt says about skills: the ones on, by name and what
-  /// they're for, those that are always on in full, and the one [called]
-  /// with a command for this reply.
+  /// they're for, in the order given (the best fit first); the others by
+  /// name; those that are always on in full; the one [called] with a
+  /// command for this reply, and the one that [fits] what was just said.
   static String forPrompt(
     List<Skill> skills, {
     Skill? called,
+    Skill? fits,
     required int contextSize,
   }) {
     final max = bodyCharsFor(contextSize);
-    final on = [
+    final usable = [
       for (final s in skills)
-        if (s.on && s.problem == null) s,
+        if (s.problem == null) s,
+    ];
+    final on = [
+      for (final s in usable)
+        if (s.on) s,
     ];
     final picked = [
       for (final s in on)
-        if (!s.always) s,
+        if (!s.always) s.id,
     ];
     final always = [
       for (final s in on)
         if (s.always && s.id != called?.id) s,
     ];
-    final b = StringBuffer('## Your skills\n');
+    final off = [
+      for (final s in usable)
+        if (!s.on && !s.review && !s.always) s.id,
+    ];
+    final review = [
+      for (final s in usable)
+        if (s.review) s.id,
+    ];
+    final b = StringBuffer(
+      '## Your skills\n'
+      'Skills are know-how you keep for particular jobs. Before you answer, '
+      'look down this list: when one fits what your human wants, call '
+      'use_skill with its name first and follow what it says, in your own '
+      'voice. Don\'t mention skills unless asked.\n',
+    );
     if (picked.isEmpty) {
-      b.write('You have no skills to pick from right now. ');
+      b.write('No skills are on right now.\n');
     } else {
-      b.write(
-        'Skills are know-how for particular jobs. When one fits what your '
-        'human wants, call use_skill with its name first and follow what it '
-        'says, in your own voice. Don\'t mention skills unless asked.\n',
-      );
-      for (final s in picked) {
-        b.write('- ${s.id}: ${s.description}\n');
+      b.write('On (${on.length} of $maxOn):\n');
+      for (final id in picked) {
+        b.write('- $id: ${on.firstWhere((s) => s.id == id).description}\n');
       }
     }
+    if (off.isNotEmpty) {
+      b.write(
+        'Off for now: ${off.join(', ')}. use_skill reads one anyway. '
+        'switch_skill turns one on when you will need it often, or one off '
+        'that you don\'t, to keep this list short.\n',
+      );
+    }
+    if (review.isNotEmpty) {
+      b.write(
+        'Written by you and waiting for your human\'s OK in the Skills tab: '
+        '${review.join(', ')}.\n',
+      );
+    }
     b.write(
-      'Each skill is a file in your folder, skills/<name>/SKILL.md. When '
-      'your human asks you to learn how to do something for good, you can '
-      'write one yourself with write_file: a header with "name:" and '
-      '"description:" between --- lines, then the steps. A new skill you '
-      'write waits for your human to turn it on in the Skills tab.',
+      'When your human teaches you how to do something for good, or you '
+      'notice you do the same job again and again, write it down as a skill '
+      'with write_skill. A new skill waits for your human to turn it on.',
     );
     for (final s in always) {
       b.write('\n\n### ${s.displayTitle} (always on)\n${_cut(s.body, max)}');
@@ -646,6 +730,13 @@ class Skills {
         '\n\n## Skill called up now: ${called.displayTitle}\n'
         'Your human typed ${called.command} to have you use this skill for '
         'this message. Follow it:\n\n${_cut(called.body, max)}',
+      );
+    } else if (fits != null && !fits.always) {
+      b.write(
+        '\n\n## A skill that fits: ${fits.displayTitle}\n'
+        'What your human just said looks like a job for your ${fits.id} '
+        'skill, so here it is; no need to call use_skill for it. Follow it '
+        'if it fits, and ignore it if it doesn\'t:\n\n${_cut(fits.body, max)}',
       );
     }
     return b.toString();

@@ -25,6 +25,136 @@ enum SearchProvider { duckDuckGo, brave, tavily, searxng }
 /// (stable-diffusion.cpp on this computer), or an InvokeAI the human runs.
 enum ImageEngineChoice { off, builtIn, invoke }
 
+/// What one picture model was last drawn with in the draw panel. A null
+/// number means "the model's own default".
+@immutable
+class DrawChoices {
+  const DrawChoices({
+    this.width,
+    this.height,
+    this.steps,
+    this.cfg,
+    this.seed,
+    this.negative = '',
+  });
+
+  final int? width;
+  final int? height;
+  final int? steps;
+  final double? cfg;
+  final int? seed;
+  final String negative;
+
+  bool get isEmpty =>
+      width == null &&
+      height == null &&
+      steps == null &&
+      cfg == null &&
+      seed == null &&
+      negative.isEmpty;
+
+  Map<String, Object?> toJson() => {
+    if (width != null) 'width': width,
+    if (height != null) 'height': height,
+    if (steps != null) 'steps': steps,
+    if (cfg != null) 'cfg': cfg,
+    if (seed != null) 'seed': seed,
+    if (negative.isNotEmpty) 'negative': negative,
+  };
+
+  factory DrawChoices.fromJson(Map<String, Object?> json) => DrawChoices(
+    width: json['width'] as int?,
+    height: json['height'] as int?,
+    steps: json['steps'] as int?,
+    cfg: (json['cfg'] as num?)?.toDouble(),
+    seed: json['seed'] as int?,
+    negative: json['negative'] as String? ?? '',
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is DrawChoices &&
+      other.width == width &&
+      other.height == height &&
+      other.steps == steps &&
+      other.cfg == cfg &&
+      other.seed == seed &&
+      other.negative == negative;
+
+  @override
+  int get hashCode => Object.hash(width, height, steps, cfg, seed, negative);
+}
+
+/// The draw panel as it was left: the Advanced switch, the picture model,
+/// the shape, and each model's own size, steps, guidance, seed and negative
+/// prompt, so switching models brings back what that model was last given.
+@immutable
+class DrawPanelPrefs {
+  const DrawPanelPrefs({
+    this.advanced = false,
+    this.model,
+    this.shape = 'square',
+    this.perModel = const {},
+  });
+
+  final bool advanced;
+  final String? model;
+  final String shape;
+  final Map<String, DrawChoices> perModel;
+
+  DrawPanelPrefs copyWith({
+    bool? advanced,
+    String? model,
+    String? shape,
+    Map<String, DrawChoices>? perModel,
+  }) => DrawPanelPrefs(
+    advanced: advanced ?? this.advanced,
+    model: model ?? this.model,
+    shape: shape ?? this.shape,
+    perModel: perModel ?? this.perModel,
+  );
+
+  /// These prefs with [choices] kept for [model]; empty choices are dropped.
+  DrawPanelPrefs withChoices(String model, DrawChoices choices) {
+    final next = {...perModel};
+    if (choices.isEmpty) {
+      next.remove(model);
+    } else {
+      next[model] = choices;
+    }
+    return copyWith(perModel: next);
+  }
+
+  Map<String, Object?> toJson() => {
+    'advanced': advanced,
+    'model': model,
+    'shape': shape,
+    'perModel': {for (final e in perModel.entries) e.key: e.value.toJson()},
+  };
+
+  factory DrawPanelPrefs.fromJson(Object? json) {
+    if (json is! Map) return const DrawPanelPrefs();
+    final per = json['perModel'];
+    return DrawPanelPrefs(
+      advanced: json['advanced'] as bool? ?? false,
+      model: json['model'] as String?,
+      shape: switch (json['shape']) {
+        'portrait' => 'portrait',
+        'landscape' => 'landscape',
+        _ => 'square',
+      },
+      perModel: {
+        if (per is Map)
+          for (final e in per.entries)
+            if (e.key is String && e.value is Map)
+              e.key as String: DrawChoices.fromJson(
+                Map<String, Object?>.from(e.value as Map),
+              ),
+      },
+    );
+  }
+}
+
 /// Everything the minimal v1 Settings page edits.
 @immutable
 class AppSettings {
@@ -76,6 +206,7 @@ class AppSettings {
     this.imageEngine = ImageEngineChoice.off,
     this.imageModel,
     this.freeGpuForDrawing = true,
+    this.draw = const DrawPanelPrefs(),
     this.pokeAfterHours = 3,
     this.pokeQuietFrom = 23,
     this.pokeQuietUntil = 8,
@@ -224,6 +355,9 @@ class AppSettings {
   /// picture model has the graphics card to itself.
   final bool freeGpuForDrawing;
 
+  /// What the Pictures tab's draw panel was left showing.
+  final DrawPanelPrefs draw;
+
   /// Hours of silence before the companion does something on its own (a
   /// poke), or 0 for never.
   final int pokeAfterHours;
@@ -339,6 +473,7 @@ class AppSettings {
       imageEngine: imageEngine,
       imageModel: imageModel,
       freeGpuForDrawing: freeGpuForDrawing,
+      draw: draw,
       pokeAfterHours: pokeAfterHours,
       pokeQuietFrom: pokeQuietFrom,
       pokeQuietUntil: pokeQuietUntil,
@@ -400,6 +535,7 @@ class AppSettings {
     ImageEngineChoice? imageEngine,
     String? imageModel,
     bool? freeGpuForDrawing,
+    DrawPanelPrefs? draw,
     int? pokeAfterHours,
     int? pokeQuietFrom,
     int? pokeQuietUntil,
@@ -469,6 +605,7 @@ class AppSettings {
       imageEngine: imageEngine ?? this.imageEngine,
       imageModel: imageModel ?? this.imageModel,
       freeGpuForDrawing: freeGpuForDrawing ?? this.freeGpuForDrawing,
+      draw: draw ?? this.draw,
       pokeAfterHours: pokeAfterHours ?? this.pokeAfterHours,
       pokeQuietFrom: pokeQuietFrom ?? this.pokeQuietFrom,
       pokeQuietUntil: pokeQuietUntil ?? this.pokeQuietUntil,
@@ -522,6 +659,7 @@ class AppSettings {
     'imageEngine': imageEngine.name,
     'imageModel': imageModel,
     'freeGpuForDrawing': freeGpuForDrawing,
+    'draw': draw.toJson(),
     'pokeAfterHours': pokeAfterHours,
     'pokeQuietFrom': pokeQuietFrom,
     'pokeQuietUntil': pokeQuietUntil,
@@ -604,6 +742,7 @@ class AppSettings {
       imageModel: json['imageModel'] as String?,
       freeGpuForDrawing:
           json['freeGpuForDrawing'] as bool? ?? d.freeGpuForDrawing,
+      draw: DrawPanelPrefs.fromJson(json['draw']),
       pokeAfterHours: json['pokeAfterHours'] as int? ?? d.pokeAfterHours,
       pokeQuietFrom: json['pokeQuietFrom'] as int? ?? d.pokeQuietFrom,
       pokeQuietUntil: json['pokeQuietUntil'] as int? ?? d.pokeQuietUntil,

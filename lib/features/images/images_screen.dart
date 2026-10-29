@@ -13,6 +13,7 @@ import '../../services/images/image_catalog.dart';
 import '../../services/images/image_engine.dart';
 import '../../services/images/sd_runtime.dart';
 import '../../theme/app_theme.dart';
+import 'resizable_field.dart';
 
 /// Every picture in `<companion folder>/images/`, and a panel to draw one by
 /// hand. Models, LoRAs and the switch live in Settings → Images.
@@ -39,6 +40,13 @@ class _ImagesScreenState extends State<ImagesScreen> {
   int? _width;
   int? _height;
 
+  /// Set once the panel has picked up what it was left showing; filling the
+  /// fields from the saved choices must not save them back.
+  bool _loaded = false;
+  bool _applying = false;
+  Timer? _saveTimer;
+  SettingsStore? _store;
+
   /// LoRAs picked in the advanced options, by name, with their weight.
   final _loras = <String, double>{};
   Future<List<File>>? _images;
@@ -47,8 +55,18 @@ class _ImagesScreenState extends State<ImagesScreen> {
   static const _sizes = [512, 576, 640, 704, 768, 832, 896, 1024, 1216, 1536];
 
   @override
+  void initState() {
+    super.initState();
+    _negative.addListener(_scheduleSave);
+    for (final c in [_steps, _cfg, _seed]) {
+      c.addListener(_numbersChanged);
+    }
+  }
+
+  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    _store = AppScope.of(context).settings;
     _images ??= _listImages(
       AppScope.of(context).settings.value.companionFolder,
     );
@@ -67,6 +85,8 @@ class _ImagesScreenState extends State<ImagesScreen> {
 
   @override
   void dispose() {
+    if (_saveTimer?.isActive ?? false) _saveChoices();
+    _saveTimer?.cancel();
     for (final c in [_prompt, _negative, _steps, _cfg, _seed]) {
       c.dispose();
     }
@@ -103,6 +123,103 @@ class _ImagesScreenState extends State<ImagesScreen> {
   ImageModel _modelIn(AppSettings s, List<ImageModel> ready) =>
       ready.where((m) => m.id == _model).firstOrNull ??
       ImageCatalog.defaultFor(s, ready)!;
+
+  /// Picks up the switch, shape, model and that model's numbers as they
+  /// were left, the first time there is a model to draw with.
+  void _loadOnce(AppSettings s, List<ImageModel> ready) {
+    if (_loaded || ready.isEmpty) return;
+    _loaded = true;
+    final saved = s.draw;
+    _advanced = saved.advanced;
+    _shape = saved.shape;
+    _model =
+        (ready.where((m) => m.id == saved.model).firstOrNull ??
+                ImageCatalog.defaultFor(s, ready)!)
+            .id;
+    _applyChoices(saved.perModel[_model] ?? const DrawChoices());
+  }
+
+  /// Puts [c] into the fields.
+  void _applyChoices(DrawChoices c) {
+    _applying = true;
+    _width = c.width;
+    _height = c.height;
+    _steps.text = c.steps?.toString() ?? '';
+    _cfg.text = c.cfg == null ? '' : '${c.cfg}';
+    _seed.text = c.seed?.toString() ?? '';
+    _negative.text = c.negative;
+    _applying = false;
+  }
+
+  void _numbersChanged() {
+    if (_applying || !_loaded) return;
+    // The Reset button shows while a number is set.
+    setState(() {});
+    _scheduleSave();
+  }
+
+  void _scheduleSave() {
+    if (_applying || !_loaded) return;
+    _saveTimer?.cancel();
+    _saveTimer = Timer(const Duration(milliseconds: 400), _saveChoices);
+  }
+
+  /// Keeps the fields as this model's choices.
+  void _saveChoices() {
+    _saveTimer?.cancel();
+    final store = _store;
+    final id = _model;
+    if (store == null || id == null || !_loaded) return;
+    final now = DrawChoices(
+      width: _width,
+      height: _height,
+      steps: int.tryParse(_steps.text),
+      cfg: double.tryParse(_cfg.text),
+      seed: int.tryParse(_seed.text),
+      negative: _negative.text,
+    );
+    final draw = store.value.draw;
+    if ((draw.perModel[id] ?? const DrawChoices()) == now) return;
+    unawaited(
+      store.update(store.value.copyWith(draw: draw.withChoices(id, now))),
+    );
+  }
+
+  /// Keeps the Advanced switch, the shape or the model.
+  void _remember({bool? advanced, String? shape, String? model}) {
+    final store = _store;
+    if (store == null) return;
+    final draw = store.value.draw;
+    unawaited(
+      store.update(
+        store.value.copyWith(
+          draw: draw.copyWith(advanced: advanced, shape: shape, model: model),
+        ),
+      ),
+    );
+  }
+
+  void _pickModel(String id) {
+    _saveChoices();
+    final store = _store;
+    setState(() {
+      _model = id;
+      _applyChoices(store?.value.draw.perModel[id] ?? const DrawChoices());
+    });
+    _remember(model: id);
+  }
+
+  void _resetNumbers() {
+    setState(() {
+      _applying = true;
+      _width = _height = null;
+      _steps.clear();
+      _cfg.clear();
+      _seed.clear();
+      _applying = false;
+    });
+    _saveChoices();
+  }
 
   Future<void> _draw(List<ImageModel> ready) async {
     final services = AppScope.of(context);
@@ -161,6 +278,19 @@ class _ImagesScreenState extends State<ImagesScreen> {
           unawaited(engine.refreshInvoke(s));
         }
         final ready = engine.available(s);
+        _loadOnce(s, ready);
+        if (_loaded && ready.isNotEmpty && ready.every((m) => m.id != _model)) {
+          // The model it was left on isn't there any more (the engine was
+          // changed): take the first one's own choices once built.
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (!mounted || ready.any((m) => m.id == _model)) return;
+            final id = ImageCatalog.defaultFor(s, ready)!.id;
+            setState(() {
+              _model = id;
+              _applyChoices(s.draw.perModel[id] ?? const DrawChoices());
+            });
+          });
+        }
         final canDraw = on && ready.isNotEmpty;
         final titleStyle = Theme.of(
           context,
@@ -311,17 +441,27 @@ class _ImagesScreenState extends State<ImagesScreen> {
                 scale: 0.8,
                 child: Switch(
                   value: _advanced,
-                  onChanged: (v) => setState(() => _advanced = v),
+                  onChanged: (v) {
+                    setState(() => _advanced = v);
+                    _remember(advanced: v);
+                  },
                 ),
               ),
             ],
           ),
-          TextField(
-            controller: _prompt,
-            minLines: 1,
-            maxLines: 4,
-            onChanged: (_) => setState(() {}),
-            decoration: InputDecoration(
+          CallbackShortcuts(
+            bindings: {
+              for (final key in [
+                const SingleActivator(LogicalKeyboardKey.enter, control: true),
+                const SingleActivator(LogicalKeyboardKey.enter, meta: true),
+              ])
+                key: () {
+                  if (_prompt.text.trim().isNotEmpty) _draw(ready);
+                },
+            },
+            child: ResizableField(
+              controller: _prompt,
+              onChanged: (_) => setState(() {}),
               hintText: switch (model.prompting) {
                 Prompting.tags => '1girl, silver hair, reading, cozy library',
                 _ => 'A cozy library at night, warm lamplight, rain outside',
@@ -330,13 +470,10 @@ class _ImagesScreenState extends State<ImagesScreen> {
           ),
           if (_advanced) ...[
             const SizedBox(height: 8),
-            TextField(
+            ResizableField(
               controller: _negative,
-              minLines: 1,
               maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'What to leave out (negative prompt)',
-              ),
+              hintText: 'What to leave out (negative prompt)',
             ),
             const SizedBox(height: 12),
             Wrap(
@@ -352,29 +489,48 @@ class _ImagesScreenState extends State<ImagesScreen> {
                       for (final m in ready)
                         DropdownMenuItem(value: m.id, child: Text(m.name)),
                     ],
-                    onChanged: (v) => setState(() {
-                      _model = v;
-                      _width = _height = null;
-                    }),
+                    onChanged: (v) => _pickModel(v!),
                   ),
                 ),
                 _labelled(
                   'Width',
-                  _sizePicker(
-                    _width ?? size.width,
-                    (v) => setState(() => _width = v),
-                  ),
+                  _sizePicker(_width ?? size.width, (v) {
+                    setState(() => _width = v);
+                    _scheduleSave();
+                  }),
+                ),
+                IconButton(
+                  tooltip: 'Swap width and height',
+                  visualDensity: VisualDensity.compact,
+                  onPressed: () {
+                    setState(() {
+                      final w = _width ?? size.width;
+                      _width = _height ?? size.height;
+                      _height = w;
+                    });
+                    _scheduleSave();
+                  },
+                  icon: const Icon(Icons.swap_horiz_rounded, size: 18),
                 ),
                 _labelled(
                   'Height',
-                  _sizePicker(
-                    _height ?? size.height,
-                    (v) => setState(() => _height = v),
-                  ),
+                  _sizePicker(_height ?? size.height, (v) {
+                    setState(() => _height = v);
+                    _scheduleSave();
+                  }),
                 ),
                 _number('Steps', _steps, '${model.steps}'),
                 _number('Guidance', _cfg, '${model.cfg}', decimal: true),
                 _number('Seed', _seed, 'random', width: 110),
+                if (_width != null ||
+                    _height != null ||
+                    _steps.text.isNotEmpty ||
+                    _cfg.text.isNotEmpty ||
+                    _seed.text.isNotEmpty)
+                  TextButton(
+                    onPressed: _resetNumbers,
+                    child: const Text('Reset'),
+                  ),
               ],
             ),
             if (loras.isNotEmpty) ...[
@@ -453,10 +609,10 @@ class _ImagesScreenState extends State<ImagesScreen> {
                     ),
                   ],
                   selected: {_shape},
-                  onSelectionChanged: (v) => setState(() {
-                    _shape = v.single;
-                    _width = _height = null;
-                  }),
+                  onSelectionChanged: (v) {
+                    setState(() => _shape = v.single);
+                    _remember(shape: v.single);
+                  },
                 ),
                 const SizedBox(width: 12),
                 Expanded(

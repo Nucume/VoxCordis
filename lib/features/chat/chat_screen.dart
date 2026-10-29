@@ -4,6 +4,7 @@ import 'package:desktop_drop/desktop_drop.dart';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:pasteboard/pasteboard.dart';
@@ -531,6 +532,7 @@ class _ChatScreenState extends State<ChatScreen> {
           thinkingLive: thinkingLive,
           onDelete: deletable ? () => _confirmDelete(m) : null,
           onRegenerate: regenerable ? _confirmRegenerate : null,
+          onChoose: regenerable ? (o) => _chat.send(o) : null,
         ),
       ],
     );
@@ -968,9 +970,14 @@ class _Bubble extends StatefulWidget {
     this.thinkingLive = false,
     this.onDelete,
     this.onRegenerate,
+    this.onChoose,
   });
 
   final ChatMessage message;
+
+  /// Sends the option picked from a question's buttons; null when they
+  /// aren't to be pressed (not the newest reply, or a reply being written).
+  final void Function(String option)? onChoose;
 
   /// The companion folder, where shared pictures live.
   final String? folder;
@@ -1114,18 +1121,31 @@ class _BubbleState extends State<_Bubble> {
                         ),
                       ),
                     if (text.isNotEmpty)
-                      SelectableText.rich(
-                        formatChat(
-                          text,
-                          actionColor: Color.lerp(
-                            context.palette.text,
-                            accent,
-                            0.7,
-                          )!,
-                          codeFill: context.palette.codeFill,
-                        ),
-                        style: const TextStyle(height: 1.4),
-                      )
+                      for (final block in chatBlocks(text))
+                        if (block.code)
+                          _CodeBlock(text: block.text, lang: block.lang)
+                        else if (block.choices case final options?)
+                          _Choices(options: options, onChoose: widget.onChoose)
+                        else if (block.rows case final rows?)
+                          _TableBlock(
+                            rows: rows,
+                            actionColor: Color.lerp(
+                              context.palette.text,
+                              accent,
+                              0.7,
+                            )!,
+                          )
+                        else
+                          _ChatText(
+                            block.text,
+                            actionColor: Color.lerp(
+                              context.palette.text,
+                              accent,
+                              0.7,
+                            )!,
+                            codeFill: context.palette.codeFill,
+                            linkColor: accent,
+                          )
                     else if (widget.live &&
                         message.reasoning?.isNotEmpty != true)
                       const _Typing(),
@@ -1138,6 +1158,237 @@ class _BubbleState extends State<_Bubble> {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: actions,
               ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Opens a link from a reply. Only web addresses, and never without a
+/// look: the text may have come from a page the companion read.
+Future<void> _openLink(BuildContext context, String url) async {
+  final uri = Uri.tryParse(url);
+  if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) return;
+  final ok = await showDialog<bool>(
+    context: context,
+    builder: (context) => AlertDialog(
+      title: const Text('Open this link?'),
+      content: SelectableText(url),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context, false),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.pop(context, true),
+          child: const Text('Open'),
+        ),
+      ],
+    ),
+  );
+  if (ok == true) await launchUrl(uri);
+}
+
+/// Formatted chat text, with tappable links.
+class _ChatText extends StatefulWidget {
+  const _ChatText(
+    this.text, {
+    required this.actionColor,
+    required this.codeFill,
+    required this.linkColor,
+  });
+
+  final String text;
+  final Color actionColor;
+  final Color codeFill;
+  final Color linkColor;
+
+  @override
+  State<_ChatText> createState() => _ChatTextState();
+}
+
+class _ChatTextState extends State<_ChatText> {
+  final _taps = <GestureRecognizer>[];
+
+  void _disposeTaps() {
+    for (final t in _taps) {
+      t.dispose();
+    }
+    _taps.clear();
+  }
+
+  @override
+  void dispose() {
+    _disposeTaps();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _disposeTaps();
+    return SelectableText.rich(
+      formatChat(
+        widget.text,
+        actionColor: widget.actionColor,
+        codeFill: widget.codeFill,
+        linkColor: widget.linkColor,
+        recognizers: _taps,
+        onLink: (url) => _openLink(context, url),
+      ),
+      style: const TextStyle(height: 1.4),
+    );
+  }
+}
+
+/// A Markdown table: the first row is the header.
+class _TableBlock extends StatelessWidget {
+  const _TableBlock({required this.rows, required this.actionColor});
+
+  final List<List<String>> rows;
+  final Color actionColor;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final line = BorderSide(color: palette.textMuted.withValues(alpha: 0.25));
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: palette.codeFill,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.fromBorderSide(line),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        child: Table(
+          defaultColumnWidth: const IntrinsicColumnWidth(),
+          border: TableBorder(horizontalInside: line, verticalInside: line),
+          children: [
+            for (var r = 0; r < rows.length; r++)
+              TableRow(
+                children: [
+                  for (final cell in rows[r])
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 6,
+                      ),
+                      child: SelectableText.rich(
+                        formatChat(
+                          cell,
+                          actionColor: actionColor,
+                          codeFill: palette.codeFill,
+                        ),
+                        style: TextStyle(
+                          fontSize: 13,
+                          height: 1.35,
+                          fontWeight: r == 0 ? FontWeight.w700 : null,
+                        ),
+                      ),
+                    ),
+                ],
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// A question's options as buttons. Pressing one sends it as the human's
+/// reply, exactly as if they had typed it; the buttons stop working once any
+/// reply has been sent.
+class _Choices extends StatelessWidget {
+  const _Choices({required this.options, required this.onChoose});
+
+  final List<String> options;
+  final void Function(String option)? onChoose;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Wrap(
+        spacing: 8,
+        runSpacing: 8,
+        children: [
+          for (final o in options)
+            OutlinedButton(
+              onPressed: onChoose == null ? null : () => onChoose!(o),
+              child: Text(o),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/// A fenced code block in a reply: boxed, monospace, with a copy button that
+/// shows on hover.
+class _CodeBlock extends StatefulWidget {
+  const _CodeBlock({required this.text, this.lang = ''});
+
+  final String text;
+  final String lang;
+
+  @override
+  State<_CodeBlock> createState() => _CodeBlockState();
+}
+
+class _CodeBlockState extends State<_CodeBlock> {
+  bool _hover = false;
+  bool _copied = false;
+
+  Future<void> _copy() async {
+    await Clipboard.setData(ClipboardData(text: widget.text));
+    if (!mounted) return;
+    setState(() => _copied = true);
+    await Future<void>.delayed(const Duration(seconds: 2));
+    if (mounted) setState(() => _copied = false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hover = true),
+      onExit: (_) => setState(() => _hover = false),
+      child: Container(
+        width: double.infinity,
+        margin: const EdgeInsets.symmetric(vertical: 6),
+        decoration: BoxDecoration(
+          color: palette.codeFill,
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: palette.textMuted.withValues(alpha: 0.25)),
+        ),
+        child: Stack(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 40, 10),
+              child: SelectableText(
+                widget.text,
+                style: const TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 13,
+                  height: 1.45,
+                ),
+              ),
+            ),
+            Positioned(
+              top: 2,
+              right: 2,
+              child: AnimatedOpacity(
+                opacity: _hover || _copied ? 1 : 0,
+                duration: const Duration(milliseconds: 150),
+                child: _Action(
+                  icon: _copied ? Icons.check_rounded : Icons.copy_rounded,
+                  tooltip: _copied ? 'Copied' : 'Copy code',
+                  onTap: _copy,
+                ),
+              ),
+            ),
           ],
         ),
       ),

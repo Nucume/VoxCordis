@@ -13,6 +13,20 @@ the ids); it is left out of the release page.
 ## Unreleased
 
 ### New
+- **Companions manage their own skills.** Your companion can now switch skills on and off to keep the ones they need at hand, and write a new skill when you teach them how to do something. Skills they write still wait for your OK in the Skills tab. Up to 8 skills can be on at once, so they don't fill every prompt; the Skills tab shows how many are on.
+- **Test this key.** Under Settings → Brain → Server-hosted, a new button next to the API key checks that the service accepts it, without sending a message or spending anything.
+- **Buttons for questions.** Your companion can now end a question with a few buttons to press. A press sends that option as your reply, exactly as if you had typed it, and you can always answer in your own words instead. The buttons stop working once any reply has been sent.
+- **Tables, links and more in chat.** Markdown tables show as tables, `[links](https://...)` and web addresses are tappable (VoxCordis asks before opening one), and `_italic_` and `__bold__` work like the star versions.
+
+### Fixed
+- **Companions use their skills more.** When what you say fits one of your companion's skills (asking whether you need an umbrella, say), VoxCordis now puts that skill's instructions right in front of them, found by meaning with Recall, instead of hoping they think of reading it. The list of skills they see is clearer, with the best fit first, and also names the ones that are off.
+- **The draw panel remembers.** Pictures → Draw something yourself keeps the Advanced switch, the shape and the model you picked across restarts, and each model keeps its own width, height, steps, guidance, seed and negative prompt, so switching models brings back what that model was last given. A Reset button puts a model's numbers back to its defaults.
+- **Resizable prompt fields.** Drag the grip in the bottom right corner of the prompt and negative prompt boxes to see more of a long prompt (double-click it to go back to fitting the text). Ctrl+Enter (or Cmd+Enter) draws, and a button between Width and Height swaps them.
+- **Code blocks in chat.** Text between ``` fences now shows as a boxed, monospace block with a copy button on hover, instead of loose text with stray backticks. Blank lines inside a block are kept as written. Quotes (`> like this`) and divider lines (`---`) show properly too.
+
+## 0.3.4
+
+### New
 - **A shorter prompt that keeps the thread.** Each reply used to carry the last 40 messages, which is why your companion sometimes said the same things again. Now it gets the last six exchanges as they are, plus "the story so far": a short summary of what came before, which your companion rewrites in the background as messages age out of that window (right after a reply, so your next message isn't kept waiting). Together with Recall's moments from older chat it keeps the thread without rereading everything. Rewinding the chat drops a story that told of the deleted messages.
 - **Recall by meaning.** Settings → Brain offers Recall, a small embedding model (EmbeddingGemma 300M, a 0.3 GB download) that lets your companion find memories by what they mean rather than by matching words: ask about "that place with the great ramen" and the memory about the restaurant comes up. It also brings up moments from older chats that fit what you're saying, dated, so your companion keeps the thread without rereading everything. It runs on this computer, on the processor, with any brain, server-hosted ones too. Without it, memories are matched by words as before.
 {{action:open-settings}}

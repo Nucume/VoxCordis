@@ -476,6 +476,18 @@ int? loopCut(
   return null;
 }
 
+/// How to offer buttons: the chat turns a ```choices block into them.
+const aboutChoices =
+    '## Offering choices\n'
+    'When you ask your human something with a few clear answers, you can '
+    'also offer them as buttons: end your message with a block like this, '
+    'one short option per line, 2 to 6 options.\n'
+    '```choices\nYes, please\nNot now\n```\n'
+    'Pressing a button sends that text as their reply, the same as typing '
+    'it, and they can always answer in their own words instead. Use it '
+    'sparingly, only when buttons truly help, and never write the options '
+    'out again in your message.';
+
 /// For a model the server won't give tools: the memory tools described in
 /// words, to be called by writing `<tool_call>` blocks in the reply.
 const aboutTextTools =

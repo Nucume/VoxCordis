@@ -137,6 +137,49 @@ class LlmClient {
         : ids;
   }
 
+  /// Checks that the server accepts [apiKey], without sending a chat or
+  /// spending tokens. Returns null when it does, else a plain-words reason.
+  Future<String?> testKey() async {
+    final provider = _provider;
+    final label = provider == LlmProvider.custom
+        ? 'The server'
+        : provider.label;
+    if (apiKey.isEmpty && provider != LlmProvider.custom) {
+      return 'Paste your ${provider.label} API key first.';
+    }
+    try {
+      // OpenRouter lists models without a key, so ask about the key itself.
+      final res = provider == LlmProvider.openRouter
+          ? await _http
+                .get(_url('/key'), headers: _headers)
+                .timeout(const Duration(seconds: 15))
+          : await _http
+                .get(
+                  provider == LlmProvider.anthropic
+                      ? _url('/models?limit=1')
+                      : _url('/models'),
+                  headers: {
+                    ..._headers,
+                    if (provider == LlmProvider.anthropic) ...{
+                      'x-api-key': apiKey,
+                      'anthropic-version': '2023-06-01',
+                    },
+                  },
+                )
+                .timeout(const Duration(seconds: 15));
+      if (res.statusCode == 200) return null;
+      if (res.statusCode == 401 || res.statusCode == 403) {
+        return '$label did not accept this API key.';
+      }
+      return '$label answered HTTP ${res.statusCode}, so the key could '
+          'not be checked.';
+    } on TimeoutException {
+      return 'Could not reach $label in time.';
+    } catch (e) {
+      return 'Could not reach $label: $e';
+    }
+  }
+
   /// Streams one completion. Emits [TextDelta]s, then at most one
   /// [ToolCallsRequested] if the model wants tools run.
   Stream<LlmEvent> chat(

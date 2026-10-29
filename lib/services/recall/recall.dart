@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:typed_data';
 
 import '../../data/memory/memory.dart';
 import '../../data/memory/memory_repository.dart';
@@ -23,6 +24,7 @@ class Recalled {
     required this.memories,
     this.moments = const [],
     required this.byMeaning,
+    this.query,
   });
 
   final List<Memory> memories;
@@ -31,6 +33,10 @@ class Recalled {
   /// Whether Recall found them by meaning, or words were matched because
   /// Recall isn't downloaded or didn't answer.
   final bool byMeaning;
+
+  /// What was said, as Recall sees it, for finding other things by
+  /// meaning ([Recall.similarity]); null without Recall.
+  final Float32List? query;
 }
 
 /// Finds memories and older chat by meaning, with the Recall embedding
@@ -67,6 +73,10 @@ class Recall {
   /// things sit around 0.3, the same thing in other words above 0.5.
   static const memoryMinScore = 0.4;
   static const momentMinScore = 0.45;
+
+  /// How alike a skill's description has to be to what was said for the
+  /// skill to be put in the prompt whole, without the model asking.
+  static const skillMinScore = 0.5;
 
   /// What is put in the prompt for [query]: the top [pinned] memories by
   /// priority, up to [related] more that fit by meaning, and up to
@@ -136,6 +146,7 @@ class Recall {
         memories: [...top, ...found],
         moments: out,
         byMeaning: true,
+        query: q,
       );
     } on Object catch (e) {
       log?.add(
@@ -149,6 +160,26 @@ class Recall {
         byMeaning: false,
       );
     }
+  }
+
+  final _vectors = <String, Float32List>{};
+
+  /// How alike each of [texts] is to [query] by meaning, like skills'
+  /// descriptions to what the human said. The texts' vectors are kept
+  /// while the app runs, as there are only a few of them.
+  Future<List<double>> similarity(Float32List query, List<String> texts) async {
+    String key(String t) => '${embedder.model}\n$t';
+    final missing = {
+      for (final t in texts)
+        if (!_vectors.containsKey(key(t))) t,
+    }.toList();
+    if (missing.isNotEmpty) {
+      final vectors = await embedder.embed(missing, query: false);
+      for (var i = 0; i < missing.length; i++) {
+        _vectors[key(missing[i])] = vectors[i];
+      }
+    }
+    return [for (final t in texts) RecallIndex.dot(query, _vectors[key(t)]!)];
   }
 
   Future<void>? _indexing;

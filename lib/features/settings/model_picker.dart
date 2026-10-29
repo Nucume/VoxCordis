@@ -58,6 +58,11 @@ class _ModelPickerState extends State<ModelPicker> {
   String? _builtInError;
   String? _serverError;
 
+  /// Outcome of "Test this key": null failure text means it passed.
+  bool _testingKey = false;
+  bool? _keyOk;
+  String? _keyMessage;
+
   AppSettings get _v => widget.value;
 
   @override
@@ -273,6 +278,26 @@ class _ModelPickerState extends State<ModelPicker> {
       status.dispose();
     }
     if (mounted) await _scanDownloaded();
+  }
+
+  Future<void> _testKey() async {
+    final provider = _provider;
+    setState(() {
+      _testingKey = true;
+      _keyOk = null;
+      _keyMessage = null;
+    });
+    final problem = await LlmClient(
+      baseUrl: _endpoint.text.trim(),
+      model: '',
+      apiKey: _apiKey.text.trim(),
+    ).testKey();
+    if (!mounted || _provider != provider) return;
+    setState(() {
+      _testingKey = false;
+      _keyOk = problem == null;
+      _keyMessage = problem ?? 'This key works.';
+    });
   }
 
   Future<void> _fetchRemoteModels() async {
@@ -568,6 +593,8 @@ class _ModelPickerState extends State<ModelPicker> {
     setState(() {
       _remoteModels = const [];
       _serverError = null;
+      _keyOk = null;
+      _keyMessage = null;
     });
     _endpoint.text = back?.endpoint ?? to.endpoint;
     _model.text = back?.model ?? to.suggestedModels.firstOrNull ?? '';
@@ -627,15 +654,38 @@ class _ModelPickerState extends State<ModelPicker> {
         custom ? 'API key (only for remote servers)' : 'API key',
         obscure: true,
       ),
-      if (!custom)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: () => launchUrl(Uri.parse(provider.keyUrl)),
-            icon: const Icon(Icons.open_in_new_rounded, size: 16),
-            label: Text('Get an API key from ${provider.label}'),
+      Wrap(
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 8,
+        children: [
+          if (!custom)
+            TextButton.icon(
+              onPressed: () => launchUrl(Uri.parse(provider.keyUrl)),
+              icon: const Icon(Icons.open_in_new_rounded, size: 16),
+              label: Text('Get an API key from ${provider.label}'),
+            ),
+          TextButton.icon(
+            onPressed: _testingKey ? null : _testKey,
+            icon: _testingKey
+                ? const SizedBox(
+                    width: 14,
+                    height: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.vpn_key_outlined, size: 16),
+            label: const Text('Test this key'),
           ),
-        ),
+          if (_keyMessage case final m?)
+            Text(
+              m,
+              style: TextStyle(
+                color: _keyOk == true
+                    ? Colors.greenAccent.shade400
+                    : Theme.of(context).colorScheme.error,
+              ),
+            ),
+        ],
+      ),
       Row(
         crossAxisAlignment: CrossAxisAlignment.end,
         children: [
