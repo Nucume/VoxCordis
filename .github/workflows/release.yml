@@ -3,6 +3,7 @@
 #   Windows  VoxCordis-<v>-windows-x64-setup.exe  (Inno Setup, not code-signed)
 #   Linux    VoxCordis-<v>-x86_64.AppImage
 #            voxcordis_<v>_amd64.deb, voxcordis-<v>-1.x86_64.rpm
+#            llama-server-cuda-<llama.cpp tag>-linux-x64.tar.gz (NVIDIA)
 #
 # A stable tag also updates the signed apt and dnf repository that GitHub
 # Pages serves under /repo/ (the repo/ folder of the gh-pages branch, see
@@ -105,6 +106,53 @@ jobs:
             dist/packages/*.deb
             dist/packages/*.rpm
 
+  # llama.cpp publishes no CUDA build for Linux, so it is built here: only
+  # llama-server, with CUDA 12.4 and its libraries linked in statically (the
+  # app's Linux installer finds it by this file name, checks its signature
+  # and uses it on NVIDIA cards instead of Vulkan). The file depends only on
+  # the llama.cpp tag, so it is built once and kept in the cache.
+  llama-cuda:
+    needs: [version]
+    if: inputs.platforms != 'windows'
+    runs-on: ubuntu-22.04
+    # nvcc and the CUDA libraries come with this image; no GPU is needed to build.
+    container: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    timeout-minutes: 90
+    env:
+      LLAMA_TAG: b11400 # keep equal to RuntimeInstaller.pinnedTag
+    steps:
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: llama-cuda
+          key: llama-server-cuda-${{ env.LLAMA_TAG }}-v1
+      - name: Build tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: apt-get update && apt-get install -y --no-install-recommends git cmake ninja-build g++ ca-certificates
+      - name: Build llama-server
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$LLAMA_TAG" https://github.com/ggml-org/llama.cpp src
+          # A plain x86-64 CPU part (AVX2) so it runs on every desktop with
+          # an NVIDIA card. Cards up to the RTX 40 series get real code; newer
+          # ones (RTX 50) get PTX, which the driver compiles on first start.
+          cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_SHARED_LIBS=OFF -DGGML_STATIC=ON -DGGML_CUDA=ON \
+            -DCMAKE_CUDA_ARCHITECTURES="61-real;70-real;75-real;80-real;86-real;89" \
+            -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON \
+            -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF
+          cmake --build build --target llama-server -j"$(nproc)"
+          mkdir -p llama-cuda/pack
+          cp build/bin/llama-server llama-cuda/pack/
+          cp src/LICENSE llama-cuda/pack/LICENSE-llama.cpp
+          tar -C llama-cuda/pack -czf "llama-cuda/llama-server-cuda-$LLAMA_TAG-linux-x64.tar.gz" .
+          rm -rf llama-cuda/pack
+          ls -la llama-cuda
+      - uses: actions/upload-artifact@v4
+        with:
+          name: llama-cuda
+          path: llama-cuda/*.tar.gz
+
   windows:
     needs: [version]
     if: inputs.platforms != 'linux'
@@ -147,7 +195,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows]
+    needs: [linux, windows, llama-cuda]
     runs-on: ubuntu-latest
     # Holds RELEASE_SIGNING_KEY; the environment limits it to v* tags and
     # asks the maintainer to approve each use.
@@ -160,7 +208,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: '{appimage,windows,packages}'
+          pattern: '{appimage,windows,packages,llama-cuda}'
           merge-multiple: true
       # The .rpm files carry a GPG signature of their own (dnf checks it);
       # the apt side signs its index instead. Done before the checksums below
