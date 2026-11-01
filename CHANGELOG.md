@@ -12,6 +12,9 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+
+## 0.3.6
+
 - **Link buttons in About.** Settings → About has a row of glass icon buttons for the VoxCordis website, GitHub, Discord, Reddit and X, each in its brand colour. The icons come from Simple Icons (CC0).
 ### New
 - **A better download bar.** Every download (models, the browser, updates) now has a thicker bar in your Colorway with a light sweep over it, the percentage under it and the time left beside that. The time appears after a few seconds, once the speed is known.

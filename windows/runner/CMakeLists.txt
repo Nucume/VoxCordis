@@ -29,6 +29,11 @@ target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MINOR=${FLUTT
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_PATCH=${FLUTTER_VERSION_PATCH}")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_BUILD=${FLUTTER_VERSION_BUILD}")
 
+# C++/WinRT (toast.cpp) falls back to the deprecated <experimental/coroutine>
+# below C++20, which Visual Studio 18 (MSVC 14.51) rejects. With C++20 it uses
+# the standard <coroutine> header instead.
+target_compile_features(${BINARY_NAME} PRIVATE cxx_std_20)
+
 # Disable Windows macros that collide with C++ standard library functions.
 target_compile_definitions(${BINARY_NAME} PRIVATE "NOMINMAX")
 
