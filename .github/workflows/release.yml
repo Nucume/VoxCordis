@@ -156,7 +156,9 @@ jobs:
   windows:
     needs: [version]
     if: inputs.platforms != 'linux'
-    runs-on: windows-latest
+    # windows-latest now ships Visual Studio 18 (MSVC 14.51), which breaks the
+    # Flutter runner build (knownfolders.h / /await errors). Stay on VS 2022.
+    runs-on: windows-2022
     timeout-minutes: 45
     env:
       VERSION: ${{ needs.version.outputs.version }}
