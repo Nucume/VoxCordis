@@ -12,6 +12,9 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+### Fixed
+- **No more video player error at startup.** When the video player can't load on Linux (libmpv missing or a different version), video portraits show their still picture and gallery clips open in your own video player, instead of an error in Logs. Logs says once why videos play outside the app.
+- **Video portraits play again on newer Linux desktops.** The video player now uses whichever libmpv your system has (libmpv.so.2 or the older libmpv.so.1), instead of only the one the release was built with.
 
 ## 0.3.6
 

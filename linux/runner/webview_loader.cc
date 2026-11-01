@@ -77,8 +77,24 @@ void desktop_webview_window_plugin_register_with_registrar(
   }
 }
 
+namespace {
+
+// The system's libmpv, in the order media_kit's Dart side looks for it, so
+// both use the same one. Loaded for everyone to see, as the video plugin is
+// built without a libmpv of its own (see linux/CMakeLists.txt).
+bool load_libmpv() {
+  for (const char* name : {"libmpv.so", "libmpv.so.2", "libmpv.so.1"}) {
+    if (dlopen(name, RTLD_NOW | RTLD_GLOBAL) != nullptr) return true;
+  }
+  g_message("Video portraits unavailable: libmpv not found");
+  return false;
+}
+
+}  // namespace
+
 void media_kit_video_plugin_register_with_registrar(
     FlPluginRegistrar* registrar) {
+  if (!load_libmpv()) return;
   load_plugin(registrar, "libmedia_kit_video_plugin.so",
               "media_kit_video_plugin_register_with_registrar",
               "Video portraits");

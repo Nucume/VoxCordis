@@ -93,6 +93,15 @@ target_include_directories(${BINARY_NAME} PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/flutter/ephemeral/.plugin_symlinks/media_kit_video/linux/include")
 target_link_libraries(${BINARY_NAME} PRIVATE ${CMAKE_DL_LIBS})
 
+# The video plugin is not tied to one libmpv version: release builds run on
+# Ubuntu 22.04 (libmpv.so.1) but newer desktops only have libmpv.so.2, and a
+# plugin that needs .so.1 won't load there. Its mpv calls are the same in
+# both, so it links without libmpv and the runner loads the system's libmpv
+# first, the same one media_kit's Dart side picks (runner/webview_loader.cc).
+get_target_property(video_libraries media_kit_video_plugin LINK_LIBRARIES)
+list(REMOVE_ITEM video_libraries PkgConfig::mpv)
+set_target_properties(media_kit_video_plugin PROPERTIES LINK_LIBRARIES "${video_libraries}")
+
 
 # === Installation ===
 # By default, "installing" just makes a relocatable bundle in the build

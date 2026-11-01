@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:path/path.dart' as p;
 
@@ -10,17 +11,55 @@ import 'package:path/path.dart' as p;
 /// characters one. Needs libmpv: bundled on Windows, the system's on Linux.
 /// Without it the still picture shows, as before.
 class AvatarVideo {
-  /// Whether libmpv was found, so a video portrait can play.
+  /// Whether libmpv and the video plugin were both found, so a video can
+  /// play inside the app.
   static bool get available => _available;
   static bool _available = false;
 
+  /// Why videos can't play here, for Settings → Logs. Null when they can.
+  static String? get unavailableReason => _reason;
+  static String? _reason;
+
+  /// The video plugin's channel. On Linux the runner loads the plugin at
+  /// startup (linux/runner/webview_loader.cc) and leaves it out when its
+  /// library won't load, e.g. when libmpv is missing or a different version.
+  @visibleForTesting
+  static const channel = MethodChannel('com.alexmercerind/media_kit_video');
+
   /// Called once at startup.
-  static void init() {
+  static Future<void> init() async {
     try {
       MediaKit.ensureInitialized();
-      _available = true;
     } catch (e) {
-      debugPrint('Video portraits unavailable: $e');
+      _reason = 'Videos play outside the app: libmpv was not found ($e).';
+      debugPrint(_reason);
+      return;
+    }
+    _available = await pluginLoaded();
+    if (!_available) {
+      _reason =
+          'Videos play outside the app: the video player plugin did not '
+          'load. On Linux, install libmpv (libmpv2 or mpv-libs).';
+      debugPrint(_reason);
+    }
+  }
+
+  /// Asks the plugin to drop a video output that never existed, which it
+  /// answers when it is there. Without it, every [VideoController] fails
+  /// with a MissingPluginException.
+  @visibleForTesting
+  static Future<bool> pluginLoaded() async {
+    try {
+      await channel
+          .invokeMethod<void>('VideoOutputManager.Dispose', {'handle': '0'})
+          .timeout(const Duration(seconds: 5));
+      return true;
+    } on MissingPluginException {
+      return false;
+    } catch (e) {
+      // It answered, just not as expected: it is there.
+      debugPrint('Video plugin check: $e');
+      return true;
     }
   }
 

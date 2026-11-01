@@ -17,8 +17,8 @@ import 'shell/window_frame.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
-  // Video portraits, when libmpv is there.
-  AvatarVideo.init();
+  // Video portraits, when libmpv and the video plugin are there.
+  await AvatarVideo.init();
   await _makeWindowTranslucent();
   final dir = await AppServices.supportDir();
   // VoxCordis' own title bar, unless the system's was chosen.
@@ -61,6 +61,8 @@ Future<void> _start(
     services.log.add(LogKind.errors, '$error', details: '$stack', error: true);
     return platformError?.call(error, stack) ?? false;
   };
+  final noVideo = AvatarVideo.unavailableReason;
+  if (noVideo != null) services.log.add(LogKind.errors, noVideo);
 
   // Never leave a llama-server or the browser running after the window
   // closes.
