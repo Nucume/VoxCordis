@@ -21,6 +21,16 @@ AppVersion={#AppVersion}
 AppVerName=VoxCordis {#AppVersion}
 AppPublisher=Nucume
 AppCopyright=Copyright (C) 2026 Nucume
+; Who and what the setup program is, shown in its file properties. An
+; installer with none of this looks anonymous to antivirus engines.
+VersionInfoCompany=Nucume
+VersionInfoDescription=VoxCordis Setup
+VersionInfoCopyright=Copyright (C) 2026 Nucume
+VersionInfoProductName=VoxCordis
+VersionInfoProductTextVersion={#AppVersion}
+AppPublisherURL=https://voxcordisai.com
+AppSupportURL=https://github.com/Nucume/VoxCordis/issues
+AppUpdatesURL=https://github.com/Nucume/VoxCordis/releases
 DefaultDirName={autopf}\VoxCordis
 DefaultGroupName=VoxCordis
 DisableProgramGroupPage=yes
@@ -32,7 +42,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 LicenseFile=..\..\LICENSE
 SetupIconFile=..\..\windows\runner\resources\app_icon.ico
-UninstallDisplayIcon={app}\companion.exe
+UninstallDisplayIcon={app}\voxcordisai.exe
 OutputDir={#OutputDir}
 OutputBaseFilename=VoxCordis-{#AppVersion}-windows-x64-setup
 Compression=lzma2/max
@@ -48,17 +58,41 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{
 [Files]
 Source: "{#SourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+; The program was called companion.exe in older versions: remove it on update.
+[InstallDelete]
+Type: files; Name: "{app}\companion.exe"
+
 [Icons]
-Name: "{autoprograms}\VoxCordis"; Filename: "{app}\companion.exe"
-Name: "{autodesktop}\VoxCordis"; Filename: "{app}\companion.exe"; Tasks: desktopicon
+Name: "{autoprograms}\VoxCordis"; Filename: "{app}\voxcordisai.exe"
+Name: "{autodesktop}\VoxCordis"; Filename: "{app}\voxcordisai.exe"; Tasks: desktopicon
 
 [Run]
-Filename: "{app}\companion.exe"; Description: "{cm:LaunchProgram,VoxCordis}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\voxcordisai.exe"; Description: "{cm:LaunchProgram,VoxCordis}"; Flags: nowait postinstall skipifsilent
 ; The in-app updater runs this setup with /SILENT /update=1: start the app again.
-Filename: "{app}\companion.exe"; Flags: nowait; Check: IsAppUpdate
+Filename: "{app}\voxcordisai.exe"; Flags: nowait; Check: IsAppUpdate
 
 [Code]
 function IsAppUpdate: Boolean;
 begin
   Result := ExpandConstant('{param:update|0}') = '1';
+end;
+
+const
+  RunKey = 'Software\Microsoft\Windows\CurrentVersion\Run';
+
+{ "Start with the computer" (written by the app) names the program, which
+  was companion.exe before it became voxcordisai.exe; this setup deletes
+  the old file, so point the entry at the new one. Otherwise VoxCordis would
+  not start at login until it had been opened once by hand. }
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Command: String;
+begin
+  if CurStep <> ssPostInstall then Exit;
+  if RegQueryStringValue(HKCU, RunKey, 'VoxCordis', Command) and
+     (Pos('\companion.exe', Command) > 0) then
+  begin
+    StringChangeEx(Command, '\companion.exe', '\voxcordisai.exe', True);
+    RegWriteStringValue(HKCU, RunKey, 'VoxCordis', Command);
+  end;
 end;

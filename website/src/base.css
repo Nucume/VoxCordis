@@ -322,3 +322,4 @@ footer nav { display: flex; gap: 20px; } footer a { text-decoration: none; } foo
 }
 @media (max-width: 460px) { .facts { grid-template-columns: 1fr; } .docked .word { display: none; } .tabs button { padding: 7px 10px; } .skill { grid-template-columns: 1fr auto; } .skill .btn { grid-row: auto; grid-column: 1; justify-self: start; } .switch { grid-column: 2; } }
 @media (prefers-reduced-motion: reduce) { :root { transition: none; } .js .intro { transition: none; } .cue svg, .dots i, .beat, .heartbox::before, .hv-pulse .pulse, .portrait .hv-pfp { animation: none; } .heart { transition: none; } .msg, .row, .skill .out, .note, .view { animation: none; } .step { transition: none; } }
+.dl p.fine { font-size: .84rem; }

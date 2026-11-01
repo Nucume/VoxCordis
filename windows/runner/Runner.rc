@@ -92,9 +92,9 @@ BEGIN
             VALUE "CompanyName", "Nucume" "\0"
             VALUE "FileDescription", "VoxCordis" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "companion" "\0"
+            VALUE "InternalName", "voxcordisai" "\0"
             VALUE "LegalCopyright", "Copyright (C) 2026 Nucume" "\0"
-            VALUE "OriginalFilename", "companion.exe" "\0"
+            VALUE "OriginalFilename", "voxcordisai.exe" "\0"
             VALUE "ProductName", "VoxCordis" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END

@@ -12,6 +12,22 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+### Changed
+- **The browser the app downloads is checked.** The headless Chrome it fetches for web pages is now one pinned version whose SHA-256 is checked before it is unpacked, like the other downloaded programs.
+- **The Windows installer says who made it.** Its file properties now name Nucume and VoxCordis, which helps antivirus programs trust it.
+
+### Fixed
+- **Chats no longer lock themselves after the app was closed mid-write.** When VoxCordis was stopped while saving (the computer shut down, it ran out of memory, a crash), the next start could show "Unlock your chats" even though the key was right there. It now opens as normal.
+- **Updating and quitting finish saving first.** The update and Quit now write the last bits and close the chat database before the app stops, instead of cutting a save off half-way (which is what tripped the lock above).
+- **The unlock screen waits for your keyring.** If VoxCordis starts at login before GNOME Keyring or KWallet is unlocked, the screen now opens by itself as soon as the key can be read, and has a Try again button.
+- **"I lost the key" keeps the old key.** Starting over no longer writes over the only copy of the old key. Chats set aside can be brought back in Settings → Privacy, added to the chats you have now.
+
+### Changed
+- **The program is now called voxcordisai.** On Windows it is `voxcordisai.exe` (it was `companion.exe`) and on Linux the binary is `voxcordisai`, so there is no doubt what it is in Task Manager or a virus scan. The app's id is now `com.nucume.voxcordis` too (your data folder on Linux is `~/.local/share/com.nucume.voxcordis/`). The first start moves everything over from the old folder, and updating removes the old program file.
+
+
+## 0.3.7
+
 ### Fixed
 - **No more video player error at startup.** When the video player can't load on Linux (libmpv missing or a different version), video portraits show their still picture and gallery clips open in your own video player, instead of an error in Logs. Logs says once why videos play outside the app.
 - **Video portraits play again on newer Linux desktops.** The video player now uses whichever libmpv your system has (libmpv.so.2 or the older libmpv.so.1), instead of only the one the release was built with.

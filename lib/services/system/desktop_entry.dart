@@ -18,7 +18,7 @@ import 'package_install.dart';
 class DesktopEntry {
   DesktopEntry._();
 
-  static const appId = 'com.nucume.companion';
+  static const appId = 'com.nucume.voxcordis';
 
   static Future<void> install() async {
     // A .deb or .rpm installs the entry and icon itself.
@@ -27,6 +27,20 @@ class DesktopEntry {
       final data =
           Platform.environment['XDG_DATA_HOME'] ??
           p.join(homeDir, '.local', 'share');
+      for (final old in [
+        p.join(data, 'applications', 'com.nucume.companion.desktop'),
+        p.join(
+          data,
+          'icons',
+          'hicolor',
+          '256x256',
+          'apps',
+          'com.nucume.companion.png',
+        ),
+      ]) {
+        final f = File(old);
+        if (await f.exists()) await f.delete();
+      }
       final icon = File(
         p.join(data, 'icons', 'hicolor', '256x256', 'apps', '$appId.png'),
       );

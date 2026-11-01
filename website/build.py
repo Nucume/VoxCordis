@@ -29,7 +29,7 @@ def chapter(id_, title, html): return f'<details class="qa ch" id="{id_}"><summa
 
 PATHS = tbl([('Companions', '<code>~/VoxCordis/&lt;Name&gt;/</code>, or wherever you chose in setup'),
              ('Models', '<code>models/</code> inside the VoxCordis folder, or a bigger drive if you move it'),
-             ('App data on Linux', '<code>~/.local/share/com.nucume.companion/</code>'),
+             ('App data on Linux', '<code>~/.local/share/com.nucume.voxcordis/</code>'),
              ('App data on Windows', '<code>%APPDATA%\\Nucume\\VoxCordis\\</code>')], ['What', 'Where'])
 
 # ---------------------------------------------------------------- Privacy: four facts, then the detail folded away
@@ -59,6 +59,7 @@ DOWNLOAD = f'''<section id="download">
       <div class="card" data-card="win" id="windows">
         <h3>Windows</h3>
         <p>Windows 10 or 11, 64-bit. The installer isn't code-signed yet, so SmartScreen may warn the first time. Choose More info, then Run anyway.</p>
+        <p class="fine">VoxCordis is currently being submitted to the <a href="https://signpath.org">SignPath Foundation</a> for free code signing of its Windows releases (code signing by <a href="https://signpath.io">SignPath.io</a>, certificate by SignPath Foundation). It isn't signed yet, but once approved, Windows releases will be.</p>
         <code class="fname" data-f="win">VoxCordis-windows-x64-setup.exe</code>
         <a class="btn primary" data-dl="win" href="{GH}/releases/latest">Download for Windows</a>
       </div>

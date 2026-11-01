@@ -159,6 +159,19 @@ class HeadlessBrowser {
     return null;
   }
 
+  /// The Chrome for Testing release this build downloads, and the SHA-256 of
+  /// each platform's headless shell zip (taken from Google's bucket).
+  static const pinnedVersion = '156.0.8078.80';
+  static const pinnedShells = {
+    'win64': '10a77466005e7f64e00f1a75fd1ea81f4a38a60093c65fea6895843b26e60a9a',
+    'linux64':
+        '547dcd374e02961bf998f6046a267644f8502225c36bb78ca307dab32a0b3eb4',
+    'mac-arm64':
+        'ea615baa2e9caf0d02d1898a6562b5f8fa9c35239707dae0f592178df5b986ac',
+    'mac-x64':
+        '535d417d9034cbd11e7dacd1a71aa3d6e1b525e6d5dcd2671eb2532f01481228',
+  };
+
   /// Downloads Chrome's headless shell from Google's Chrome for Testing
   /// bucket into the app-support folder.
   Future<String> download({DownloadProgress? onProgress}) async {
@@ -169,34 +182,18 @@ class HeadlessBrowser {
         : Platform.isMacOS
         ? (Platform.version.contains('arm64') ? 'mac-arm64' : 'mac-x64')
         : 'linux64';
-    final res = await _http.get(
-      Uri.parse(
-        'https://googlechromelabs.github.io/chrome-for-testing/'
-        'last-known-good-versions-with-downloads.json',
-      ),
+    final sha = pinnedShells[platform];
+    if (sha == null) throw 'No headless browser for $platform.';
+    final uri = Uri.parse(
+      'https://storage.googleapis.com/chrome-for-testing-public/'
+      '$pinnedVersion/$platform/chrome-headless-shell-$platform.zip',
     );
-    if (res.statusCode != 200) {
-      throw 'Could not reach Google to get the browser '
-          '(HTTP ${res.statusCode}).';
-    }
-    final stable = ((jsonDecode(res.body) as Map)['channels'] as Map)['Stable'];
-    final shells =
-        ((stable as Map)['downloads'] as Map)['chrome-headless-shell'] as List;
-    final url = [
-      for (final d in shells.cast<Map>())
-        if (d['platform'] == platform) d['url'] as String,
-    ].firstOrNull;
-    final uri = url == null ? null : Uri.parse(url);
-    // Only ever Google's own bucket.
-    if (uri == null ||
-        uri.scheme != 'https' ||
-        uri.host != 'storage.googleapis.com' ||
-        !uri.path.startsWith('/chrome-for-testing-public/')) {
-      throw 'No headless browser for $platform.';
-    }
     final dir = _downloadDir;
     final zip = File(p.join(dir.parent.path, 'headless-shell.zip'));
     await downloadFile(_http, uri, zip, onProgress: onProgress);
+    // The browser runs with the human's rights: only the exact file pinned
+    // here, never whatever the bucket serves later.
+    await verifySha256(zip, sha);
     final staging = Directory('${dir.path}.partial');
     if (await staging.exists()) await staging.delete(recursive: true);
     await extractFileToDisk(zip.path, staging.path);

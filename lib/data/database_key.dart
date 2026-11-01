@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -28,6 +29,10 @@ class DatabaseKey {
   /// Holds the new key while [change] re-encrypts, so an interrupted change
   /// is finished at the next start instead of locking anything out.
   static const nextName = 'database-key-next';
+
+  /// The keys in use before each start over ([setAside]), as a JSON list,
+  /// so chats set aside then can still be brought back ([LockedChats]).
+  static const earlierName = 'database-key-earlier';
 
   /// Own passwords shorter than this are refused.
   static const minPasswordLength = 8;
@@ -116,16 +121,46 @@ class DatabaseKey {
       for (final f in databases())
         if (!isPlain(f)) f,
     ];
-    if (key == null) {
-      if (locked.isNotEmpty) return false;
+    if (locked.isEmpty && key == null) {
       key = generate();
       await markUnsaved();
       await secrets.write(secretName, key);
-    } else if (!locked.every((f) => opens(f, key!))) {
-      return false;
+    } else if (key == null || !locked.every((f) => opens(f, key!))) {
+      // The keyring and the file can each hold a copy (one was written
+      // while the keyring was locked), and keys from before a start over
+      // are kept: whichever opens everything is the key.
+      final fits = [
+        for (final k in await _knownKeys())
+          if (k != key && locked.every((f) => opens(f, k))) k,
+      ];
+      if (fits.isEmpty) return false;
+      key = fits.first;
+      await secrets.write(secretName, key);
     }
     _use(key);
     return true;
+  }
+
+  /// Every key this computer still has: the stored one wherever a copy
+  /// is (keyring and file), one a change was moving to, and those kept
+  /// when the human started over without the key ([setAside]).
+  Future<List<String>> _knownKeys() async => {
+    ...await secrets.readAll(secretName),
+    ...await secrets.readAll(nextName),
+    ...await _earlierKeys(),
+  }.toList();
+
+  Future<List<String>> _earlierKeys() async {
+    final saved = await secrets.read(earlierName);
+    if (saved == null) return const [];
+    try {
+      return [
+        for (final k in jsonDecode(saved) as List)
+          if (k is String && k.isNotEmpty) k,
+      ];
+    } on FormatException {
+      return const [];
+    }
   }
 
   /// Takes [password] (the key from Settings, or the human's own password)
@@ -181,7 +216,7 @@ class DatabaseKey {
         .toIso8601String()
         .replaceAll(RegExp(r'[:.]'), '-')
         .substring(0, 19);
-    final to = Directory(p.join(supportDir.path, 'locked-$stamp'));
+    final to = Directory(p.join(supportDir.path, '$lockedPrefix$stamp'));
     for (final f in databases()) {
       if (isPlain(f)) continue;
       final rel = p.relative(f.path, from: supportDir.path);
@@ -192,6 +227,13 @@ class DatabaseKey {
         if (await s.exists()) await s.rename('${target.path}$side');
       }
     }
+    // Whatever key was there may be the right one after all (a locked
+    // keyring, a database left half-written): keep it for bringing the
+    // chats back, rather than writing over its only copy.
+    final keep = await _knownKeys();
+    if (keep.isNotEmpty) {
+      await secrets.write(earlierName, jsonEncode(keep));
+    }
     await secrets.delete(nextName);
     await markUnsaved();
     final key = generate();
@@ -200,18 +242,96 @@ class DatabaseKey {
     return to;
   }
 
+  /// The folders [setAside] moved chats into, oldest first.
+  List<Directory> lockedFolders() {
+    if (!supportDir.existsSync()) return const [];
+    return supportDir
+        .listSync()
+        .whereType<Directory>()
+        .where((d) => p.basename(d.path).startsWith(lockedPrefix))
+        .toList()
+      ..sort((a, b) => a.path.compareTo(b.path));
+  }
+
+  static const lockedPrefix = 'locked-';
+
+  /// The databases in a folder [setAside] made.
+  static List<File> databasesIn(Directory folder) => [
+    for (final e in folder.listSync(recursive: true))
+      if (e is File && e.path.endsWith('.db')) e,
+  ];
+
+  /// A key this computer kept that opens every database in [folder], or
+  /// null when only the human's copy can.
+  Future<String?> keptKeyFor(Directory folder) async {
+    final dbs = databasesIn(folder);
+    if (dbs.isEmpty) return null;
+    for (final k in {if (_value != null) _value!, ...await _knownKeys()}) {
+      if (dbs.every((f) => opens(f, k))) return k;
+    }
+    return null;
+  }
+
   /// Whether [key] opens the encrypted database [f].
+  ///
+  /// A database the app was writing when it was killed (shut down, out of
+  /// memory, power cut) has a "hot" journal that has to be rolled back
+  /// before it can be read, which a read-only look can't do: SQLite then
+  /// says "readonly", not "wrong key". Another program writing to it says
+  /// "busy". Neither means the key is wrong, so those are checked on a copy
+  /// (rolling back with a wrong key would scramble the real file).
   static bool opens(File f, String key) {
+    final r = _look(f.path, key, readOnly: true);
+    if (r == true) return true;
+    if (r == false && !_hasSideFiles(f.path)) return false;
+    return _opensCopy(f, key);
+  }
+
+  static const _notADatabase = 26; // SQLITE_NOTADB: what a wrong key gives
+
+  /// True when [key] opens [path], false when it is the wrong key, null
+  /// when SQLite can't tell (half-written, busy, unreadable).
+  static bool? _look(String path, String key, {required bool readOnly}) {
     raw.Database? db;
     try {
-      db = raw.sqlite3.open(f.path, mode: raw.OpenMode.readOnly);
+      db = raw.sqlite3.open(
+        path,
+        mode: readOnly ? raw.OpenMode.readOnly : raw.OpenMode.readWrite,
+      );
       db.execute('PRAGMA key = ${quote(key)}');
+      db.execute('PRAGMA busy_timeout = 3000');
       db.select('SELECT count(*) FROM sqlite_master');
       return true;
-    } on raw.SqliteException {
-      return false;
+    } on raw.SqliteException catch (e) {
+      return e.resultCode == _notADatabase ? false : null;
     } finally {
       db?.close();
+    }
+  }
+
+  static bool _hasSideFiles(String path) =>
+      ['-journal', '-wal'].any((side) => File('$path$side').existsSync());
+
+  /// [opens] on a copy of [f] with its journal, which may be rolled back.
+  static bool _opensCopy(File f, String key) {
+    Directory? tmp;
+    try {
+      tmp = Directory.systemTemp.createTempSync('voxcordis-key-check');
+      final copy = p.join(tmp.path, 'check.db');
+      f.copySync(copy);
+      for (final side in ['-journal', '-wal']) {
+        final s = File('${f.path}$side');
+        if (s.existsSync()) s.copySync('$copy$side');
+      }
+      return _look(copy, key, readOnly: false) ?? false;
+    } on FileSystemException {
+      return false;
+    } finally {
+      try {
+        tmp?.deleteSync(recursive: true);
+      } on FileSystemException {
+        // A temporary folder: the system clears it.
+      }
     }
   }
 

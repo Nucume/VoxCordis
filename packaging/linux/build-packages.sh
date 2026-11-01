@@ -35,11 +35,15 @@ mkdir -p "$tree/usr/lib/voxcordis" "$tree/usr/bin" \
   "$tree/usr/share/applications" "$tree/usr/share/metainfo" \
   "$tree/usr/share/icons/hicolor/256x256/apps"
 cp -a "$bundle/." "$tree/usr/lib/voxcordis/"
-cp "$here/com.nucume.companion.desktop" "$tree/usr/share/applications/"
-cp "$here/com.nucume.companion.metainfo.xml" "$tree/usr/share/metainfo/"
+cp "$here/com.nucume.voxcordis.desktop" "$tree/usr/share/applications/"
+cp "$here/com.nucume.voxcordis.metainfo.xml" "$tree/usr/share/metainfo/"
 cp "$icons/app_icon_256.png" \
-  "$tree/usr/share/icons/hicolor/256x256/apps/com.nucume.companion.png"
-ln -s ../lib/voxcordis/companion "$tree/usr/bin/voxcordis"
+  "$tree/usr/share/icons/hicolor/256x256/apps/com.nucume.voxcordis.png"
+ln -s ../lib/voxcordis/voxcordisai "$tree/usr/bin/voxcordis"
+# The program was called companion before the rename, and a "Start with the
+# computer" entry written by an older version still starts that path until
+# the app runs once and rewrites it.
+ln -s voxcordisai "$tree/usr/lib/voxcordis/companion"
 chmod -R u+rwX,go+rX,go-w "$tree"
 size_kb=$(du -sk "$tree" | cut -f1)
 
@@ -114,9 +118,9 @@ cp -a $rpmroot/. %{buildroot}/
 %files
 /usr/bin/voxcordis
 /usr/lib/voxcordis
-/usr/share/applications/com.nucume.companion.desktop
-/usr/share/metainfo/com.nucume.companion.metainfo.xml
-/usr/share/icons/hicolor/256x256/apps/com.nucume.companion.png
+/usr/share/applications/com.nucume.voxcordis.desktop
+/usr/share/metainfo/com.nucume.voxcordis.metainfo.xml
+/usr/share/icons/hicolor/256x256/apps/com.nucume.voxcordis.png
 %license /usr/share/licenses/voxcordis/LICENSE
 EOF
 rpmbuild -bb --quiet --define "_topdir $rpmtop" --target x86_64 \

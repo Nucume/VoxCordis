@@ -146,7 +146,7 @@ class _UpdateDialog extends StatelessWidget {
                     ? null
                     : () => updater.install(
                         info,
-                        beforeExit: services.runtime.stopAll,
+                        beforeExit: services.closeForExit,
                       ),
                 icon: const Icon(Icons.download_rounded),
                 label: const Text('Update and restart'),

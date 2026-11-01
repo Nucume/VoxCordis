@@ -11,7 +11,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // One VoxCordis at a time: a second launch brings the running window
   // forward (out of the tray or the taskbar too) and quits.
   HANDLE single_instance =
-      ::CreateMutexW(nullptr, TRUE, L"Local\\com.nucume.companion.single");
+      ::CreateMutexW(nullptr, TRUE, L"Local\\com.nucume.voxcordis.single");
   if (single_instance != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
     HWND existing = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"VoxCordis");
     if (existing != nullptr) {
@@ -24,7 +24,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   }
 
   // The name Windows shows on notifications and groups the taskbar by.
-  ::SetCurrentProcessExplicitAppUserModelID(L"com.nucume.companion");
+  ::SetCurrentProcessExplicitAppUserModelID(L"com.nucume.voxcordis");
 
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.

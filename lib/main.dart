@@ -41,8 +41,7 @@ Future<void> _start(
   final services = await AppServices.open(dir, key);
   Future<void> beforeQuit() async {
     await services.webTools.close();
-    await services.runtime.stopAll();
-    await services.log.flush();
+    await services.closeForExit();
   }
 
   // Errors nothing else caught go to Settings → Logs as well.

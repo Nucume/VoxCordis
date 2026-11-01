@@ -6,6 +6,7 @@ import '../../data/database_key.dart';
 import '../../services/secret_store.dart';
 import '../../theme/app_theme.dart';
 import 'keep_key_dialog.dart';
+import 'locked_chats_section.dart';
 
 /// Settings → Privacy: the key the chats and memories are encrypted with.
 /// Show and copy it (needed on a new computer), swap it for a new random
@@ -218,6 +219,7 @@ class _EncryptionSettingsState extends State<EncryptionSettings> {
           'so you and $name can open those files directly.',
           style: muted,
         ),
+        const LockedChatsSection(),
       ],
     );
   }

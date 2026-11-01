@@ -42,6 +42,15 @@ The AppImage and the Windows installer update themselves in one click (the
 checksum GitHub lists and against the VoxCordis release signature before it
 is installed.
 
+### Code signing
+
+VoxCordis is currently being submitted to the
+[SignPath Foundation](https://signpath.org) for free code signing of its
+Windows releases (code signing by [SignPath.io](https://signpath.io),
+certificate by SignPath Foundation). It isn't signed yet, but once approved,
+Windows releases will be. Until then the installer is unsigned, so SmartScreen
+may warn the first time.
+
 ## What it does
 
 | | |
@@ -148,7 +157,7 @@ signed.
   per companion and `models/` for downloads. Settings can move the models
   folder, e.g. to a bigger drive.
 - **App data** (settings, chats, memories, the llama.cpp runtime):
-  `~/.local/share/com.nucume.companion/` on Linux,
+  `~/.local/share/com.nucume.voxcordis/` on Linux,
   `%APPDATA%\Nucume\VoxCordis\` on Windows.
 
 ## Code layout

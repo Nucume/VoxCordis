@@ -85,7 +85,7 @@ shows the apt or dnf command instead of downloading anything.
    workflow's `changelog` job files them under `## <version>` on main (notes
    merged after the tag stay under Unreleased). Renaming it yourself before
    tagging works too.
-3. Add a `<release>` line to `packaging/linux/com.nucume.companion.metainfo.xml`.
+3. Add a `<release>` line to `packaging/linux/com.nucume.voxcordis.metainfo.xml`.
 4. Tag and push:
 
    ```sh
@@ -214,7 +214,7 @@ cloud option; switching to it means replacing the `signtool` steps with
 The `.flatpak` file installs anywhere, but showing up in GNOME Software and
 KDE Discover needs a Flathub listing. Flathub requires:
 
-- an app id on a domain or code host you can prove you own. `com.nucume.companion`
+- an app id on a domain or code host you can prove you own. `com.nucume.voxcordis`
   would need `nucume.com`; `io.github.nucume.VoxCordis` works with the GitHub
   account. Changing the id touches `linux/CMakeLists.txt`, the macOS bundle
   id and these packaging files.

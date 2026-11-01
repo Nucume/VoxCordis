@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/widgets.dart';
@@ -8,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
 import 'data/database.dart';
 import 'data/database_key.dart';
+import 'data/locked_chats.dart';
 import 'data/desk/desk_tools.dart';
 import 'data/memory/memory_repository.dart';
 import 'data/memory/memory_tools.dart';
@@ -109,6 +111,40 @@ class AppServices {
       settings.value.companionId,
     ),
   );
+
+  /// Before the app quits (an update, Quit from the tray): the last log
+  /// lines are written and the database closed, so no write is cut off
+  /// half-way. A cut-off write leaves a journal that has to be rolled back
+  /// at the next start.
+  Future<void> closeForExit() async {
+    await runtime.stopAll();
+    await log.flush();
+    try {
+      await db.close();
+    } on Object {
+      // Already closed, or busy: the journal covers it.
+    }
+  }
+
+  /// Adds the chats a start over set aside in [folder] (see
+  /// [DatabaseKey.setAside]) back to the companions' chats, with [oldKey]
+  /// their key. Returns how many messages came back.
+  Future<int> bringBackLocked(Directory folder, String oldKey) async {
+    final n = await LockedChats(dbKey).bringBack(
+      folder,
+      oldKey,
+      open: db,
+      openPath: companionDbPath(
+        runtime.supportDir.path,
+        settings.value.companionId,
+      ),
+    );
+    memoryChanged();
+    scheduleChanged();
+    recall.update().ignore();
+    resets.value++;
+    return n;
+  }
 
   /// `companion.db` for the first companion, `companions/<id>.db` for every
   /// one added after it.
@@ -460,7 +496,7 @@ class AppServices {
   /// Windows. Downloaded models live in the VoxCordis folder instead.
   static Future<Directory> supportDir() async {
     final Directory dir = await getApplicationSupportDirectory();
-    if (Platform.isWindows) await _adoptOldWindowsFolder(dir);
+    await _adoptOldFolders(dir);
     await dir.create(recursive: true);
     // Chats, memories, settings and logs: for this user's eyes only, as are
     // the companions' folders (personality, lessons, privacy rules).
@@ -508,14 +544,34 @@ class AppServices {
     ).ignore();
   }
 
-  /// Windows names this folder after the company and product in the exe.
-  /// Early builds said "com.nucume" and "companion"; bring that folder's
-  /// settings, chats and downloads over once.
-  static Future<void> _adoptOldWindowsFolder(Directory dir) async {
-    final old = Directory(
-      p.join(dir.parent.parent.path, 'com.nucume', 'companion'),
-    );
-    if (!await old.exists()) return;
+  /// Older builds kept their data elsewhere; bring it over once, if this
+  /// folder has no settings yet:
+  /// - Windows named it after the company and product in the exe, and early
+  ///   builds said "com.nucume" and "companion".
+  /// - Linux and macOS name it after the app id, which was
+  ///   `com.nucume.companion` until the program became voxcordisai.
+  static Future<void> _adoptOldFolders(Directory dir) => adoptOldFolder(
+    dir,
+    oldFolderFor(dir, windows: Platform.isWindows),
+    removeEmptyParent: Platform.isWindows,
+  );
+
+  /// Where older builds kept what now belongs in [dir].
+  @visibleForTesting
+  static Directory oldFolderFor(Directory dir, {required bool windows}) =>
+      windows
+      ? Directory(p.join(dir.parent.parent.path, 'com.nucume', 'companion'))
+      : Directory(p.join(dir.parent.path, 'com.nucume.companion'));
+
+  /// Moves what is in [old] into [dir] unless [dir] already has settings,
+  /// then points the paths in settings.json that named [old] at [dir].
+  @visibleForTesting
+  static Future<void> adoptOldFolder(
+    Directory dir,
+    Directory old, {
+    bool removeEmptyParent = false,
+  }) async {
+    if (p.equals(old.path, dir.path) || !await old.exists()) return;
     if (await File(p.join(dir.path, 'settings.json')).exists()) return;
     await dir.create(recursive: true);
     await for (final e in old.list()) {
@@ -530,7 +586,25 @@ class AppServices {
         // In use or locked: leave it.
       }
     }
-    for (final d in [old, old.parent]) {
+    final settings = File(p.join(dir.path, 'settings.json'));
+    try {
+      if (await settings.exists()) {
+        // As written in JSON too, where Windows' backslashes are doubled.
+        String json(String path) {
+          final quoted = jsonEncode(path);
+          return quoted.substring(1, quoted.length - 1);
+        }
+
+        final text = await settings.readAsString();
+        final fixed = text
+            .replaceAll(json(old.path), json(dir.path))
+            .replaceAll(old.path, dir.path);
+        if (fixed != text) await settings.writeAsString(fixed);
+      }
+    } on FileSystemException {
+      // Leave the paths as they are.
+    }
+    for (final d in [old, if (removeEmptyParent) old.parent]) {
       try {
         await d.delete(); // only if it is empty now
       } on FileSystemException {

@@ -15,17 +15,17 @@ appdir="$work/VoxCordis.AppDir"
 mkdir -p "$appdir/usr/lib/voxcordis" "$appdir/usr/share/applications" \
   "$appdir/usr/share/metainfo" "$appdir/usr/share/icons/hicolor/256x256/apps"
 cp -a "$bundle/." "$appdir/usr/lib/voxcordis/"
-cp "$here/com.nucume.companion.desktop" "$appdir/usr/share/applications/"
-cp "$here/com.nucume.companion.desktop" "$appdir/"
-cp "$here/com.nucume.companion.metainfo.xml" "$appdir/usr/share/metainfo/com.nucume.companion.appdata.xml"
-cp "$icons/app_icon_256.png" "$appdir/usr/share/icons/hicolor/256x256/apps/com.nucume.companion.png"
-cp "$icons/app_icon_256.png" "$appdir/com.nucume.companion.png"
+cp "$here/com.nucume.voxcordis.desktop" "$appdir/usr/share/applications/"
+cp "$here/com.nucume.voxcordis.desktop" "$appdir/"
+cp "$here/com.nucume.voxcordis.metainfo.xml" "$appdir/usr/share/metainfo/com.nucume.voxcordis.appdata.xml"
+cp "$icons/app_icon_256.png" "$appdir/usr/share/icons/hicolor/256x256/apps/com.nucume.voxcordis.png"
+cp "$icons/app_icon_256.png" "$appdir/com.nucume.voxcordis.png"
 cp "$icons/app_icon_256.png" "$appdir/.DirIcon"
 
 cat > "$appdir/AppRun" <<'RUN'
 #!/bin/sh
 here=$(dirname "$(readlink -f "$0")")
-exec "$here/usr/lib/voxcordis/companion" "$@"
+exec "$here/usr/lib/voxcordis/voxcordisai" "$@"
 RUN
 chmod +x "$appdir/AppRun"
 

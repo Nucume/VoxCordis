@@ -47,6 +47,38 @@ class SecretStore {
     return await plain.exists() ? await plain.readAsString() : null;
   }
 
+  /// Every copy of [name] there is: the keyring's (or the sealed one) and
+  /// the private file's. They differ when one was written while the
+  /// keyring was locked or not running yet, and [read] only gives the
+  /// first.
+  Future<List<String>> readAll(String name) async {
+    final found = <String>{};
+    final b = _backend;
+    try {
+      if (b is _Dpapi) {
+        final sealed = _sealed(name);
+        if (await sealed.exists()) {
+          found.add(b.unseal(await sealed.readAsBytes()));
+        }
+      } else if (b is _Libsecret) {
+        final v = await b.read(name);
+        if (v != null) found.add(v);
+      }
+    } on Object {
+      // Locked keyring, or sealed by another account.
+    }
+    final plain = _plain(name);
+    try {
+      if (await plain.exists()) found.add(await plain.readAsString());
+    } on FileSystemException {
+      // Unreadable: nothing there for us.
+    }
+    return [
+      for (final v in found)
+        if (v.isNotEmpty) v,
+    ];
+  }
+
   /// Saves [value], or forgets the secret when it is empty.
   Future<void> write(String name, String value) async {
     if (value.isEmpty) return delete(name);

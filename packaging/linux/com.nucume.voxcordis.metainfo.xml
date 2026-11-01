@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!-- Copyright (C) 2026 Nucume -->
 <component type="desktop-application">
-  <id>com.nucume.companion</id>
+  <id>com.nucume.voxcordis</id>
   <name>VoxCordis</name>
   <summary>A local AI companion for the desktop</summary>
   <developer id="com.nucume">
@@ -18,7 +18,7 @@
   </description>
   <url type="homepage">https://github.com/Nucume/VoxCordis</url>
   <url type="bugtracker">https://github.com/Nucume/VoxCordis/issues</url>
-  <launchable type="desktop-id">com.nucume.companion.desktop</launchable>
+  <launchable type="desktop-id">com.nucume.voxcordis.desktop</launchable>
   <content_rating type="oars-1.1"/>
   <releases>
     <release version="0.2.0" date="2026-10-25"/>

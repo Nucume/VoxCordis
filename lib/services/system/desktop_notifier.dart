@@ -108,7 +108,7 @@ class DesktopNotifier {
   /// The app identity Windows files toasts under; the runner registers its
   /// name and icon (windows/runner/toast.cpp) and the process sets the same
   /// one (windows/runner/main.cpp).
-  static const windowsAppId = 'com.nucume.companion';
+  static const windowsAppId = 'com.nucume.voxcordis';
 
   /// A toast through the runner's own Windows code: no other program runs,
   /// and the words never pass through a script.

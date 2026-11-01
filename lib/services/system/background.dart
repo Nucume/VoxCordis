@@ -176,13 +176,14 @@ class Background with WindowListener {
   static String get _linuxAutostart => p.join(
     Platform.environment['XDG_CONFIG_HOME'] ?? p.join(homeDir, '.config'),
     'autostart',
-    'com.nucume.companion.desktop',
+    'com.nucume.voxcordis.desktop',
   );
 
   /// Adds or removes VoxCordis from what starts when the human logs in, with
   /// the window put away ([StartMode.minimized]) or showing.
   Future<void> syncLoginItem(StartMode mode) async {
     _loginItem = mode;
+    if (Platform.isLinux) await _dropOldAutostart();
     final on = mode != StartMode.off;
     final hidden = mode == StartMode.minimized;
     if (Platform.isLinux) {
@@ -206,6 +207,22 @@ class Background with WindowListener {
     }
   }
 
+  /// Before the program became voxcordisai the entry was named after the
+  /// old app id; the new one replaces it.
+  Future<void> _dropOldAutostart() async {
+    try {
+      final old = File(
+        p.join(
+          File(_linuxAutostart).parent.path,
+          'com.nucume.companion.desktop',
+        ),
+      );
+      if (await old.exists()) await old.delete();
+    } on FileSystemException {
+      // Leave it.
+    }
+  }
+
   /// [command] quoted for a .desktop file's Exec line, as the spec asks.
   static String quoteExec(String command) =>
       '"${command.replaceAll(r'\', r'\\\\').replaceAll('"', r'\"').replaceAll(r'$', r'\$').replaceAll('`', r'\`')}"';
@@ -218,7 +235,7 @@ class Background with WindowListener {
         'Name=VoxCordis\n'
         'Comment=Keeps your companion\'s reminders running\n'
         'Exec=$quoted${hidden ? ' $startHiddenArg' : ''}\n'
-        'Icon=com.nucume.companion\n'
+        'Icon=com.nucume.voxcordis\n'
         'X-GNOME-Autostart-enabled=true\n'
         'Terminal=false\n';
   }
