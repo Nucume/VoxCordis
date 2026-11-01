@@ -9,6 +9,7 @@ import 'package:path/path.dart' as p;
 
 import '../runtime/download.dart';
 import 'image_catalog.dart';
+import '../system/posix_native.dart';
 
 /// Gets stable-diffusion.cpp's `sd-cli` onto the machine, the way
 /// [RuntimeInstaller] gets llama-server: once, from a pinned release whose
@@ -125,7 +126,7 @@ class SdInstaller {
     if (exe == null) throw SdException('$exeName missing from the download.');
     if (!Platform.isWindows) {
       // Zip files don't keep the executable bit.
-      await Process.run('chmod', ['+x', exe]);
+      PosixNative.makeExecutable(exe);
     }
     return exe;
   }
@@ -178,8 +179,136 @@ class DrawRequest {
   final double? cfg;
 }
 
+/// A picture to bring to life: the video model reads [image] as the first
+/// frame and [prompt] as what happens next.
+class AnimateRequest extends DrawRequest {
+  AnimateRequest({
+    required VideoModel super.model,
+    required super.prompt,
+    required this.image,
+    this.frames = 49,
+    super.negative,
+    super.shape,
+    super.seed,
+    super.steps,
+    super.cfg,
+  });
+
+  final File image;
+
+  /// Frames in the clip; Wan needs 4n + 1.
+  final int frames;
+
+  VideoModel get video => model as VideoModel;
+}
+
 /// Runs sd-cli for one picture.
 class SdRun {
+  /// The arguments for turning a picture into a clip, written to [out].
+  static List<String> videoArgs(
+    AnimateRequest r, {
+    required Directory modelsDir,
+    required File out,
+    required int seed,
+  }) {
+    final m = r.video;
+    final size = m.sizeFor(r.shape);
+    final negative = [
+      cleanPrompt(r.negative),
+      m.negative,
+    ].where((t) => t.trim().isNotEmpty).join(', ');
+    return [
+      '-M', 'vid_gen',
+      for (final f in m.files)
+        if (f.role != ImageFileRole.upscaler) ...[
+          f.role.flag,
+          ImageCatalog.fileIn(modelsDir, f).path,
+        ],
+      '-i', r.image.path,
+      '-p', cleanPrompt(r.prompt, max: 8000),
+      if (negative.isNotEmpty) ...['-n', negative],
+      '--cfg-scale', '${r.cfg ?? m.cfg}',
+      if (m.sigmas != null) ...[
+        '--sigmas',
+        m.sigmas!,
+      ] else ...[
+        '--steps',
+        '${r.steps ?? m.steps}',
+      ],
+      '--sampling-method', m.sampler,
+      if (m.flowShift != null) ...['--flow-shift', '${m.flowShift}'],
+      // LTX makes the clip small, enlarges it x2 and refines it.
+      ..._upscaleArgs(m, modelsDir),
+      // The 14B models have a second expert for the first steps.
+      if (m.highNoiseSteps != null) ...[
+        '--high-noise-cfg-scale',
+        '${r.cfg ?? m.cfg}',
+        '--high-noise-sampling-method',
+        m.sampler,
+        '--high-noise-steps',
+        '${m.highNoiseSteps}',
+      ],
+      '-W', '${size.width}',
+      '-H', '${size.height}',
+      '--video-frames', '${r.frames}',
+      '--fps', '${m.fps}',
+      '-s', '$seed',
+      // Flash attention is needed on Vulkan to avoid scrambled output, and
+      // the weights wait in the computer's memory. VAE tiling is left out:
+      // for Wan it is ignored or corrupts the picture the clip starts from.
+      '--diffusion-fa',
+      '--offload-to-cpu',
+      ...m.extraArgs,
+      '-o', out.path,
+    ];
+  }
+
+  static List<String> _upscaleArgs(VideoModel m, Directory modelsDir) {
+    final up = m.files.where((f) => f.role == ImageFileRole.upscaler);
+    if (up.isEmpty) return const [];
+    return [
+      '--hires-upscalers-dir',
+      modelsDir.path,
+      '--hires-upscaler',
+      p.basenameWithoutExtension(up.first.fileName),
+      '--hires',
+      if (m.hiresSigmas != null) ...['--hires-sigmas', m.hiresSigmas!],
+    ];
+  }
+
+  /// Squeezes [source] into [out] with `sd-cli -M convert`, as [type]
+  /// ("q8_0").
+  static Future<void> convert(
+    String exe, {
+    required File source,
+    required File out,
+    required String type,
+  }) async {
+    final dir = File(exe).parent.path;
+    final tmp = File('${out.path}.part');
+    final res = await Process.run(
+      exe,
+      ['-M', 'convert', '-m', source.path, '--type', type, '-o', tmp.path],
+      workingDirectory: dir,
+      environment: {
+        if (Platform.isLinux)
+          'LD_LIBRARY_PATH': [
+            dir,
+            ?Platform.environment['LD_LIBRARY_PATH'],
+          ].join(':'),
+        if (Platform.isMacOS) 'DYLD_LIBRARY_PATH': dir,
+      },
+    );
+    if (res.exitCode != 0 || !await tmp.exists()) {
+      if (await tmp.exists()) await tmp.delete();
+      throw SdException(
+        'Squeezing the text encoder failed (it needs about 30 GB of free '
+        'memory). ${'${res.stderr}'.trim().split('\n').last}',
+      );
+    }
+    await tmp.rename(out.path);
+  }
+
   /// The arguments for [r], with models in [modelsDir] and LoRAs in
   /// [lorasDir], written to [out].
   static List<String> args(
@@ -228,14 +357,15 @@ class SdRun {
   }
 
   /// [text] without tags in angle brackets (LoRAs, embeddings) and
-  /// without line breaks, at most 2000 characters.
-  static String cleanPrompt(String text) {
+  /// without line breaks, at most [max] characters (2000 for pictures; clips
+  /// pass more, since video models like long prompts).
+  static String cleanPrompt(String text, {int max = 2000}) {
     final t = text
         .replaceAll(RegExp(r'<[^>]*>'), ' ')
         .replaceAll(RegExp(r'[<>]'), ' ')
         .replaceAll(RegExp(r'\s+'), ' ')
         .trim();
-    return t.length > 2000 ? t.substring(0, 2000) : t;
+    return t.length > max ? t.substring(0, max) : t;
   }
 
   static final _progress = RegExp(r'(\d+)/(\d+) - [\d.]+(s/it|it/s)');
@@ -262,13 +392,25 @@ class SdRun {
     required int seed,
     void Function(double fraction)? onProgress,
     Future<void>? cancel,
-    Duration timeout = const Duration(minutes: 30),
+    Duration? timeout,
+    void Function(String line)? onLine,
   }) async {
     await out.parent.create(recursive: true);
     final dir = File(exe).parent.path;
+    final clip = r is AnimateRequest;
+    timeout ??= Duration(minutes: clip ? 120 : 30);
+    final argv = r is AnimateRequest
+        ? videoArgs(r, modelsDir: modelsDir, out: out, seed: seed)
+        : args(
+            r,
+            modelsDir: modelsDir,
+            lorasDir: lorasDir,
+            out: out,
+            seed: seed,
+          );
     final process = await Process.start(
       exe,
-      args(r, modelsDir: modelsDir, lorasDir: lorasDir, out: out, seed: seed),
+      argv,
       workingDirectory: dir,
       environment: {
         // The libraries come in the same folder as sd-cli.
@@ -281,8 +423,10 @@ class SdRun {
       },
     );
     final log = Queue<String>();
+    onLine?.call('$exe ${argv.join(' ')}');
     void keep(String line) {
       if (line.trim().isEmpty) return;
+      onLine?.call(line);
       log.addLast(line);
       while (log.length > 30) {
         log.removeFirst();
@@ -317,7 +461,9 @@ class SdRun {
       code = await process.exitCode.timeout(timeout);
     } on TimeoutException {
       process.kill(ProcessSignal.sigkill);
-      throw SdException('Drawing took too long and was stopped.');
+      throw SdException(
+        '${clip ? 'The clip' : 'Drawing'} took too long and was stopped.',
+      );
     } finally {
       await outLines.cancel();
       await errLines.cancel();
@@ -332,7 +478,7 @@ class SdRun {
         orElse: () => log.isEmpty ? '' : log.last,
       );
       throw SdException(
-        'The picture couldn\'t be drawn${hint.isEmpty ? '' : ' (${hint.trim()})'}.',
+        'The ${clip ? 'clip' : 'picture'} couldn\'t be ${clip ? 'made' : 'drawn'}${hint.isEmpty ? '' : ' (${hint.trim()})'}.',
         output: log.join('\n'),
       );
     }

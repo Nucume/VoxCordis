@@ -69,6 +69,28 @@ void main() {
     expect(asked, isEmpty);
   });
 
+  test(
+    'allow everything runs without asking, but not with access off',
+    () async {
+      settings = settings.copyWith(allowEverything: true);
+      final cmd = Platform.isWindows ? 'Get-Location' : 'pwd';
+      final r = await run('run_command', {'command': cmd, 'why': 'test'});
+      expect(r['ok'], true);
+      expect(asked, isEmpty);
+      settings = settings.copyWith(systemAccess: false);
+      final off = await run('run_command', {'command': cmd, 'why': 'test'});
+      expect(off['error'], contains('off'));
+    },
+  );
+
+  test('allow everything is off by default and survives a round trip', () {
+    expect(const AppSettings().allowEverything, false);
+    final back = AppSettings.fromJson(
+      settings.copyWith(allowEverything: true).toJson(),
+    );
+    expect(back.allowEverything, true);
+  });
+
   test('a command runs in the companion folder after an OK', () async {
     final r = await run('run_command', {
       'command': Platform.isWindows ? 'Get-Location' : 'pwd',
@@ -218,6 +240,21 @@ void main() {
     await Process.run('chmod', ['755', f.path]);
     expect(SystemTools.isRunnable(f.path), isTrue);
   }, skip: Platform.isWindows);
+
+  test('commands use pwsh when installed, else Windows PowerShell', () {
+    final env = {'PATH': r'C:\bin;C:\Program Files\PowerShell\7'};
+    expect(
+      SystemTools.windowsShell(
+        environment: env,
+        exists: (f) => f == r'C:\Program Files\PowerShell\7\pwsh.exe',
+      ),
+      r'C:\Program Files\PowerShell\7\pwsh.exe',
+    );
+    expect(
+      SystemTools.windowsShell(environment: env, exists: (_) => false),
+      'powershell.exe',
+    );
+  });
 }
 
 String homeDirForTest() =>

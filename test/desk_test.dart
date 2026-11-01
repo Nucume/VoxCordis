@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:companion/data/desk/desk_files.dart';
 import 'package:companion/data/desk/desk_tools.dart';
 import 'package:companion/data/desk/pictures.dart';
+import 'package:companion/services/import/import_temp.dart';
 import 'package:companion/data/looks.dart';
 import 'package:companion/data/settings.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -231,6 +232,39 @@ void main() {
       await DeskFiles.ensure(settings.copyWith(portraitPath: picked.path));
       final folder = settings.companionFolder!;
       expect(Pictures.avatarIn(folder)!.path, p.join(folder, 'avatar.webp'));
+    });
+
+    test('an imported portrait set comes along with its still', () async {
+      final temp = await ImportTemp.create();
+      addTearDown(() => temp.delete(recursive: true));
+      final still = await File(
+        p.join(temp.path, 'avatar.png'),
+      ).writeAsBytes(png);
+      await File(p.join(temp.path, 'avatar.mp4')).writeAsBytes([1, 2, 3]);
+      await File(p.join(temp.path, 'avatar-nsfw.png')).writeAsBytes(png);
+      await File(p.join(temp.path, 'avatar-nsfw.mp4')).writeAsBytes([4]);
+      await DeskFiles.ensure(settings.copyWith(portraitPath: still.path));
+      final folder = settings.companionFolder!;
+      final avatar = Pictures.avatarIn(folder)!;
+      expect(
+        Pictures.avatarVideoBeside(avatar.path)!.path,
+        p.join(folder, 'avatar.mp4'),
+      );
+      final nsfw = Pictures.avatarIn(folder, nsfw: true)!;
+      expect(nsfw.path, p.join(folder, 'avatar-nsfw.png'));
+      expect(
+        Pictures.avatarVideoBeside(nsfw.path)!.path,
+        p.join(folder, 'avatar-nsfw.mp4'),
+      );
+
+      // A picture the companion picks later replaces the whole set.
+      await File(p.join(folder, 'new.png')).writeAsBytes(png);
+      await run('set_avatar', {'path': 'new.png'});
+      expect(Pictures.avatarVideoBeside(avatar.path), isNull);
+      expect(Pictures.avatarIn(folder, nsfw: true)!.path, avatar.path);
+      for (final f in ['avatar.mp4', 'avatar-nsfw.png', 'avatar-nsfw.mp4']) {
+        expect(File(p.join(folder, f)).existsSync(), isFalse, reason: f);
+      }
     });
 
     test('picture lines are found and hidden from the text', () {

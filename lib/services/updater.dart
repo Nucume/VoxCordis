@@ -8,6 +8,7 @@ import 'package:http/http.dart' as http;
 import 'release_signature.dart';
 import 'system/package_install.dart';
 import 'runtime/download.dart' show sha256Digest, verifySha256;
+import 'system/posix_native.dart';
 
 /// The version this build was made as. The release workflow passes the tag
 /// (e.g. `0.2.0`, or `0.1.0-dev.12` for test builds) with --dart-define.
@@ -15,6 +16,11 @@ const appVersion = String.fromEnvironment(
   'APP_VERSION',
   defaultValue: '0.2.0-dev',
 );
+
+/// Whether Animate (picture to clip) and the video models show up. Off in
+/// release builds; test builds pass --dart-define=VIDEO_GEN=true. The code
+/// stays, so clips already made still play in Pictures either way.
+const videoGenEnabled = bool.fromEnvironment('VIDEO_GEN');
 
 /// Where releases are published. It has to be readable without signing in,
 /// so a private repository only works for its collaborators' tokens.
@@ -189,7 +195,7 @@ class Updater extends ChangeNotifier {
       _set(UpdateStatus.installing);
       await beforeExit();
       if (appImage != null) {
-        await Process.run('chmod', ['755', target.path]);
+        PosixNative.makeExecutable(target.path);
         // Replacing the file under a running AppImage is safe: the old one
         // stays mounted until this process exits.
         await target.rename(appImage);

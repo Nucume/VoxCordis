@@ -1,10 +1,11 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart' show MethodCall, MethodChannel;
 import 'package:path/path.dart' as p;
 
 /// Pops up a desktop notification, also while the window is hidden, with
-/// what the system already has: notify-send or D-Bus on Linux, a toast
-/// through PowerShell on Windows, osascript on macOS. No plugin, so nothing
+/// what the system already has: notify-send or D-Bus on Linux, a native toast
+/// from the Windows runner, osascript on macOS. No plugin, so nothing
 /// new to build or bundle. A notification that can't be shown is skipped:
 /// the message is in the chat either way.
 class DesktopNotifier {
@@ -30,13 +31,31 @@ class DesktopNotifier {
     return File(icon).existsSync() ? icon : null;
   }
 
-  Future<void> show(String title, String body) async {
+  static const _channel = MethodChannel('voxcordis/notify');
+
+  /// Called when a Windows toast is clicked, to bring the window back.
+  static void Function()? onOpen;
+
+  static bool _listening = false;
+
+  static void _listen() {
+    if (_listening) return;
+    _listening = true;
+    _channel.setMethodCallHandler((MethodCall call) async {
+      if (call.method == 'open') onOpen?.call();
+    });
+  }
+
+  /// [image] is a picture on disk (the companion's portrait), shown beside
+  /// the words where the system allows it.
+  Future<void> show(String title, String body, {String? image}) async {
+    if (image != null && !File(image).existsSync()) image = null;
     final text = body.length > 240 ? '${body.substring(0, 239)}…' : body;
     try {
       if (Platform.isLinux) {
-        await _linux(title, text);
+        await _linux(title, text, image);
       } else if (Platform.isWindows) {
-        await _windows(title, text);
+        await _windows(title, text, image);
       } else if (Platform.isMacOS) {
         await run('osascript', [
           '-e',
@@ -51,8 +70,8 @@ class DesktopNotifier {
     }
   }
 
-  Future<void> _linux(String title, String body) async {
-    final icon = _icon;
+  Future<void> _linux(String title, String body, String? picture) async {
+    final icon = picture ?? _icon;
     final r = await run('notify-send', [
       '--app-name=VoxCordis',
       if (icon != null) '--icon=$icon',
@@ -86,27 +105,21 @@ class DesktopNotifier {
   static String gvariantString(String s) =>
       '"${s.replaceAll('\\', '\\\\').replaceAll('"', '\\"').replaceAll('\n', '\\n')}"';
 
-  /// A toast through the Windows Runtime. The words go in environment
-  /// variables, never in the script, so nothing in them can run.
-  Future<void> _windows(String title, String body) => run(
-    'powershell',
-    [
-      '-NoProfile',
-      '-NonInteractive',
-      '-WindowStyle',
-      'Hidden',
-      '-Command',
-      r'''
-[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
-[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
-$xml = [Windows.UI.Notifications.ToastNotificationManager]::GetTemplateContent([Windows.UI.Notifications.ToastTemplateType]::ToastText02)
-$t = $xml.GetElementsByTagName('text')
-$t.Item(0).AppendChild($xml.CreateTextNode($env:VC_TITLE)) | Out-Null
-$t.Item(1).AppendChild($xml.CreateTextNode($env:VC_BODY)) | Out-Null
-$id = '{1AC14E77-02E7-4E5D-B744-2EB1AE5198B7}\WindowsPowerShell\v1.0\powershell.exe'
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier($id).Show([Windows.UI.Notifications.ToastNotification]::new($xml))
-''',
-    ],
-    environment: {'VC_TITLE': title, 'VC_BODY': body},
-  );
+  /// The app identity Windows files toasts under; the runner registers its
+  /// name and icon (windows/runner/toast.cpp) and the process sets the same
+  /// one (windows/runner/main.cpp).
+  static const windowsAppId = 'com.nucume.companion';
+
+  /// A toast through the runner's own Windows code: no other program runs,
+  /// and the words never pass through a script.
+  Future<void> _windows(String title, String body, String? image) async {
+    _listen();
+    await _channel.invokeMethod<bool>('show', {
+      'appId': windowsAppId,
+      'title': title,
+      'body': body,
+      'image': image ?? _icon,
+      'icon': _icon,
+    });
+  }
 }

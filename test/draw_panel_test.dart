@@ -26,6 +26,7 @@ void main() {
             cfg: 4,
             seed: 7,
             negative: 'blurry',
+            loras: {'film-grain': 0.6},
           ),
         )
         .withChoices('sdxl', const DrawChoices(steps: 12));
@@ -36,6 +37,7 @@ void main() {
     expect(back.shape, 'portrait');
     expect(back.model, 'anima');
     expect(back.perModel['anima'], prefs.perModel['anima']);
+    expect(back.perModel['anima']?.loras, {'film-grain': 0.6});
     expect(back.perModel['sdxl']?.steps, 12);
     expect(back.perModel['sdxl']?.width, isNull);
     // Back to nothing set drops the entry.
@@ -104,6 +106,9 @@ void main() {
       ..createSync(recursive: true);
     File(p.join(images.path, 'alpha.safetensors')).writeAsBytesSync([1]);
     File(p.join(images.path, 'beta.safetensors')).writeAsBytesSync([1]);
+    final loras = Directory(p.join(dir.path, 'models', 'loras'))
+      ..createSync(recursive: true);
+    File(p.join(loras.path, 'grain.safetensors')).writeAsBytesSync([1]);
     final file = File(p.join(dir.path, 'settings.json'));
     late AppServices services;
     await tester.runAsync(() async {
@@ -164,6 +169,16 @@ void main() {
     expect(find.text('Steps'), findsOneWidget);
     await tester.enterText(field('Steps'), '17');
     await tester.enterText(field('Seed'), '99');
+    // Sizes are typed and settle on a multiple of 64.
+    await tester.enterText(field('Width'), '1000');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(tester.widget<TextField>(field('Width')).controller!.text, '1024');
+    await tester.enterText(field('Height'), '90');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    expect(tester.widget<TextField>(field('Height')).controller!.text, '256');
+    await tester.tap(find.text('grain'));
     await tester.pump(const Duration(seconds: 1));
 
     // Another model starts clean...
@@ -182,12 +197,16 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Steps'), findsOneWidget);
     expect(tester.widget<TextField>(field('Steps')).controller!.text, '5');
+    expect(find.text('0.8'), findsNothing);
     await tester.tap(find.text('beta'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('alpha').last);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(field('Steps')).controller!.text, '17');
     expect(tester.widget<TextField>(field('Seed')).controller!.text, '99');
+    expect(tester.widget<TextField>(field('Width')).controller!.text, '1024');
+    expect(tester.widget<TextField>(field('Height')).controller!.text, '256');
+    expect(find.text('0.8'), findsOneWidget);
     expect(services.settings.value.draw.advanced, isTrue);
   });
 }

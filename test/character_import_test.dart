@@ -5,6 +5,8 @@ import 'dart:typed_data';
 import 'package:archive/archive.dart';
 import 'package:companion/data/database.dart';
 import 'package:companion/data/desk/desk_files.dart';
+import 'package:companion/services/import/import_temp.dart';
+import 'package:companion/data/desk/pictures.dart';
 import 'package:companion/data/schedule/schedule_repository.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/services/import/avatar_download.dart';
@@ -289,6 +291,98 @@ void main() {
           throwsA(isA<ImportException>()),
         );
       }
+    });
+
+    test('says so when the address is a video', () async {
+      final mp4 = [0, 0, 0, 0x18, ...'ftypmp42'.codeUnits, 0, 0, 0, 0];
+      final d = AvatarDownload(
+        client: MockClient((r) async => http.Response.bytes(mp4, 200)),
+      );
+      await expectLater(
+        d.fetch(Uri.parse('https://img.example/clip')),
+        throwsA(
+          isA<ImportException>().having(
+            (e) => e.message,
+            'message',
+            contains('video'),
+          ),
+        ),
+      );
+    });
+
+    test('saves a video with its still beside it', () async {
+      final mp4 = [0, 0, 0, 0x18, ...'ftypisom'.codeUnits, 1, 2, 3, 4];
+      final d = AvatarDownload(
+        client: MockClient((r) async => http.Response.bytes(mp4, 200)),
+      );
+      final frame = File(p.join((await ImportTemp.create()).path, 'avatar.png'))
+        ..writeAsBytesSync(png);
+      final clip = AvatarSet(video: Uri.parse('https://rub.example/a.mp4'));
+      final still = await d.fetchSet(clip, still: frame);
+      expect(p.basename(still.path), 'avatar.png');
+      expect(still.parent.path, isNot(frame.parent.path));
+      expect(Pictures.avatarVideoBeside(still.path)!.readAsBytesSync(), mp4);
+
+      // Without a still, and none to be had from the video, nothing is kept.
+      await expectLater(
+        d.fetchSet(clip, stillFrom: (_) async => null),
+        throwsA(isA<ImportException>()),
+      );
+      // A picture is not a video.
+      final e = AvatarDownload(
+        client: MockClient((r) async => http.Response.bytes(png, 200)),
+      );
+      await expectLater(
+        e.fetchSet(clip, stillFrom: (_) async => null),
+        throwsA(isA<ImportException>()),
+      );
+      await frame.parent.delete(recursive: true);
+      await still.parent.delete(recursive: true);
+    });
+
+    test('saves both versions of a Soulkyn avatar', () async {
+      final mp4 = [0, 0, 0, 0x18, ...'ftypisom'.codeUnits, 1, 2, 3, 4];
+      final d = AvatarDownload(
+        client: MockClient((r) async {
+          if (r.url.path == '/gone.mp4') return http.Response('', 404);
+          return http.Response.bytes(
+            r.url.path.endsWith('.mp4') ? mp4 : png,
+            200,
+          );
+        }),
+      );
+      final still = await d.fetchSet(
+        AvatarSet(
+          still: Uri.parse('https://rub.example/a'),
+          video: Uri.parse('https://rub.example/a.mp4'),
+          nsfwStill: Uri.parse('https://rub.example/b'),
+          nsfwVideo: Uri.parse('https://rub.example/gone.mp4'),
+        ),
+      );
+      final names = still.parent.listSync().map((e) => p.basename(e.path));
+      // The 18+ video failed and is left out; the rest came.
+      expect(
+        names,
+        unorderedEquals(['avatar.png', 'avatar.mp4', 'avatar-nsfw.png']),
+      );
+      expect(Pictures.hasNsfwBeside(still.path), isTrue);
+      await still.parent.delete(recursive: true);
+    });
+
+    test('saves a frame drawn by the browser, and only a picture', () async {
+      final f = await AvatarDownload.saveFrame(
+        'data:image/png;base64,${base64.encode(png)}',
+      );
+      expect(p.basename(f!.path), 'avatar.png');
+      expect(f.readAsBytesSync(), png);
+      await f.parent.delete(recursive: true);
+      expect(
+        await AvatarDownload.saveFrame(
+          'data:image/png;base64,${base64.encode(utf8.encode('<svg/>'))}',
+        ),
+        isNull,
+      );
+      expect(await AvatarDownload.saveFrame('data:text/html,hi'), isNull);
     });
 
     test('refuses pictures over the size cap', () async {

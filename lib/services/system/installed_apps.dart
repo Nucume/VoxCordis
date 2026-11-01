@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:path/path.dart' as p;
 
 import '../folder_service.dart';
+import 'windows_native.dart';
 
 /// A program the human has installed, as their system's app menu lists it.
 class InstalledApp {
@@ -18,7 +19,7 @@ class InstalledApp {
   final String name;
 
   /// Linux: the desktop file id ("vivaldi-stable.desktop"). Windows: the
-  /// Start menu AppID. macOS: the bundle's name.
+  /// Start menu shortcut's name. macOS: the bundle's name.
   final String id;
 
   /// The desktop file, shortcut or bundle it was found as, if any.
@@ -130,9 +131,7 @@ class InstalledApps {
   /// Starts [app] apart from VoxCordis, so it stays open after we close.
   static Future<void> launch(InstalledApp app) async {
     if (Platform.isWindows) {
-      await Process.start('explorer.exe', [
-        'shell:AppsFolder\\${app.id}',
-      ], mode: ProcessStartMode.detached);
+      await WindowsNative.open(app.path ?? 'shell:AppsFolder\\${app.id}');
       return;
     }
     if (Platform.isMacOS) {
@@ -281,23 +280,35 @@ class InstalledApps {
   }
 
   static Future<List<InstalledApp>> _windows() async {
-    // Get-StartApps lists Start menu apps, Store apps included, with the
-    // AppID that shell:AppsFolder starts.
-    final r = await Process.run('powershell', [
-      '-NoProfile',
-      '-NonInteractive',
-      '-Command',
-      '[Console]::OutputEncoding = [Text.Encoding]::UTF8; '
-          'Get-StartApps | Select-Object Name, AppID | ConvertTo-Json -Compress',
-    ], stdoutEncoding: utf8);
-    final out = (r.stdout as String).trim();
-    if (out.isEmpty) return const [];
-    final json = jsonDecode(out);
-    return [
-      for (final e in json is List ? json : [json])
-        if (e is Map && e['Name'] is String && e['AppID'] is String)
-          InstalledApp(name: e['Name'] as String, id: e['AppID'] as String),
-    ];
+    // The shortcuts in the Start menu folders, for everyone and for this
+    // user. (Store apps without a shortcut there are not listed.)
+    final found = <InstalledApp>[];
+    for (final root in [
+      Platform.environment['ProgramData'],
+      Platform.environment['APPDATA'],
+    ]) {
+      if (root == null) continue;
+      final dir = Directory(
+        p.join(root, 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+      );
+      if (!dir.existsSync()) continue;
+      try {
+        for (final e in dir.listSync(recursive: true, followLinks: false)) {
+          if (e is! File || !e.path.toLowerCase().endsWith('.lnk')) continue;
+          final name = p.basenameWithoutExtension(e.path);
+          if (RegExp(
+            r'uninstall|readme|help',
+            caseSensitive: false,
+          ).hasMatch(name)) {
+            continue;
+          }
+          found.add(InstalledApp(name: name, id: name, path: e.path));
+        }
+      } on Object {
+        // An unreadable folder: the rest still counts.
+      }
+    }
+    return found;
   }
 
   static Future<List<InstalledApp>> _mac() async {

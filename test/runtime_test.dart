@@ -30,6 +30,8 @@ void main() {
       'llama-$tag-bin-win-vulkan-x64.zip',
       'llama-$tag-bin-win-cuda-12.4-x64.zip',
       'cudart-llama-bin-win-cuda-12.4-x64.zip',
+      'llama-$tag-bin-win-cuda-13.1-x64.zip',
+      'cudart-llama-bin-win-cuda-13.1-x64.zip',
     ];
 
     test('Linux prefers the Vulkan build', () {
@@ -57,6 +59,39 @@ void main() {
         'llama-$tag-bin-win-cpu-x64.zip',
         'llama-$tag-bin-win-vulkan-x64.zip',
       ]);
+    });
+
+    test('Windows with an NVIDIA card gets CUDA 12 and its runtime', () {
+      expect(
+        RuntimeInstaller.pickAssets(
+          names,
+          os: 'windows',
+          arm: false,
+          cuda: true,
+        ),
+        [
+          'llama-$tag-bin-win-cpu-x64.zip',
+          'llama-$tag-bin-win-cuda-12.4-x64.zip',
+          'cudart-llama-bin-win-cuda-12.4-x64.zip',
+        ],
+      );
+    });
+
+    test('CUDA without its runtime archive falls back to Vulkan', () {
+      expect(
+        RuntimeInstaller.pickAssets(
+          names.where((n) => !n.startsWith('cudart')),
+          os: 'windows',
+          arm: false,
+          cuda: true,
+        ),
+        ['llama-$tag-bin-win-cpu-x64.zip', 'llama-$tag-bin-win-vulkan-x64.zip'],
+      );
+    });
+
+    test('driver version is read from nvidia-smi output', () {
+      expect(RuntimeInstaller.parseDriverMajor('551.61\n'), 551);
+      expect(RuntimeInstaller.parseDriverMajor(''), isNull);
     });
   });
 
@@ -96,6 +131,81 @@ void main() {
     expect(last, 1.0);
     expect(await File('${target.path}.part').exists(), isFalse);
   });
+
+  test(
+    'downloadFile fetches big files over several connections and resumes',
+    () async {
+      final payload = List<int>.generate(
+        34 * 1024 * 1024,
+        (i) => (i * 7) % 253,
+      );
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      final ranges = <String>[];
+      server.listen((req) async {
+        final m = RegExp(
+          r'bytes=(\d+)-(\d*)',
+        ).firstMatch(req.headers.value('range') ?? '');
+        if (m == null) {
+          req.response.contentLength = payload.length;
+          req.response.add(payload);
+        } else {
+          ranges.add(m.group(0)!);
+          final start = int.parse(m.group(1)!);
+          final end = m.group(2)!.isEmpty
+              ? payload.length - 1
+              : int.parse(m.group(2)!);
+          req.response.statusCode = 206;
+          req.response.headers.set(
+            'content-range',
+            'bytes $start-$end/${payload.length}',
+          );
+          req.response.contentLength = end - start + 1;
+          req.response.add(payload.sublist(start, end + 1));
+        }
+        await req.response.close();
+      });
+      final tmp = await Directory.systemTemp.createTemp('dl_par_test');
+      addTearDown(() async {
+        await server.close(force: true);
+        await tmp.delete(recursive: true);
+      });
+      final url = Uri.parse('http://127.0.0.1:${server.port}/m');
+      final target = File(p.join(tmp.path, 'big.gguf'));
+
+      // Cancel part way, then finish: the second run must not start over.
+      var calls = 0;
+      await expectLater(
+        downloadFile(
+          http.Client(),
+          url,
+          target,
+          isCancelled: () => ++calls > 6,
+        ),
+        throwsA(isA<DownloadCancelled>()),
+      );
+      expect(await target.exists(), isFalse);
+      ranges.clear();
+      var last = 0;
+      await downloadFile(
+        http.Client(),
+        url,
+        target,
+        onProgress: (got, _) => last = got,
+      );
+      expect(await target.length(), payload.length);
+      expect(await target.readAsBytes(), payload);
+      expect(last, payload.length);
+      expect(ranges.length, greaterThan(1));
+      var asked = 0;
+      for (final r in ranges) {
+        final m = RegExp(r'bytes=(\d+)-(\d+)').firstMatch(r)!;
+        asked += int.parse(m.group(2)!) - int.parse(m.group(1)!) + 1;
+      }
+      expect(asked, lessThanOrEqualTo(payload.length));
+      expect(await File('${target.path}.part').exists(), isFalse);
+      expect(await File('${target.path}.part.segs').exists(), isFalse);
+    },
+  );
 
   // Real llama.cpp end to end. Runs when LLAMA_SERVER_DIR (a folder with a
   // built llama-server) and TEST_GGUF (any small model) are set.
@@ -182,6 +292,60 @@ void main() {
         ? 'set LLAMA_SERVER_DIR and TEST_GGUF to run'
         : false,
     timeout: const Timeout(Duration(minutes: 3)),
+  );
+
+  // A stand-in llama-server that crashes on its first reply, as a real one
+  // can when the graphics card runs out of memory, and works once started
+  // again.
+  test(
+    'a built-in model that crashes mid-reply is started again',
+    () async {
+      final support = await Directory.systemTemp.createTemp('crash_test');
+      addTearDown(() => support.delete(recursive: true));
+      final install = Directory(
+        p.join(support.path, 'runtime', RuntimeInstaller.pinnedTag),
+      );
+      await install.create(recursive: true);
+      final crashed = File(p.join(support.path, 'crashed'));
+      final exe = File(p.join(install.path, RuntimeInstaller.exeName));
+      await exe.writeAsString(_fakeServer(crashed.path));
+      await Process.run('chmod', ['+x', exe.path]);
+      final model = File(p.join(support.path, 'model.gguf'));
+      await model.writeAsString('not really a model');
+
+      final runtime = RuntimeController(support);
+      addTearDown(runtime.stopAll);
+      final db = await openAppDatabase(inMemoryDatabasePath);
+      addTearDown(db.close);
+      final services = AppServices(
+        settings: SettingsStore(
+          File(p.join(support.path, 'settings.json')),
+          AppSettings(
+            companionName: 'Aria',
+            companionFolder: p.join(support.path, 'home'),
+            modelPath: model.path,
+            contextSize: 2048,
+            useGpu: false,
+          ),
+        ),
+        db: db,
+        dbKey: DatabaseKey(Directory.systemTemp),
+        runtime: runtime,
+      );
+      final chat = ChatController(services);
+      await chat.send('Hi there');
+      expect(await crashed.exists(), isTrue);
+      expect(chat.error, isNull);
+      expect(chat.messages.last.content, 'Hello again.');
+      expect(chat.toolNote, contains('started again'));
+      final logged = await services.log.entries();
+      expect(
+        logged.map((e) => e.message),
+        contains(contains('GGML_ASSERT(oops) failed')),
+      );
+    },
+    skip: Platform.isWindows ? 'the stand-in server is a script' : false,
+    timeout: const Timeout(Duration(minutes: 1)),
   );
 
   // Real Eyes end to end. Runs when LLAMA_SERVER_DIR is set and
@@ -298,3 +462,50 @@ void main() {
     }
   });
 }
+
+/// A Python stand-in for llama-server: answers /health, and the first chat
+/// request writes a word, says what failed and exits, the way a crash
+/// looks. Later starts reply in full.
+String _fakeServer(String crashedMarker) =>
+    r"""#!/usr/bin/env python3
+import json, os, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+port = int(sys.argv[sys.argv.index('--port') + 1])
+marker = '""" +
+    crashedMarker +
+    r"""'
+
+def chunk(text):
+    return 'data: ' + json.dumps(
+        {'choices': [{'delta': {'content': text}, 'finish_reason': None}]}
+    ) + '\n\n'
+
+class H(BaseHTTPRequestHandler):
+    def log_message(self, *a):
+        pass
+
+    def do_GET(self):
+        self.send_response(200)
+        self.end_headers()
+        self.wfile.write(b'{"status":"ok"}')
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get('Content-Length', 0)))
+        self.send_response(200)
+        self.send_header('Content-Type', 'text/event-stream')
+        self.send_header('Content-Length', '100000')
+        self.end_headers()
+        if not os.path.exists(marker):
+            open(marker, 'w').close()
+            self.wfile.write(chunk('Hel').encode())
+            self.wfile.flush()
+            sys.stderr.write('/src/ggml.c:1: GGML_ASSERT(oops) failed\n')
+            sys.stderr.flush()
+            os._exit(3)
+        self.wfile.write((chunk('Hello again.') + 'data: [DONE]\n\n').encode())
+        self.wfile.flush()
+        self.close_connection = True
+
+HTTPServer(('127.0.0.1', port), H).serve_forever()
+""";

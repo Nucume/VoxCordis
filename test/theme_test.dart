@@ -17,23 +17,9 @@ void main() {
     });
 
     test('reads the Windows registry value', () {
-      const head =
-          r'HKEY_CURRENT_USER\Software\Microsoft\Windows\CurrentVersion'
-          r'\Themes\Personalize';
-      expect(
-        SystemTheme.parseWindows(
-          '$head\n    AppsUseLightTheme    REG_DWORD    0x0\n',
-        ),
-        Brightness.dark,
-      );
-      expect(
-        SystemTheme.parseWindows(
-          '$head\n    AppsUseLightTheme    REG_DWORD    0x1\n',
-        ),
-        Brightness.light,
-      );
-      expect(SystemTheme.parseWindows(null), isNull);
-      expect(SystemTheme.parseWindows('ERROR: not found'), isNull);
+      expect(SystemTheme.fromDword(0), Brightness.dark);
+      expect(SystemTheme.fromDword(1), Brightness.light);
+      expect(SystemTheme.fromDword(null), isNull);
     });
 
     test('reads the desktop portal', () {

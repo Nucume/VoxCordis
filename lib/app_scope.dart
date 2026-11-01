@@ -24,6 +24,7 @@ import 'data/skills/skill_tools.dart';
 import 'features/chat/prompt_history.dart';
 import 'services/changelog.dart';
 import 'services/import/import_temp.dart';
+import 'services/images/clip_prompt.dart';
 import 'services/import/personality_rewrite.dart';
 import 'services/images/draw_tools.dart';
 import 'services/images/image_engine.dart';
@@ -270,6 +271,47 @@ class AppServices {
   }
 
   bool _rewriteRunning = false;
+
+  /// Turns the human's few words into a prompt for a video model with the
+  /// chat model ([ClipPrompt]). Null when it gave nothing usable; throws
+  /// when the model can't be reached.
+  Future<String?> writeClipPrompt(
+    String idea, {
+    required bool detailed,
+    int? seconds,
+    String? model,
+    int? chars,
+    int? limit,
+  }) async {
+    final s = settings.value;
+    final http = Client();
+    runtime.hold();
+    try {
+      final target = await runtime.ensureReady(s);
+      final client = LlmClient(
+        baseUrl: target.baseUrl,
+        model: target.model,
+        apiKey: target.apiKey,
+        sampling: samplingFor(s),
+        stop: stopFor(s),
+        maxTokens: 3000,
+        stallWait: const Duration(minutes: 2),
+        client: http,
+      );
+      return await ClipPrompt.write(
+        client,
+        idea,
+        detailed: detailed,
+        seconds: seconds,
+        model: model,
+        chars: chars,
+        limit: limit,
+      );
+    } finally {
+      http.close();
+      runtime.release(settings.value);
+    }
+  }
 
   /// Set while the human is setting up another companion from the menu.
   final addingCompanion = ValueNotifier(false);

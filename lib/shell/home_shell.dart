@@ -16,6 +16,7 @@ import '../features/update/update_dialog.dart';
 import '../features/update/whats_new_dialog.dart';
 import '../data/settings.dart';
 import '../services/schedule/scheduler.dart';
+import '../services/system/desktop_notifier.dart';
 import '../services/system/system_tools.dart';
 import '../theme/app_theme.dart';
 import 'companion_card.dart';
@@ -130,6 +131,7 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
     services.imageEngine.onDrawn = (job, picture) =>
         _chat!.addPicture(job, picture);
     services.imageEngine.onFailed = (job, error) => _chat!.pictureFailed(error);
+    DesktopNotifier.onOpen = () => services.background?.showWindow().ignore();
     _scheduler ??= Scheduler(
       repo: () => services.schedules,
       run: (item, {required late}) => _chat!.runScheduled(item, late: late),
@@ -137,6 +139,7 @@ class _HomeShellState extends State<HomeShell> implements WhatsNewHost {
       notify: (title, body) => services.notifier.show(
         '${services.settings.value.companionName}: $title',
         body,
+        image: services.settings.value.portraitPath,
       ),
       focused: () async => await services.background?.windowFocused() ?? true,
       onChanged: services.scheduleChanged,

@@ -12,6 +12,33 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+- **Link buttons in About.** Settings → About has a row of glass icon buttons for the VoxCordis website, GitHub, Discord, Reddit and X, each in its brand colour. The icons come from Simple Icons (CC0).
+### New
+- **A better download bar.** Every download (models, the browser, updates) now has a thicker bar in your Colorway with a light sweep over it, the percentage under it and the time left beside that. The time appears after a few seconds, once the speed is known.
+- **Edit your companion's replies, and they learn from it.** Hover a reply and press the pencil to rewrite it in place (Ctrl+Enter saves, Esc cancels). The edited reply replaces the old one, so later turns see your version. Your companion then compares the two and suggests a short lesson, like "Keep replies short and casual", which you can reword, keep or skip; kept lessons go into lessons.md and are read before every reply. Fixing a typo or a comma doesn't ask.
+- **Much faster model downloads.** Language and drawing models (and the runtimes) now download over several connections at once instead of one, starting with four and adding more for as long as the speed keeps rising, so a fast line (2.5 or 10 Gbit) gets filled while a slow one isn't flooded. A cut download still picks up where it stopped. The progress bar also redraws less often, so the app stays smooth meanwhile.
+- **Faster on NVIDIA cards.** An NVIDIA card with a recent driver now gets llama.cpp's CUDA build instead of Vulkan, which reads long chats and writes replies noticeably faster; other cards keep Vulkan. On Linux the CUDA build comes with the VoxCordis release (checked against the release key before it is used) and falls back to Vulkan if it isn't there. The model's memory of the chat (KV cache) is also stored in 8-bit with flash attention, which roughly halves its size with almost no change in quality, and only one chat slot is reserved. The new runtime downloads once the next time the model starts.
+- **Native Windows notifications with your companion's picture.** Reminders and task results now appear as proper Windows toasts: your companion's portrait beside their name and the message, and clicking one brings VoxCordis back.
+- **Windows is asked directly.** Notifications, finding your GPU memory, the usual folders, starting with your computer and the app list now ask Windows directly instead of starting PowerShell or other programs. Commands your companion runs (still asked first) use PowerShell 7 (`pwsh`) when it is installed, and the PowerShell that comes with Windows otherwise. That is the one place a shell is still needed. And "open an app" finds apps with a Start menu shortcut.
+- **Interface size.** Settings → Appearance has a new slider that makes everything, text included, 80–150% of what your computer's scaling says. It only goes as big as the window has room for.
+- **Start On-Screen.** Under Settings → General, "Start with my computer" is now a choice: Disabled, Start On-Screen (the window opens when you log in) or Start Minimized (it goes to the tray or taskbar, as before).
+- **Allow everything.** With "Let your companion use this computer" on, Settings → Computer has a new switch that lets commands and opens run without asking each time. It is off by default, turning it on shows a warning that it can be highly destructive and that you use it at your own risk, and turning off computer access turns it off too.
+- **Download a Kyn's whole Soulkyn gallery.** Pictures has a new "Download all Images & Videos" button: paste a Kyn's link and every picture and video in its Soulkyn gallery is saved into Pictures, with an option to leave NSFW ones out. Pressing it again later only fetches what is new. Videos show in Pictures with a play sign and play right in the app. Importing a Kyn from Soulkyn offers the same button on the "Who is your companion?" step.
+- **Soulkyn remembers your login.** The Soulkyn window now stays logged in between imports, avatar and gallery downloads, and restarts, so private characters work without signing in each time. "Log out of Soulkyn" in the download dialog forgets it.
+- **Delete and Show in folder in the viewer.** A picture or video opened in Pictures now has a folder button that opens its folder with the file picked out, and a Delete button that asks first and moves it to your computer's trash, so it can still be brought back.
+
+### Fixed
+- **Small or heavily scaled screens.** On a screen with little room left after scaling (say 1080p at 200%), the window now opens and stays within the screen, and the interface shrinks to fit instead of being cut off.
+- **Windows notifications say VoxCordis.** They were filed under "Windows PowerShell".
+- **VoxCordis opens only once.** Starting it again brings the running window forward, also from the tray or the taskbar, instead of opening a second copy.
+- **Soulkyn characters with a video avatar.** Importing one now brings over a still from the video as the portrait, instead of a broken or missing picture.
+- **No more "Connection closed while receiving data".** When the built-in model stops in the middle of a reply (it crashed, ran out of memory, or was restarted because a setting changed), VoxCordis now starts it again and writes the reply once more by itself. If it happens twice in a row you get a plain explanation instead of the technical error, and Settings → Logs → Chat keeps the model's last words before it stopped, which helps find the cause. Saving settings or drawing a picture no longer restarts the model while a reply is being written.
+
+### Changed
+- **A tidier LoRA picker.** In Draw's advanced options, LoRAs are now glass buttons across the panel's width instead of a long list. Pick one and its strength slider appears right under its name. The LoRAs you pick are remembered for each model, like the other advanced options.
+
+## 0.3.5
+
 ### New
 - **Companions manage their own skills.** Your companion can now switch skills on and off to keep the ones they need at hand, and write a new skill when you teach them how to do something. Skills they write still wait for your OK in the Skills tab. Up to 8 skills can be on at once, so they don't fill every prompt; the Skills tab shows how many are on.
 - **Test this key.** Under Settings → Brain → Server-hosted, a new button next to the API key checks that the service accepts it, without sending a message or spending anything.

@@ -890,21 +890,31 @@ class _SoulkynImportDialogState extends State<SoulkynImportDialog> {
   }
 }
 
-/// Offers the picture an imported character links to as its portrait.
+/// Offers the picture an imported character links to as its portrait, or
+/// its whole portrait set ([avatars]: picture, video, 18+ versions).
 /// Nothing is fetched until the human presses Download.
 class PortraitDownload extends StatefulWidget {
   const PortraitDownload({
     super.key,
-    required this.url,
+    this.url,
+    this.avatars,
     required this.onPortrait,
+    this.still,
     this.download,
-  });
+  }) : assert(url != null || avatars != null);
 
-  final Uri url;
+  final Uri? url;
+  final AvatarSet? avatars;
+
+  /// Gets the main picture; the rest of a set sits beside it.
   final ValueChanged<File> onPortrait;
 
-  /// Fetches the picture; [AvatarDownload] unless a test replaces it.
-  final Future<File> Function(Uri url)? download;
+  /// The picture already taken from the video, kept as its still.
+  final File? still;
+
+  /// Fetches the picture or set; [AvatarDownload] unless a test replaces
+  /// it.
+  final Future<File> Function()? download;
 
   @override
   State<PortraitDownload> createState() => _PortraitDownloadState();
@@ -921,29 +931,50 @@ class _PortraitDownloadState extends State<PortraitDownload> {
     });
     final client = AvatarDownload();
     try {
-      final file = await (widget.download ?? client.fetch)(widget.url);
+      final avatars = widget.avatars;
+      final file =
+          await (widget.download?.call() ??
+              (avatars != null
+                  ? client.fetchSet(avatars, still: widget.still)
+                  : client.fetch(widget.url!)));
       widget.onPortrait(file);
     } on ImportException catch (e) {
       _error = e.message;
     } catch (_) {
-      _error = 'The picture could not be downloaded.';
+      _error =
+          'The ${widget.avatars != null ? 'avatar' : 'picture'} could not be '
+          'downloaded.';
     } finally {
       client.close();
       if (mounted) setState(() => _downloading = false);
     }
   }
 
+  String get _offer {
+    final set = widget.avatars;
+    if (set == null) {
+      return 'The import links to a picture on ${widget.url!.host}. Use it '
+          'as the portrait? Nothing is fetched until you press the button.';
+    }
+    final what = [
+      if (set.still != null || set.nsfwStill != null) 'a picture',
+      if (set.hasVideo) 'a short video that plays as the portrait',
+    ].join(' and ');
+    return 'The avatar on ${set.host} comes as $what'
+        '${set.hasNsfw ? ', each also in an 18+ version' : ''}. Download '
+        '${set.hasNsfw || set.hasVideo ? 'them' : 'it'}? Nothing is fetched '
+        'until you press the button.';
+  }
+
   @override
   Widget build(BuildContext context) {
     final small = TextStyle(fontSize: 12, color: context.palette.textMuted);
     return _Box(
-      icon: Icons.image_outlined,
+      icon: widget.avatars?.hasVideo ?? false
+          ? Icons.movie_outlined
+          : Icons.image_outlined,
       children: [
-        Text(
-          'The import links to a picture on ${widget.url.host}. Use it as the '
-          'portrait? Nothing is fetched until you press the button.',
-          style: small,
-        ),
+        Text(_offer, style: small),
         const SizedBox(height: 8),
         FilledButton.tonalIcon(
           onPressed: _downloading ? null : _download,
@@ -953,7 +984,9 @@ class _PortraitDownloadState extends State<PortraitDownload> {
                   child: CircularProgressIndicator(strokeWidth: 2),
                 )
               : const Icon(Icons.download_rounded),
-          label: const Text('Download picture'),
+          label: Text(
+            widget.avatars != null ? 'Download avatar' : 'Download picture',
+          ),
         ),
         if (_error != null) ...[
           const SizedBox(height: 6),

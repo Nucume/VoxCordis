@@ -27,7 +27,8 @@ Installers are on the [Releases](https://github.com/Nucume/VoxCordis/releases)
 page:
 
 - **Linux:** `VoxCordis-<version>-x86_64.AppImage`. Make it executable and run
-  it.
+  it. Video portraits play when libmpv is installed (`libmpv2` on Debian and
+  Ubuntu, `mpv-libs` on Fedora); without it they show as a still picture.
 - **Debian, Ubuntu, Fedora and relatives:** install from the signed apt or dnf
   repository at <https://nucume.github.io/VoxCordis/repo/> (the page shows the
   commands), and updates come with the rest of your system's. The `.deb` and
@@ -108,7 +109,7 @@ You need [Flutter](https://docs.flutter.dev/get-started/install) (stable,
 
 ```sh
 sudo apt install clang cmake ninja-build pkg-config libgtk-3-dev \
-  libwebkit2gtk-4.1-dev libsoup-3.0-dev liblzma-dev
+  libwebkit2gtk-4.1-dev libsoup-3.0-dev liblzma-dev libmpv-dev libepoxy-dev
 git clone https://github.com/Nucume/VoxCordis.git
 cd VoxCordis
 flutter pub get
@@ -116,7 +117,7 @@ flutter run -d linux            # or: flutter build linux --release
 ```
 
 At run time WebKitGTK is optional (used only for importing characters from a link),
-and libsecret is used for the API key when a keyring is running.
+so is libmpv (video portraits), and libsecret is used for the API key when a keyring is running.
 
 **Windows:** install Visual Studio 2022 with "Desktop development with C++",
 then:

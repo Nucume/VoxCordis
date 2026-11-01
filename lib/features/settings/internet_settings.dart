@@ -9,6 +9,7 @@ import '../../services/web/web_guard.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass_popover.dart';
 import 'model_picker.dart' show InfoIcon;
+import '../../widgets/download_bar.dart';
 
 /// Settings → Internet: whether the companion may search and read the
 /// web, its own browser (no window), the search service, and sites it
@@ -309,7 +310,7 @@ class _InternetSettingsState extends State<InternetSettings> {
             style: TextStyle(color: palette.text),
           ),
           const SizedBox(height: 6),
-          LinearProgressIndicator(value: _progress),
+          DownloadBar(progress: _progress),
         ],
       );
     } else {

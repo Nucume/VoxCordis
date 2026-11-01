@@ -8,6 +8,7 @@ import 'app.dart';
 import 'app_scope.dart';
 import 'data/database_key.dart';
 import 'features/unlock/unlock_app.dart';
+import 'services/avatar_video.dart';
 import 'services/changelog.dart';
 import 'services/logs/app_log.dart';
 import 'services/system/background.dart';
@@ -16,6 +17,8 @@ import 'shell/window_frame.dart';
 
 Future<void> main(List<String> args) async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Video portraits, when libmpv is there.
+  AvatarVideo.init();
   await _makeWindowTranslucent();
   final dir = await AppServices.supportDir();
   // VoxCordis' own title bar, unless the system's was chosen.

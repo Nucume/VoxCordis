@@ -212,6 +212,72 @@ void main() {
       expect(c.avatarUrl.toString(), 'https://rub.soulkyn.io/abc/p.png');
     });
 
+    test('a video avatar gives its poster, never the video file', () {
+      expect(
+        SoulkynLink.avatarFrom([
+          'https://rub.soulkyn.io/abc/clip.mp4',
+          'https://rub.soulkyn.io/abc/still.webp',
+        ], page),
+        'https://rub.soulkyn.io/abc/still.webp',
+      );
+      final c = SoulkynLink.fromHtml(
+        _defaultView.replaceFirst(
+          RegExp(r'<img alt="Persona Avatar"[^>]*>'),
+          '<video autoplay loop muted src="https://rub.soulkyn.io/v/a.mp4" '
+          'poster="https://rub.soulkyn.io/v/a-poster.jpg"></video>',
+        ),
+        page,
+      )!;
+      expect(c.avatarUrl.toString(), 'https://rub.soulkyn.io/v/a-poster.jpg');
+    });
+
+    test('finds the avatar video by its label', () {
+      final c = SoulkynLink.fromHtml(
+        _defaultView.replaceFirst(
+          RegExp(r'<img alt="Persona Avatar"[^>]*>'),
+          '<video src="https://rub.soulkyn.io/other.mp4"></video>'
+          '<video aria-label="Avatar video for Lilith Vanhouten" '
+          'src="https://rub.soulkyn.io/1674f1a2.mp4" '
+          'class="w-full aspect-768/1280 object-cover" autoplay="" '
+          'loop="" playsinline=""></video>',
+        ),
+        page,
+      )!;
+      expect(
+        c.avatars!.video.toString(),
+        'https://rub.soulkyn.io/1674f1a2.mp4',
+      );
+      expect(c.avatars!.hasNsfw, isFalse);
+      expect(
+        SoulkynLink.videoFrom(['http://a.example/x.mp4', '/v/a.webm'], page),
+        Uri.parse('https://soulkyn.com/v/a.webm'),
+      );
+      expect(SoulkynLink.videoFrom(['https://a.example/x.png'], page), isNull);
+    });
+
+    test('both avatar versions come from the page data', () {
+      const sfw = 'cc8e4f5b-85c2-4c4e-a73b-ee6c1d3d3231';
+      const clip = '00a4d28c-6196-4bd5-8bbd-737611b2a5a5';
+      const nsfw = '5ae1a7fa-e25a-404e-b8f1-3acee8753839';
+      final set = SoulkynLink.avatarSetFrom({
+        'sfw': {'still': sfw, 'video': clip},
+        'nsfw': {'still': nsfw, 'video': '../evil'},
+      })!;
+      expect(set.still.toString(), 'https://rub.soulkyn.io/$sfw');
+      expect(set.video.toString(), 'https://rub.soulkyn.io/$clip.mp4');
+      expect(set.nsfwStill.toString(), 'https://rub.soulkyn.io/$nsfw');
+      // Only plain ids become addresses.
+      expect(set.nsfwVideo, isNull);
+      expect(SoulkynLink.avatarSetFrom(null), isNull);
+      expect(SoulkynLink.avatarSetFrom({'sfw': null, 'nsfw': null}), isNull);
+    });
+
+    test('a frame from the browser window becomes the portrait', () {
+      final frame = File('frame.jpg');
+      final c = SoulkynLink.fromHtml(_defaultView, page, portrait: frame)!;
+      expect(c.portrait, frame);
+    });
+
     test('falls back to the description, and says tags are missing', () {
       final c = SoulkynLink.fromHtml(_metaOnly, page)!;
       expect(c.name, 'Nova Reyes');

@@ -6,6 +6,7 @@ import '../../app_scope.dart';
 import '../../services/updater.dart';
 import '../../theme/app_theme.dart';
 import '../chat/chat_text.dart';
+import '../../widgets/download_bar.dart';
 
 /// Shows what's new and updates with one button. The app restarts itself.
 Future<void> showUpdateDialog(BuildContext context) =>
@@ -110,11 +111,11 @@ class _UpdateDialog extends StatelessWidget {
                 ],
                 if (working) ...[
                   const SizedBox(height: 16),
-                  LinearProgressIndicator(
-                    value: updater.status == UpdateStatus.installing
+                  DownloadBar(
+                    progress: updater.status == UpdateStatus.installing
                         ? null
                         : updater.progress,
-                    borderRadius: BorderRadius.circular(4),
+                    showText: updater.status != UpdateStatus.installing,
                   ),
                   const SizedBox(height: 6),
                   Text(

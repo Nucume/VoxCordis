@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:io';
 import 'dart:math';
+import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -11,6 +12,7 @@ import '../../data/settings.dart';
 import '../invoke_client.dart';
 import '../logs/app_log.dart';
 import '../runtime/download.dart';
+import '../import/soulkyn_media.dart';
 import '../runtime/runtime_controller.dart';
 import 'image_catalog.dart';
 import 'sd_runtime.dart';
@@ -139,6 +141,53 @@ class ImageEngine extends ChangeNotifier {
     return job;
   }
 
+  /// Queues turning [image] into a clip with the first video model that is
+  /// downloaded; null when there is none or the engine is Invoke.
+  Future<DrawJob?> animate(
+    File image, {
+    required String folder,
+    String prompt = '',
+    int seconds = 4,
+    String? modelId,
+  }) async {
+    final s = settings();
+    if (s.imageEngine != ImageEngineChoice.builtIn) return null;
+    final ready = ImageCatalog.availableVideo(ImageCatalog.videoFor(s));
+    final model =
+        ready.where((m) => m.id == modelId).firstOrNull ?? ready.firstOrNull;
+    if (model == null) return null;
+    return draw(
+      DrawJob(
+        AnimateRequest(
+          model: model,
+          prompt: prompt.trim().isEmpty ? 'the scene comes to life' : prompt,
+          image: image,
+          frames: model.framesFor(seconds),
+          shape: await shapeOf(image),
+        ),
+        folder: folder,
+        forChat: false,
+      ),
+    );
+  }
+
+  /// "portrait", "landscape" or "square", from the proportions of [image].
+  static Future<String> shapeOf(File image) async {
+    final codec = await ui.instantiateImageCodec(await image.readAsBytes());
+    try {
+      final f = (await codec.getNextFrame()).image;
+      final ratio = f.width / f.height;
+      f.dispose();
+      return ratio < 0.85
+          ? 'portrait'
+          : ratio > 1.18
+          ? 'landscape'
+          : 'square';
+    } finally {
+      codec.dispose();
+    }
+  }
+
   /// Stops the picture being drawn and drops the ones waiting.
   void cancelAll() {
     for (final j in _queue) {
@@ -166,9 +215,10 @@ class ImageEngine extends ChangeNotifier {
           final file = await _run(job);
           log?.add(
             LogKind.drawing,
-            'Drew ${p.basename(file.path)} in '
+            '${job.request is AnimateRequest ? 'Made' : 'Drew'} '
+            '${p.basename(file.path)} in '
             '${DateTime.now().difference(started).inSeconds} s',
-            details: file.path,
+            details: [file.path, ..._output].join('\n'),
           );
           job._done.complete(file);
           if (job.forChat) await onDrawn?.call(job, file);
@@ -193,7 +243,12 @@ class ImageEngine extends ChangeNotifier {
     }
   }
 
+  /// What sd-cli printed for the current job, for Settings → Logs: when a
+  /// clip comes out wrong, this is what says why.
+  final _output = <String>[];
+
   Future<File> _run(DrawJob job) async {
+    _output.clear();
     // The reply that asked for it is still being written.
     while (runtime.busy) {
       await Future<void>.delayed(const Duration(milliseconds: 300));
@@ -205,17 +260,29 @@ class ImageEngine extends ChangeNotifier {
     if (s.freeGpuForDrawing && s.useGpu && s.llmMode == LlmMode.builtIn) {
       status = 'Making room on the graphics card';
       notifyListeners();
+      // A reply may have started while the engine was found; unloading the
+      // model now would cut it off. Nothing waits between this check and
+      // freeForDrawing, which makes later replies wait for the picture.
+      while (runtime.busy) {
+        await Future<void>.delayed(const Duration(milliseconds: 300));
+      }
       await runtime.freeForDrawing(done.future);
     }
     _cancel = Completer<void>();
     try {
-      status = 'Drawing';
+      final clip = job.request is AnimateRequest;
+      if (clip && viaInvoke) {
+        throw SdException('Clips need the built-in drawing, not Invoke.');
+      }
+      status = clip ? 'Making a clip' : 'Drawing';
       progress = 0;
       notifyListeners();
       final stamp = DateFormat('yyyyMMdd-HHmmss').format(DateTime.now());
-      var out = File(p.join(job.folder, 'images', 'drawn-$stamp.png'));
+      final name = clip ? 'animated' : 'drawn';
+      final ext = clip ? 'webm' : 'png';
+      var out = File(p.join(job.folder, 'images', '$name-$stamp.$ext'));
       for (var n = 2; await out.exists(); n++) {
-        out = File(p.join(job.folder, 'images', 'drawn-$stamp-$n.png'));
+        out = File(p.join(job.folder, 'images', '$name-$stamp-$n.$ext'));
       }
       final seed = job.request.seed ?? Random().nextInt(1 << 31);
       final r = job.request;
@@ -239,23 +306,47 @@ class ImageEngine extends ChangeNotifier {
           await _drawInInvoke(s, job.request, seed, _cancel!.future),
         );
       }
-      return await SdRun.run(
+      final made = await SdRun.run(
         exe,
         job.request,
-        modelsDir: ImageCatalog.dirFor(s),
+        modelsDir: job.request is AnimateRequest
+            ? ImageCatalog.videoFor(s)
+            : ImageCatalog.dirFor(s),
         lorasDir: ImageCatalog.lorasFor(s),
         out: out,
         seed: seed,
         cancel: _cancel!.future,
+        onLine: (line) {
+          if (_output.length < 300) _output.add(line);
+        },
         onProgress: (f) {
           progress = f;
           notifyListeners();
         },
       );
+      if (r is AnimateRequest) await keepThumbnail(r.image, made);
+      return made;
     } finally {
       _cancel = null;
       done.complete();
     }
+  }
+
+  /// The clip's poster for the gallery's tile: a copy of the picture it was
+  /// made from, where the gallery looks for posters.
+  static File thumbnailOf(File clip) => File(
+    p.join(
+      clip.parent.path,
+      SoulkynMediaDownload.postersFolder,
+      '${p.basenameWithoutExtension(clip.path)}.png',
+    ),
+  );
+
+  @visibleForTesting
+  static Future<void> keepThumbnail(File source, File clip) async {
+    final thumb = thumbnailOf(clip);
+    await thumb.parent.create(recursive: true);
+    await source.copy(thumb.path);
   }
 
   Future<Uint8List> _drawInInvoke(
@@ -317,7 +408,9 @@ class ImageEngine extends ChangeNotifier {
 
   /// Downloads every missing file of [m] into the picture models folder.
   Future<void> download(ImageModel m) async {
-    final dir = ImageCatalog.dirFor(settings());
+    final dir = m is VideoModel
+        ? ImageCatalog.videoFor(settings())
+        : ImageCatalog.dirFor(settings());
     downloads[m.id] = null;
     _cancelled.remove(m.id);
     notifyListeners();
@@ -330,10 +423,11 @@ class ImageEngine extends ChangeNotifier {
           done += f.sizeGb * 1e9;
           continue;
         }
+        final source = File(p.join(dir.path, f.sourceName));
         final file = await downloadFile(
           _http,
           f.url,
-          target,
+          source,
           onProgress: (got, _) {
             downloads[m.id] = ((done + got) / total).clamp(0.0, 0.99);
             notifyListeners();
@@ -341,6 +435,22 @@ class ImageEngine extends ChangeNotifier {
           isCancelled: () => _cancelled.contains(m.id),
         );
         await verifySha256(file, f.sha256);
+        if (f.convertTo != null) {
+          status = 'Squeezing ${f.sourceName}';
+          notifyListeners();
+          try {
+            final exe = await _ensureEngine(settings());
+            await SdRun.convert(
+              exe,
+              source: file,
+              out: target,
+              type: f.convertTo!,
+            );
+          } finally {
+            status = null;
+          }
+          await file.delete();
+        }
         done += f.sizeGb * 1e9;
       }
     } finally {
@@ -354,13 +464,18 @@ class ImageEngine extends ChangeNotifier {
   /// Deletes [m]'s files, except parts another downloaded model still
   /// uses.
   Future<void> delete(ImageModel m) async {
-    final dir = ImageCatalog.dirFor(settings());
+    final video = m is VideoModel;
+    final dir = video
+        ? ImageCatalog.videoFor(settings())
+        : ImageCatalog.dirFor(settings());
     final kept = {
-      for (final other in ImageCatalog.models)
+      for (final other
+          in video ? ImageCatalog.videoModels : ImageCatalog.models)
         if (other.id != m.id && ImageCatalog.installed(dir, other))
           for (final f in other.files) f.fileName,
     };
-    for (final f in m.files) {
+    // An own video file shares the VAE and text encoder of Wan 2.2 5B.
+    for (final f in m.own ? m.files.take(1) : m.files) {
       if (kept.contains(f.fileName)) continue;
       final file = ImageCatalog.fileIn(dir, f);
       if (await file.exists()) await file.delete();

@@ -76,6 +76,18 @@ void main() {
     expect(old.toldAboutMoreCompanions, isFalse);
   });
 
+  test('video portraits play unless switched off', () {
+    expect(
+      AppSettings.fromJson({'companionName': 'X'}).playVideoPortraits,
+      isTrue,
+    );
+    final off = AppSettings.fromJson(
+      jsonDecode(jsonEncode(first.copyWith(playVideoPortraits: false).toJson()))
+          as Map<String, Object?>,
+    );
+    expect(off.playVideoPortraits, isFalse);
+  });
+
   test('each companion keeps its own chats', () async {
     final tmp = await Directory.systemTemp.createTemp('companions_test');
     addTearDown(() => tmp.delete(recursive: true));

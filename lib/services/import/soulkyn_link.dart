@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -58,6 +59,8 @@ class SoulkynLink {
     Map<Object?, Object?> fields,
     Uri url, {
     String? avatarHint,
+    AvatarSet? avatars,
+    File? portrait,
   }) {
     final s = slug(url);
     final card = CharacterCard.parse({
@@ -76,7 +79,10 @@ class SoulkynLink {
       traits: card.traits,
       looks: card.looks,
       sections: card.sections,
+      portrait: portrait,
       avatarUrl: card.avatarUrl,
+      soulkynPage: url,
+      avatars: avatars,
       notes: card.notes,
     );
   }
@@ -166,6 +172,8 @@ class SoulkynLink {
     String html,
     Uri url, {
     String? avatarHint,
+    AvatarSet? avatars,
+    File? portrait,
   }) {
     final s = slug(url);
     final physical = _chipsUnder(html, const [
@@ -204,6 +212,7 @@ class SoulkynLink {
       'avatar': avatarFrom([
         _personaAvatar(html),
         avatarHint,
+        _videoPoster(html),
         _meta(html, 'og:image'),
       ], url),
       'data': {
@@ -236,7 +245,15 @@ class SoulkynLink {
       traits: card.traits,
       looks: card.looks,
       sections: card.sections,
+      portrait: portrait,
       avatarUrl: card.avatarUrl,
+      soulkynPage: url,
+      avatars:
+          avatars ??
+          switch (videoFrom([_avatarVideo(html)], url)) {
+            final Uri video => AvatarSet(video: video),
+            null => null,
+          },
       notes: [
         if (tagCount > 0 && editorStory == null)
           'The public page has no identity, clothing or location tags and '
@@ -322,6 +339,8 @@ class SoulkynLink {
   /// The first candidate that makes an HTTPS picture address. A relative
   /// or image-proxy address (`/_ipx/w_700/https://rub.soulkyn.io/…`) is
   /// resolved against the page, or the original address inside it taken.
+  /// A video file (some Soulkyn avatars are short clips) is passed over,
+  /// since only a picture can be the portrait.
   @visibleForTesting
   static String avatarFrom(Iterable<String?> candidates, Uri page) {
     for (final c in candidates) {
@@ -338,11 +357,101 @@ class SoulkynLink {
         final r = Uri.tryParse(c);
         u = r == null ? null : page.resolveUri(r);
       }
-      if (u != null && u.scheme == 'https' && u.host.isNotEmpty) {
+      if (u != null &&
+          u.scheme == 'https' &&
+          u.host.isNotEmpty &&
+          !isVideoAddress(u)) {
         return u.toString();
       }
     }
     return '';
+  }
+
+  /// Whether [u] names a video file, by its extension.
+  static bool isVideoAddress(Uri u) => RegExp(
+    r'\.(mp4|m4v|mov|webm|mkv)$',
+    caseSensitive: false,
+  ).hasMatch(u.path);
+
+  /// The portrait set from Soulkyn's character data (`persona.Avatar` and
+  /// `persona.AvatarNSFW`) as [soulkynPersonaAvatars] read it: file ids on
+  /// rub.soulkyn.io, `<id>` for the full picture and `<id>.mp4` for a video.
+  /// Ids that aren't plain UUIDs are passed over.
+  static AvatarSet? avatarSetFrom(Object? read) {
+    if (read is! Map) return null;
+    final uuid = RegExp(
+      r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+    );
+    Uri? file(Object? side, String key, {bool video = false}) {
+      final id = side is Map ? side[key] : null;
+      if (id is! String || !uuid.hasMatch(id)) return null;
+      return Uri.https('rub.soulkyn.io', video ? '/$id.mp4' : '/$id');
+    }
+
+    final sfw = read['sfw'], nsfw = read['nsfw'];
+    final set = AvatarSet(
+      still: file(sfw, 'still'),
+      video: file(sfw, 'video', video: true),
+      nsfwStill: file(nsfw, 'still'),
+      nsfwVideo: file(nsfw, 'video', video: true),
+    );
+    return set.isEmpty ? null : set;
+  }
+
+  /// The first candidate that is an HTTPS video file (`.mp4`, `.webm`…),
+  /// resolved against the page.
+  static Uri? videoFrom(Iterable<String?> candidates, Uri page) {
+    for (final c in candidates) {
+      if (c == null || c.trim().isEmpty) continue;
+      final r = Uri.tryParse(c.trim());
+      final u = r == null ? null : page.resolveUri(r);
+      if (u != null &&
+          u.scheme == 'https' &&
+          u.host.isNotEmpty &&
+          isVideoAddress(u)) {
+        return u;
+      }
+    }
+    return null;
+  }
+
+  /// The avatar clip: `<video aria-label="Avatar video for …" src=…>`, or
+  /// else the first video from Soulkyn's file host.
+  static String? _avatarVideo(String html) {
+    String? fallback;
+    for (final m in RegExp(
+      r'<video\b[^>]*>',
+      caseSensitive: false,
+    ).allMatches(html)) {
+      final tag = m.group(0)!;
+      final src = RegExp(r"""(?<![\w-])src=["']([^"']+)["']""").firstMatch(tag);
+      if (src == null) continue;
+      final url = _unescape(src.group(1)!);
+      if (RegExp(
+        r"""aria-label=["']Avatar video""",
+        caseSensitive: false,
+      ).hasMatch(tag)) {
+        return url;
+      }
+      if (url.contains('soulkyn.io/')) fallback ??= url;
+    }
+    return fallback;
+  }
+
+  /// The still picture (`poster`) of the page's first video, which is the
+  /// avatar on characters whose portrait is a short clip.
+  static String? _videoPoster(String html) {
+    for (final m in RegExp(
+      r'<video\b[^>]*>',
+      caseSensitive: false,
+    ).allMatches(html)) {
+      final poster = RegExp(
+        r"""(?<![\w-])poster=["']([^"']+)["']""",
+        caseSensitive: false,
+      ).firstMatch(m.group(0)!);
+      if (poster != null) return _unescape(poster.group(1)!);
+    }
+    return null;
   }
 
   static String? _personaAvatar(String html) {
@@ -499,3 +608,53 @@ const soulkynExporter =
     r'''setTimeout(()=>URL.revokeObjectURL(url),1000);'''
     r'''alert('Saved '+slug+'-soulkyn.json: '+sk.personality_tags.length+' personality and '+sk.physical_tags.length+' physical traits. Now choose it in VoxCordis.');'''
     r'''})();''';
+
+/// Reads the ids of a Soulkyn character's avatar files from the page's own
+/// data: the profile's `persona` holds `Avatar` and `AvatarNSFW`, each with
+/// `FWSUUID` (the picture), `VideoFwsUUID` and a smaller
+/// `VideoLightFwsUUID`. The light one is cut short (8 s of a 14 s clip,
+/// on a real one), so the full clip wins. Found through Vue's component tree, from an
+/// element up (development builds) or from the app's root down (what a
+/// production build keeps). Null when the page has neither.
+const soulkynPersonaAvatars = r'''(() => {
+  const ok = p => p && typeof p === 'object' && (p.Avatar || p.AvatarNSFW);
+  const fromInstance = i => {
+    if (!i) return null;
+    for (const src of [i.props, i.setupState, i.data]) {
+      if (src && ok(src.persona)) return src.persona;
+    }
+    return null;
+  };
+  let persona = null;
+  for (const el of document.querySelectorAll('video, img, h1')) {
+    let e = el;
+    while (e && !e.__vueParentComponent) e = e.parentElement;
+    for (let i = e && e.__vueParentComponent, n = 0; i && n < 50; i = i.parent, n++) {
+      persona = fromInstance(i);
+      if (persona) break;
+    }
+    if (persona) break;
+  }
+  if (!persona) {
+    const root = [...document.querySelectorAll('*')].find(e => e.__vue_app__ || e._vnode);
+    const app = root && root.__vue_app__;
+    const stack = [root && root._vnode, app && app._instance && app._instance.subTree];
+    for (let n = 0; stack.length && n < 20000 && !persona; n++) {
+      const v = stack.pop();
+      if (!v || typeof v !== 'object') continue;
+      if (v.component) {
+        persona = fromInstance(v.component);
+        stack.push(v.component.subTree);
+      }
+      if (Array.isArray(v.children)) stack.push(...v.children);
+      else if (v.children && typeof v.children === 'object') stack.push(...Object.values(v.children));
+      if (v.suspense) stack.push(v.suspense.activeBranch);
+    }
+  }
+  if (!persona) return null;
+  const pick = a => a && typeof a === 'object' ? {
+    still: a.FWSUUID || '',
+    video: a.VideoDisabled ? '' : (a.VideoFwsUUID || a.VideoLightFwsUUID || ''),
+  } : null;
+  return { sfw: pick(persona.Avatar), nsfw: pick(persona.AvatarNSFW) };
+})()''';

@@ -150,6 +150,8 @@ class GlassSelect<T> extends StatefulWidget {
     this.label,
     this.width,
     this.minWidth,
+    this.placeholder,
+    this.pill = false,
   });
 
   final T value;
@@ -165,6 +167,13 @@ class GlassSelect<T> extends StatefulWidget {
   /// The least it gets when it fits its option, so pickers stacked in a
   /// column line up whatever they show.
   final double? minWidth;
+
+  /// Shown while [value] matches no option (a "More" button).
+  final String? placeholder;
+
+  /// A rounder chip that tints with the accent while an option is chosen,
+  /// to sit in a row with other chips.
+  final bool pill;
 
   @override
   State<GlassSelect<T>> createState() => _GlassSelectState<T>();
@@ -314,13 +323,19 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
                   : BoxConstraints(minWidth: widget.minWidth!),
               padding: const EdgeInsets.only(left: 10, right: 6),
               decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(12),
-                color: hover || _open ? palette.tile : Colors.transparent,
+                borderRadius: BorderRadius.circular(widget.pill ? 18 : 12),
+                color: widget.pill && current != null
+                    ? Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: 0.2)
+                    : hover || _open
+                    ? palette.tile
+                    : Colors.transparent,
                 border: Border.all(
-                  color: _open
+                  color: _open || (widget.pill && current != null)
                       ? Theme.of(
                           context,
-                        ).colorScheme.primary.withValues(alpha: 0.5)
+                        ).colorScheme.primary.withValues(alpha: 0.6)
                       : palette.glassBorder,
                 ),
               ),
@@ -340,7 +355,7 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
                         ],
                         Flexible(
                           child: Text(
-                            current?.label ?? '',
+                            current?.label ?? widget.placeholder ?? '',
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(

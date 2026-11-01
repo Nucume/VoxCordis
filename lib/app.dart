@@ -5,6 +5,7 @@ import 'data/looks.dart';
 import 'data/settings.dart';
 import 'features/setup/setup_wizard.dart';
 import 'shell/home_shell.dart';
+import 'shell/interface_scale.dart';
 import 'shell/window_frame.dart';
 import 'theme/app_theme.dart';
 import 'theme/system_theme.dart';
@@ -96,17 +97,20 @@ class _CompanionAppState extends State<CompanionApp>
           color: Colors.transparent,
           // The background under everything, the title bar included, and
           // the pages under the title bar.
-          builder: (context, navigator) => WindowCorners(
-            child: AuroraBackground(
-              accent: accent,
-              colors: [for (final c in glows) Color(c)],
-              layout:
-                  settings.value.backgroundLayout ??
-                  AuroraBackground.defaultLayout,
-              // Moving only during setup: it costs the graphics card the
-              // model needs.
-              animate: setup,
-              child: WindowFrame(child: navigator!),
+          builder: (context, navigator) => InterfaceScale(
+            scale: settings.value.interfaceScale,
+            child: WindowCorners(
+              child: AuroraBackground(
+                accent: accent,
+                colors: [for (final c in glows) Color(c)],
+                layout:
+                    settings.value.backgroundLayout ??
+                    AuroraBackground.defaultLayout,
+                // Moving only during setup: it costs the graphics card the
+                // model needs.
+                animate: setup,
+                child: WindowFrame(child: navigator!),
+              ),
             ),
           ),
           // First run (no home folder yet) goes through setup, and so does

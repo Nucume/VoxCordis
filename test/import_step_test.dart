@@ -95,8 +95,8 @@ void main() {
               PortraitDownload(
                 url: c.avatarUrl!,
                 onPortrait: (f) => portrait = f,
-                download: (url) async {
-                  fetched.add(url);
+                download: () async {
+                  fetched.add(c.avatarUrl!);
                   return File('picked.png');
                 },
               ),

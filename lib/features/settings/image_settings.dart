@@ -9,8 +9,10 @@ import '../../app_scope.dart';
 import '../../data/settings.dart';
 import '../../services/images/image_catalog.dart';
 import '../../services/invoke_client.dart';
+import '../../services/updater.dart' show videoGenEnabled;
 import '../../services/images/sd_runtime.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/download_bar.dart';
 
 /// Settings → Images: whether the companion may draw, the picture models
 /// and LoRAs, and the graphics card. The switches are saved with the page's
@@ -62,7 +64,7 @@ class _ImageSettingsState extends State<ImageSettings> {
     try {
       await engine.download(m);
       if (!mounted) return;
-      if (_v.imageModel == null) {
+      if (_v.imageModel == null && m is! VideoModel) {
         widget.onChanged(_v.copyWith(imageModel: m.id));
       }
       setState(() {});
@@ -275,6 +277,7 @@ class _ImageSettingsState extends State<ImageSettings> {
         final s = _v;
         final palette = context.palette;
         final dir = ImageCatalog.dirFor(s);
+        final videoDir = ImageCatalog.videoFor(s);
         final ready = ImageCatalog.available(dir);
         final own = ImageCatalog.own(dir);
         final loras = ImageCatalog.loras(ImageCatalog.lorasFor(s));
@@ -458,6 +461,60 @@ class _ImageSettingsState extends State<ImageSettings> {
                   ),
                 ],
               ),
+              if (videoGenEnabled) ...[
+                const SizedBox(height: 22),
+                Text('Video models', style: sectionStyle),
+                const SizedBox(height: 4),
+                Text(
+                  'Turn any picture into a short clip, from the picture\'s '
+                  'viewer in the Images tab. Clips take minutes, not seconds, '
+                  'and the longer ones need a card with plenty of memory.',
+                  style: muted,
+                ),
+                const SizedBox(height: 8),
+                for (final m in ImageCatalog.videoModels)
+                  _ModelTile(
+                    model: m,
+                    installed: ImageCatalog.installed(videoDir, m),
+                    usual: false,
+                    progress: engine.downloads[m.id],
+                    downloading: engine.downloads.containsKey(m.id),
+                    onDownload: () => _download(m),
+                    onCancel: () => engine.cancelDownload(m.id),
+                    onDelete: () => _delete(m),
+                  ),
+                for (final m in ImageCatalog.ownVideo(videoDir))
+                  _ModelTile(
+                    model: m,
+                    installed: true,
+                    usual: false,
+                    onDelete: () => _delete(m),
+                  ),
+                Wrap(
+                  spacing: 8,
+                  children: [
+                    TextButton.icon(
+                      onPressed: () => _addFile(videoDir, const [
+                        'safetensors',
+                        'gguf',
+                      ], 'Video models'),
+                      icon: const Icon(Icons.add_rounded),
+                      label: const Text('Add your own model…'),
+                    ),
+                    TextButton.icon(
+                      onPressed: () => _open(videoDir),
+                      icon: const Icon(Icons.folder_open_outlined),
+                      label: const Text('Open the folder'),
+                    ),
+                  ],
+                ),
+                Text(
+                  'Your own models: finetunes of Wan 2.2 5B as a single .gguf '
+                  'or .safetensors file. They use the VAE and text encoder that '
+                  'come with Wan 2.2 5B.',
+                  style: muted,
+                ),
+              ],
             ],
           ],
         );
@@ -476,7 +533,7 @@ class _ModelTile extends StatelessWidget {
     this.onDownload,
     this.onCancel,
     this.onDelete,
-    required this.onUsual,
+    this.onUsual,
   });
 
   final ImageModel model;
@@ -487,7 +544,7 @@ class _ModelTile extends StatelessWidget {
   final VoidCallback? onDownload;
   final VoidCallback? onCancel;
   final VoidCallback? onDelete;
-  final VoidCallback onUsual;
+  final VoidCallback? onUsual;
 
   @override
   Widget build(BuildContext context) {
@@ -534,7 +591,7 @@ class _ModelTile extends StatelessWidget {
                 if (m.license != null) Text(m.license!, style: muted),
                 if (downloading) ...[
                   const SizedBox(height: 6),
-                  LinearProgressIndicator(value: progress),
+                  DownloadBar(progress: progress),
                 ],
               ],
             ),
@@ -548,7 +605,7 @@ class _ModelTile extends StatelessWidget {
               child: const Text('Download'),
             )
           else ...[
-            if (!usual)
+            if (!usual && onUsual != null)
               TextButton(onPressed: onUsual, child: const Text('Use usually')),
             if (onDelete != null)
               IconButton(

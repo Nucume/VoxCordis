@@ -42,6 +42,7 @@ class LlamaServer {
     String? chatTemplateFile,
     String? mmprojPath,
     bool embedding = false,
+    bool quantizeCache = true,
     Duration timeout = const Duration(minutes: 3),
     http.Client? client,
     void Function(int pid)? onSpawn,
@@ -83,6 +84,17 @@ class LlamaServer {
           '--mmproj',
           mmprojPath,
           if (!useGpu) '--no-mmproj-offload',
+        ],
+        // The app talks to one chat at a time, so one slot: no memory is
+        // set aside for requests that never come.
+        '--parallel', '1',
+        if (!embedding && quantizeCache) ...[
+          // Flash attention is what lets the KV cache be stored as 8-bit,
+          // which halves its memory (room for a longer span or a bigger
+          // model) with almost no change in quality.
+          '--flash-attn', 'on',
+          '--cache-type-k', 'q8_0',
+          '--cache-type-v', 'q8_0',
         ],
         '--no-webui',
         '--alias', modelAlias,
@@ -143,7 +155,12 @@ class LlamaServer {
     }
   }
 
+  /// Whether the app stopped this server itself, rather than it crashing.
+  bool get stopRequested => _stopRequested;
+  bool _stopRequested = false;
+
   Future<void> stop() async {
+    _stopRequested = true;
     _process.kill();
     try {
       await _process.exitCode.timeout(const Duration(seconds: 5));
@@ -165,6 +182,46 @@ class LlamaServer {
     await s.close();
     return port;
   }
+}
+
+/// Plain words for why a server that ended with exit [code] stopped, from
+/// the last lines it printed ([log]).
+String serverExitHint(int code, String log) {
+  final lines = log.split('\n');
+  final lower = log.toLowerCase();
+  if (const [
+    'out of memory',
+    'failed to allocate',
+    'unable to allocate',
+    'erroroutofdevicememory',
+    'erroroutofhostmemory',
+    'bad_alloc',
+  ].any(lower.contains)) {
+    return 'it ran out of memory';
+  }
+  if (lower.contains('devicelost') || lower.contains('device lost')) {
+    return 'the graphics driver stopped it';
+  }
+  // The system's out-of-memory killer on Linux and macOS.
+  if (code == -9 && !Platform.isWindows) {
+    return 'the system stopped it, most likely for lack of memory';
+  }
+  final hint = lines.lastWhere(
+    (l) =>
+        l.toLowerCase().contains('error') ||
+        l.contains('failed') ||
+        l.contains('GGML_ASSERT') ||
+        l.contains('terminate called'),
+    orElse: () => '',
+  );
+  // Windows codes read best in hex, like 0xC0000005.
+  final shown = Platform.isWindows && code < 0
+      ? '0x${(code & 0xFFFFFFFF).toRadixString(16).toUpperCase()}'
+      : '$code';
+  if (hint.trim().isEmpty) return 'it crashed (exit code $shown)';
+  final line = hint.trim();
+  return 'it crashed (exit code $shown: '
+      '${line.length > 200 ? '${line.substring(0, 200)}…' : line})';
 }
 
 class LlamaServerException implements Exception {

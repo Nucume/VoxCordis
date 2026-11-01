@@ -24,9 +24,12 @@ import '../../data/skills/skills.dart';
 import '../../services/images/draw_tools.dart';
 import '../../services/images/image_engine.dart';
 import '../../services/llm_client.dart';
+import '../../services/llm_providers.dart';
 import '../../services/logs/app_log.dart';
 import '../../services/recall/recall.dart';
+import '../../services/runtime/llama_server.dart';
 import '../../services/runtime/model_catalog.dart';
+import '../../services/runtime/runtime_controller.dart';
 import '../../services/schedule/poke.dart';
 import '../../services/schedule/scheduler.dart';
 import '../../services/sight.dart';
@@ -35,6 +38,7 @@ import '../../services/system/system_tools.dart';
 import '../../services/web/web_tools.dart';
 import 'attachments_prompt.dart';
 import 'chat_text.dart';
+import 'edit_lesson.dart';
 import 'prompt_history.dart';
 
 enum ChatPhase {
@@ -50,6 +54,21 @@ enum ChatPhase {
 
   /// Eyes is looking at a shared picture.
   looking,
+}
+
+/// What the companion is taking from the human's edit of one of its
+/// replies, shown under that reply until it is kept or skipped.
+class LessonOffer {
+  const LessonOffer({required this.messageId, this.rule, this.why});
+
+  /// The edited reply.
+  final String messageId;
+
+  /// Null while the model is still working it out.
+  final String? rule;
+  final String? why;
+
+  bool get thinking => rule == null;
 }
 
 /// Runs the conversation: builds the prompt (core file + recalled memories +
@@ -256,6 +275,153 @@ class ChatController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// What the companion makes of the human's last edit, if anything.
+  LessonOffer? lessonOffer;
+  http.Client? _lessonHttp;
+
+  /// Replaces the companion's reply [m] with the human's [text], so every
+  /// later turn sees the edited version, then works out what it can learn
+  /// from the change and offers that as a lesson. Shared pictures and
+  /// files stay with the message.
+  Future<void> editReply(ChatMessage m, String text) async {
+    if (busy || m.role != 'assistant') return;
+    final before = SharedFiles.withoutMarkers(m.content);
+    final after = text.trim();
+    if (after.isEmpty || after == before) return;
+    final content = EditLesson.withMarkersOf(m.content, after);
+    await _services.messages.setContent(m.id, content);
+    final i = messages.indexWhere((x) => x.id == m.id);
+    if (i >= 0) messages[i] = messages[i].withContent(content);
+    _log(LogKind.chat, 'You edited a reply', details: '$before\n\n→\n\n$after');
+    // The exchange is found by meaning from its new words.
+    final asked = _askedBefore(m);
+    if (asked != null) {
+      _services.recall.update(limit: 8, refresh: asked.id).ignore();
+    }
+    _cancelLesson();
+    if (EditLesson.worthLearning(before, after)) {
+      lessonOffer = LessonOffer(messageId: m.id);
+      _learnFromEdit(m.id, before, after, asked?.content).ignore();
+    }
+    notifyListeners();
+  }
+
+  /// The human's message right before [m] in the chat shown, if any.
+  ChatMessage? _askedBefore(ChatMessage m) {
+    final i = messages.indexWhere((x) => x.id == m.id);
+    for (var j = i - 1; j >= 0; j--) {
+      if (messages[j].role == 'user') return messages[j];
+      if (messages[j].role == 'assistant') return null;
+    }
+    return null;
+  }
+
+  Future<void> _learnFromEdit(
+    String id,
+    String before,
+    String after,
+    String? asked,
+  ) async {
+    final s = _services.settings.value;
+    final client = _lessonHttp = http.Client();
+    _services.runtime.hold();
+    String? problem;
+    try {
+      final target = await _services.runtime.ensureReady(s);
+      final llm = LlmClient(
+        baseUrl: target.baseUrl,
+        model: target.model,
+        apiKey: target.apiKey,
+        sampling: {...samplingFor(s), 'temperature': 0.2},
+        stop: stopFor(s),
+        maxTokens: EditLesson.maxTokens,
+        firstWait: firstWait,
+        stallWait: stallWait,
+        client: client,
+      );
+      final answer = StringBuffer();
+      final prompt = EditLesson.prompt(
+        s,
+        before: SharedFiles.withoutMarkers(before),
+        after: after,
+        asked: asked == null ? null : SharedFiles.withoutMarkers(asked),
+      );
+      await for (final e in llm.chat(prompt)) {
+        if (e is TextDelta) answer.write(e.text);
+      }
+      if (!identical(_lessonHttp, client)) return; // skipped or replaced
+      final found = EditLesson.parse(answer.toString());
+      _log(
+        LogKind.thinking,
+        found == null
+            ? 'Nothing to learn from your edit'
+            : 'Worked out a lesson from your edit',
+        details: answer.toString().trim(),
+      );
+      lessonOffer = found == null
+          ? null
+          : LessonOffer(messageId: id, rule: found.rule, why: found.why);
+      if (found == null) toolNote = 'Nothing new to learn from that edit';
+    } on Object catch (e) {
+      if (!identical(_lessonHttp, client)) return;
+      problem = '$e';
+      lessonOffer = null;
+      toolNote = 'Couldn\'t work out a lesson from that edit';
+      _log(
+        LogKind.thinking,
+        'Couldn\'t work out a lesson from your edit',
+        details: problem,
+        error: true,
+      );
+    } finally {
+      client.close();
+      if (identical(_lessonHttp, client)) _lessonHttp = null;
+      _services.runtime.release(_services.settings.value);
+      notifyListeners();
+    }
+  }
+
+  void _cancelLesson() {
+    final c = _lessonHttp;
+    _lessonHttp = null;
+    c?.close();
+    lessonOffer = null;
+  }
+
+  /// Saves the offered lesson, as [rule] when the human reworded it, to
+  /// lessons.md. Returns why it couldn't be saved, or null.
+  Future<String?> keepLesson({String? rule}) async {
+    final offer = lessonOffer;
+    if (offer == null || offer.thinking) return null;
+    final result =
+        jsonDecode(
+              await _services.deskTools.call('learn_lesson', {
+                'rule': (rule ?? offer.rule!).replaceAll('*', '').trim(),
+                'why': offer.why!,
+              }),
+            )
+            as Map<String, Object?>;
+    if (result['error'] case final String problem) {
+      _log(
+        LogKind.chat,
+        'The lesson wasn\'t saved',
+        details: problem,
+        error: true,
+      );
+      return problem;
+    }
+    lessonOffer = null;
+    _addNote('Learned a lesson from your edit');
+    notifyListeners();
+    return null;
+  }
+
+  /// Drops the offered lesson, or stops working one out.
+  void skipLesson() {
+    _cancelLesson();
+    notifyListeners();
+  }
+
   /// The human's message that [reply] answered, when [reply] is the last
   /// message: deleting that reply takes it too, so the chat doesn't end on
   /// a message with no answer.
@@ -332,6 +498,36 @@ class ChatController extends ChangeNotifier {
   /// limit is. Null while a server-hosted model's limit is unknown.
   int? _contextFor(AppSettings s) =>
       s.llmMode == LlmMode.builtIn ? s.contextSize : _serverCtx[_modelKey(s)];
+
+  /// What to tell the human when the connection to the model dropped twice
+  /// in one reply. [why] says how the built-in model's server ended, when
+  /// it crashed.
+  static String droppedMessage(
+    AppSettings s, {
+    String? why,
+    bool crashed = false,
+  }) {
+    if (s.llmMode == LlmMode.external) {
+      final provider = LlmProvider.forEndpoint(s.llmEndpoint);
+      final host = provider == LlmProvider.custom
+          ? 'the server'
+          : provider.label;
+      return 'The connection to $host dropped while ${s.companionName} was '
+          'writing. Try again.';
+    }
+    if (crashed) {
+      final help = why != null && why.contains('memory')
+          ? 'A smaller model or a shorter memory span in Settings → Brain '
+                'should help.'
+          : 'If it keeps happening, a shorter memory span, or turning off '
+                'the graphics card in Settings → Brain, may help.';
+      return 'The built-in model stopped while ${s.companionName} was '
+          'writing${why == null ? '' : ': $why'}. Try again: it starts '
+          'again by itself. $help';
+    }
+    return 'The connection to the built-in model dropped while '
+        '${s.companionName} was writing. Try again.';
+  }
 
   /// Whether [e] is a server saying the model can't be given tools.
   static bool refusedTools(LlmException e) =>
@@ -779,6 +975,7 @@ class ChatController extends ChangeNotifier {
     _unattended = scheduled?.kind == ScheduleKind.task || poke != null;
     // A summary being written would keep this reply waiting.
     _services.storyKeeper.cancel();
+    if (lessonOffer?.thinking ?? false) _cancelLesson();
     error = null;
     toolNote = null;
     stopped = false;
@@ -798,7 +995,7 @@ class ChatController extends ChangeNotifier {
 
     _services.runtime.hold();
     try {
-      final target = await _services.runtime.ensureReady(settings);
+      var target = await _services.runtime.ensureReady(settings);
       if (_stopRequested) throw const _Stopped();
       phase = ChatPhase.thinking;
       notifyListeners();
@@ -812,7 +1009,8 @@ class ChatController extends ChangeNotifier {
           ScheduleKind.task => 'task',
         }} with ${target.model}',
       );
-      final client = LlmClient(
+      final http.Client connection = _http = http.Client();
+      LlmClient clientFor(LlmTarget target) => LlmClient(
         baseUrl: target.baseUrl,
         model: target.model,
         apiKey: target.apiKey,
@@ -822,8 +1020,9 @@ class ChatController extends ChangeNotifier {
         progress: settings.llmMode == LlmMode.builtIn,
         firstWait: firstWait,
         stallWait: stallWait,
-        client: _http = http.Client(),
+        client: connection,
       );
+      var client = clientFor(target);
       final core = await CoreRules.load(settings);
       final desk = await DeskFiles.load(settings);
       // The prompt carries the story so far and the recent messages, as
@@ -952,6 +1151,7 @@ class ChatController extends ChangeNotifier {
         }
       }
       var refits = 0;
+      var drops = 0;
       // Repeats are skipped across the whole reply.
       final seen = <String>{};
       var actedFirst = false;
@@ -985,7 +1185,7 @@ class ChatController extends ChangeNotifier {
       for (var round = 0; round <= _maxToolRounds; round++) {
         List<ToolCall>? calls;
         var checkedText = buffer.length, checkedThoughts = thoughts.length;
-        final thoughtsFrom = thoughts.length;
+        final textFrom = buffer.length, thoughtsFrom = thoughts.length;
         endMarked = false;
         try {
           await for (final event in client.chat(
@@ -1065,6 +1265,66 @@ class ChatController extends ChangeNotifier {
             // Leaving the loop closes the stream, which stops the server.
             if (looped) break;
           }
+        } on http.ClientException catch (e) {
+          // The connection dropped: the server crashed or was stopped, or
+          // never answered. Start it again and write this round once more.
+          if (_stopRequested) rethrow;
+          final exit = settings.llmMode == LlmMode.builtIn
+              ? await _services.runtime.exitOf(target.baseUrl)
+              : null;
+          final crash = exit != null && !exit.onPurpose;
+          final why = crash ? serverExitHint(exit.code, exit.log) : null;
+          _log(
+            LogKind.chat,
+            exit == null
+                ? 'The connection to the model dropped${drops == 0 ? '; trying again' : ''}'
+                : exit.onPurpose
+                ? 'The model was restarted while writing; trying again'
+                : 'The model stopped while writing: $why'
+                      '${drops == 0 ? '; restarting it' : ''}',
+            details: [
+              e.message,
+              if (exit != null) 'Exit code: ${exit.code}',
+              if (exit != null && exit.log.isNotEmpty)
+                'Last lines it printed:\n${exit.log}',
+            ].join('\n'),
+            error: exit == null || crash,
+          );
+          if (drops++ > 0) {
+            throw LlmException(
+              droppedMessage(settings, why: why, crashed: crash),
+            );
+          }
+          // What this round wrote goes; the retry writes it again.
+          final keepText = buffer.toString().substring(
+            0,
+            min(textFrom, buffer.length),
+          );
+          final keepThoughts = thoughts.toString().substring(
+            0,
+            min(thoughtsFrom, thoughts.length),
+          );
+          buffer
+            ..clear()
+            ..write(keepText);
+          thoughts
+            ..clear()
+            ..write(keepThoughts);
+          reply = reply.withContent(shown(), reasoning: thoughts.toString());
+          messages[messages.length - 1] = reply;
+          if (crash) _addNote('The model stopped and was started again');
+          phase = ChatPhase.waking;
+          reading = null;
+          notifyListeners();
+          target = await _services.runtime.ensureReady(
+            _services.settings.value,
+          );
+          if (_stopRequested) throw const _Stopped();
+          client = clientFor(target);
+          phase = ChatPhase.thinking;
+          notifyListeners();
+          round--;
+          continue;
         } on LlmException catch (e) {
           // Still too long for the model, by the server's own count: learn
           // how far off the guess was, leave out more and ask again.

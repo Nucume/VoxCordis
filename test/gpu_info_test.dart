@@ -11,10 +11,12 @@ void main() {
     expect(g.memoryGb, 12);
   });
 
-  test('reads the Windows display adapter registry', () {
-    final g = GpuInfo.parseWindowsRegistry(
-      'Intel(R) UHD Graphics|\r\nAMD Radeon RX 6700 XT|12868124672\r\n',
-    )!;
+  test('picks the Windows display adapter with the most memory', () {
+    final g = GpuInfo.fromAdapters([
+      (name: 'Intel(R) UHD Graphics', bytes: 0),
+      (name: 'AMD Radeon RX 6700 XT', bytes: 12868124672),
+      (name: 'Small GPU', bytes: 1073741824),
+    ])!;
     expect(g.name, 'AMD Radeon RX 6700 XT');
     expect(g.memoryGb!.round(), 12);
   });

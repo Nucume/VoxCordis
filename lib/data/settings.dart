@@ -12,10 +12,18 @@ enum LlmMode { builtIn, external }
 /// doesn't say.
 enum ThemeChoice { system, light, dark }
 
+/// The range of the interface size slider in Settings.
+const minInterfaceScale = 0.8;
+const maxInterfaceScale = 1.5;
+
 /// Where the light that says whether the brain is ready sits: on the
 /// portrait's corner, next to the companion's name, or as the labelled
 /// chip in the chat's top bar.
 enum StatusLight { portrait, name, header }
+
+/// How Settings shows its pages: a glass pill row across the top, or a
+/// glass rail down the left.
+enum SettingsTabs { top, side }
 
 /// Where web_search looks: DuckDuckGo needs no account, Brave and Tavily
 /// want a key, SearXNG is an instance the human names.
@@ -24,6 +32,9 @@ enum SearchProvider { duckDuckGo, brave, tavily, searxng }
 /// What draws the companion's pictures: nothing yet, VoxCordis itself
 /// (stable-diffusion.cpp on this computer), or an InvokeAI the human runs.
 enum ImageEngineChoice { off, builtIn, invoke }
+
+/// What happens when the human logs in to the computer.
+enum StartMode { off, onScreen, minimized }
 
 /// What one picture model was last drawn with in the draw panel. A null
 /// number means "the model's own default".
@@ -36,6 +47,7 @@ class DrawChoices {
     this.cfg,
     this.seed,
     this.negative = '',
+    this.loras = const {},
   });
 
   final int? width;
@@ -45,13 +57,17 @@ class DrawChoices {
   final int? seed;
   final String negative;
 
+  /// The LoRAs picked for this model, by name, with their strength.
+  final Map<String, double> loras;
+
   bool get isEmpty =>
       width == null &&
       height == null &&
       steps == null &&
       cfg == null &&
       seed == null &&
-      negative.isEmpty;
+      negative.isEmpty &&
+      loras.isEmpty;
 
   Map<String, Object?> toJson() => {
     if (width != null) 'width': width,
@@ -60,16 +76,26 @@ class DrawChoices {
     if (cfg != null) 'cfg': cfg,
     if (seed != null) 'seed': seed,
     if (negative.isNotEmpty) 'negative': negative,
+    if (loras.isNotEmpty) 'loras': loras,
   };
 
-  factory DrawChoices.fromJson(Map<String, Object?> json) => DrawChoices(
-    width: json['width'] as int?,
-    height: json['height'] as int?,
-    steps: json['steps'] as int?,
-    cfg: (json['cfg'] as num?)?.toDouble(),
-    seed: json['seed'] as int?,
-    negative: json['negative'] as String? ?? '',
-  );
+  factory DrawChoices.fromJson(Map<String, Object?> json) {
+    final loras = json['loras'];
+    return DrawChoices(
+      width: json['width'] as int?,
+      height: json['height'] as int?,
+      steps: json['steps'] as int?,
+      cfg: (json['cfg'] as num?)?.toDouble(),
+      seed: json['seed'] as int?,
+      negative: json['negative'] as String? ?? '',
+      loras: {
+        if (loras is Map)
+          for (final e in loras.entries)
+            if (e.key is String && e.value is num)
+              e.key as String: (e.value as num).toDouble().clamp(-1, 2),
+      },
+    );
+  }
 
   @override
   bool operator ==(Object other) =>
@@ -79,15 +105,26 @@ class DrawChoices {
       other.steps == steps &&
       other.cfg == cfg &&
       other.seed == seed &&
-      other.negative == negative;
+      other.negative == negative &&
+      mapEquals(other.loras, loras);
 
   @override
-  int get hashCode => Object.hash(width, height, steps, cfg, seed, negative);
+  int get hashCode => Object.hash(
+    width,
+    height,
+    steps,
+    cfg,
+    seed,
+    negative,
+    Object.hashAllUnordered(
+      loras.entries.map((e) => Object.hash(e.key, e.value)),
+    ),
+  );
 }
 
 /// The draw panel as it was left: the Advanced switch, the picture model,
-/// the shape, and each model's own size, steps, guidance, seed and negative
-/// prompt, so switching models brings back what that model was last given.
+/// the shape, and each model's own size, steps, guidance, seed, negative
+/// prompt and LoRAs, so switching models brings back what that model was last given.
 @immutable
 class DrawPanelPrefs {
   const DrawPanelPrefs({
@@ -185,9 +222,15 @@ class AppSettings {
     this.colorway,
     this.themeChoice = ThemeChoice.system,
     this.statusLight = StatusLight.portrait,
+    this.settingsTabs = SettingsTabs.top,
     this.backgroundDim = 0.6,
+    this.interfaceScale = 1.0,
+    this.videoVolume = 100,
+    this.playVideoPortraits = true,
+    this.showNsfwAvatar = false,
     this.systemAccess = false,
     this.allowedSystemActions = const [],
+    this.allowEverything = false,
     this.companionId,
     this.otherCompanions = const [],
     this.toldAboutMoreCompanions = false,
@@ -201,7 +244,7 @@ class AppSettings {
     this.keepRunning = false,
     this.keepLogs = true,
     this.logsOff = const [],
-    this.startWithComputer = false,
+    this.startMode = StartMode.off,
     this.automationRunsPerDay = 24,
     this.imageEngine = ImageEngineChoice.off,
     this.imageModel,
@@ -278,6 +321,21 @@ class AppSettings {
 
   final StatusLight statusLight;
 
+  final SettingsTabs settingsTabs;
+
+  /// How big everything is drawn, on top of the computer's own scaling;
+  /// 1 is as the computer says.
+  final double interfaceScale;
+
+  /// The volume videos in Pictures play at, 0-100, as last set.
+  final double videoVolume;
+
+  /// Whether a video portrait plays; off, its still picture shows.
+  final bool playVideoPortraits;
+
+  /// Whether a portrait's 18+ version shows, when it has one.
+  final bool showNsfwAvatar;
+
   /// How much the background picture is darkened (or lightened in the
   /// light theme), from 0.3 to 0.9.
   final double backgroundDim;
@@ -289,6 +347,10 @@ class AppSettings {
   /// Requests the human allowed always, e.g. `run: git status` or
   /// `open: https://example.com`; matched exactly.
   final List<String> allowedSystemActions;
+
+  /// With system access on, commands and opens run without asking. Off
+  /// unless the human accepted the warning.
+  final bool allowEverything;
 
   /// Which database holds the current companion's chats and memories.
   /// Null for the first companion, whose database is `companion.db`.
@@ -337,8 +399,11 @@ class AppSettings {
   /// is on.
   final List<String> logsOff;
 
-  /// Starts VoxCordis in the background when the human logs in.
-  final bool startWithComputer;
+  /// Whether VoxCordis starts when the human logs in, and whether its window
+  /// shows or is put away.
+  final StartMode startMode;
+
+  bool get startWithComputer => startMode != StartMode.off;
 
   /// Most automation runs a day, so a mistake can't run up a bill with a
   /// server-hosted brain.
@@ -452,9 +517,15 @@ class AppSettings {
       colorway: c.colorway,
       themeChoice: themeChoice,
       statusLight: statusLight,
+      settingsTabs: settingsTabs,
       backgroundDim: backgroundDim,
+      interfaceScale: interfaceScale,
+      videoVolume: videoVolume,
+      playVideoPortraits: playVideoPortraits,
+      showNsfwAvatar: showNsfwAvatar,
       systemAccess: systemAccess,
       allowedSystemActions: allowedSystemActions,
+      allowEverything: allowEverything,
       companionId: c.id,
       otherCompanions: others,
       toldAboutMoreCompanions: toldAboutMoreCompanions,
@@ -468,7 +539,7 @@ class AppSettings {
       keepRunning: keepRunning,
       keepLogs: keepLogs,
       logsOff: logsOff,
-      startWithComputer: startWithComputer,
+      startMode: startMode,
       automationRunsPerDay: automationRunsPerDay,
       imageEngine: imageEngine,
       imageModel: imageModel,
@@ -515,9 +586,15 @@ class AppSettings {
     String? colorway,
     ThemeChoice? themeChoice,
     StatusLight? statusLight,
+    SettingsTabs? settingsTabs,
     double? backgroundDim,
+    double? interfaceScale,
+    double? videoVolume,
+    bool? playVideoPortraits,
+    bool? showNsfwAvatar,
     bool? systemAccess,
     List<String>? allowedSystemActions,
+    bool? allowEverything,
     List<CompanionProfile>? otherCompanions,
     bool? toldAboutMoreCompanions,
     bool? picturesToServerOk,
@@ -530,7 +607,7 @@ class AppSettings {
     bool? keepRunning,
     bool? keepLogs,
     List<String>? logsOff,
-    bool? startWithComputer,
+    StartMode? startMode,
     int? automationRunsPerDay,
     ImageEngineChoice? imageEngine,
     String? imageModel,
@@ -583,9 +660,15 @@ class AppSettings {
           : colorway ?? this.colorway,
       themeChoice: themeChoice ?? this.themeChoice,
       statusLight: statusLight ?? this.statusLight,
+      settingsTabs: settingsTabs ?? this.settingsTabs,
       backgroundDim: backgroundDim ?? this.backgroundDim,
+      interfaceScale: interfaceScale ?? this.interfaceScale,
+      videoVolume: videoVolume ?? this.videoVolume,
+      playVideoPortraits: playVideoPortraits ?? this.playVideoPortraits,
+      showNsfwAvatar: showNsfwAvatar ?? this.showNsfwAvatar,
       systemAccess: systemAccess ?? this.systemAccess,
       allowedSystemActions: allowedSystemActions ?? this.allowedSystemActions,
+      allowEverything: allowEverything ?? this.allowEverything,
       companionId: clearFolder ? null : companionId,
       otherCompanions: otherCompanions ?? this.otherCompanions,
       toldAboutMoreCompanions:
@@ -600,7 +683,7 @@ class AppSettings {
       keepRunning: keepRunning ?? this.keepRunning,
       keepLogs: keepLogs ?? this.keepLogs,
       logsOff: logsOff ?? this.logsOff,
-      startWithComputer: startWithComputer ?? this.startWithComputer,
+      startMode: startMode ?? this.startMode,
       automationRunsPerDay: automationRunsPerDay ?? this.automationRunsPerDay,
       imageEngine: imageEngine ?? this.imageEngine,
       imageModel: imageModel ?? this.imageModel,
@@ -639,9 +722,15 @@ class AppSettings {
     'colorway': colorway,
     'themeChoice': themeChoice.name,
     'statusLight': statusLight.name,
+    'settingsTabs': settingsTabs.name,
     'backgroundDim': backgroundDim,
+    'interfaceScale': interfaceScale,
+    'videoVolume': videoVolume,
+    'playVideoPortraits': playVideoPortraits,
+    'showNsfwAvatar': showNsfwAvatar,
     'systemAccess': systemAccess,
     'allowedSystemActions': allowedSystemActions,
+    'allowEverything': allowEverything,
     'companionId': companionId,
     'otherCompanions': [for (final c in otherCompanions) c.toJson()],
     'toldAboutMoreCompanions': toldAboutMoreCompanions,
@@ -654,7 +743,7 @@ class AppSettings {
     'keepRunning': keepRunning,
     'keepLogs': keepLogs,
     'logsOff': logsOff,
-    'startWithComputer': startWithComputer,
+    'startMode': startMode.name,
     'automationRunsPerDay': automationRunsPerDay,
     'imageEngine': imageEngine.name,
     'imageModel': imageModel,
@@ -705,10 +794,22 @@ class AppSettings {
           ThemeChoice.values.asNameMap()[json['themeChoice']] ?? d.themeChoice,
       statusLight:
           StatusLight.values.asNameMap()[json['statusLight']] ?? d.statusLight,
+      settingsTabs:
+          SettingsTabs.values.asNameMap()[json['settingsTabs']] ??
+          d.settingsTabs,
       backgroundDim:
           ((json['backgroundDim'] as num?)?.toDouble() ?? d.backgroundDim)
               .clamp(0.3, 0.9),
+      videoVolume: ((json['videoVolume'] as num?)?.toDouble() ?? d.videoVolume)
+          .clamp(0, 100)
+          .toDouble(),
+      interfaceScale:
+          ((json['interfaceScale'] as num?)?.toDouble() ?? d.interfaceScale)
+              .clamp(minInterfaceScale, maxInterfaceScale),
+      playVideoPortraits: json['playVideoPortraits'] as bool? ?? true,
+      showNsfwAvatar: json['showNsfwAvatar'] as bool? ?? false,
       systemAccess: json['systemAccess'] as bool? ?? false,
+      allowEverything: json['allowEverything'] as bool? ?? false,
       allowedSystemActions:
           (json['allowedSystemActions'] as List?)?.cast<String>() ?? const [],
       companionId: json['companionId'] as String?,
@@ -733,7 +834,12 @@ class AppSettings {
       keepLogs: json['keepLogs'] as bool? ?? true,
       logsOff:
           (json['logsOff'] as List?)?.whereType<String>().toList() ?? const [],
-      startWithComputer: json['startWithComputer'] as bool? ?? false,
+      // Before the choice there was a switch, which always started hidden.
+      startMode:
+          StartMode.values.asNameMap()[json['startMode']] ??
+          (json['startWithComputer'] == true
+              ? StartMode.minimized
+              : StartMode.off),
       automationRunsPerDay:
           json['automationRunsPerDay'] as int? ?? d.automationRunsPerDay,
       imageEngine:

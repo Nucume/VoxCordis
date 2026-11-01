@@ -7,7 +7,9 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../../data/settings.dart';
 import '../folder_service.dart';
+import 'windows_native.dart';
 import 'installed_apps.dart';
+import 'posix_native.dart';
 
 /// What the companion wants to do outside its folder.
 class SystemRequest {
@@ -155,6 +157,26 @@ class SystemTools {
     }
   }
 
+  /// PowerShell 7 (pwsh) where it is installed, else the PowerShell that
+  /// comes with Windows.
+  static String windowsShell({
+    Map<String, String>? environment,
+    bool Function(String path)? exists,
+  }) {
+    final env = environment ?? Platform.environment;
+    final has = exists ?? (String f) => File(f).existsSync();
+    final dirs = [
+      for (final d in (env['PATH'] ?? env['Path'] ?? '').split(';'))
+        if (d.isNotEmpty) d,
+      if (env['ProgramFiles'] != null) '${env['ProgramFiles']}\\PowerShell\\7',
+    ];
+    for (final d in dirs) {
+      final f = '$d\\pwsh.exe';
+      if (has(f)) return f;
+    }
+    return 'powershell.exe';
+  }
+
   /// What a command's output may add to the prompt.
   static const maxOutput = 8000;
 
@@ -249,8 +271,9 @@ class SystemTools {
           runnable: await _opensRunnable(target, s),
         );
       }
-      final approval =
-          !request.runnable && s.allowedSystemActions.contains(request.key)
+      final approval = s.allowEverything
+          ? SystemApproval.once
+          : !request.runnable && s.allowedSystemActions.contains(request.key)
           ? SystemApproval.always
           : await (ask?.call(request) ?? Future.value(SystemApproval.deny));
       if (approval == SystemApproval.deny) {
@@ -291,7 +314,7 @@ class SystemTools {
   Future<String> _run(SystemRequest r, AppSettings s) async {
     final dir = s.companionFolder;
     final process = await Process.start(
-      Platform.isWindows ? 'powershell' : '/bin/sh',
+      Platform.isWindows ? windowsShell() : '/bin/sh',
       Platform.isWindows
           ? ['-NoProfile', '-NonInteractive', '-Command', r.target]
           : ['-c', r.target],
@@ -424,30 +447,23 @@ class SystemTools {
     final key = name.toLowerCase().replaceFirst(RegExp(r'^my\s*'), '');
     if (key == 'home') return homeDir;
     const kinds = {
-      'desktop': ('DESKTOP', 'Desktop', 'Desktop'),
-      'documents': ('DOCUMENTS', 'MyDocuments', 'Documents'),
-      'downloads': ('DOWNLOAD', '', 'Downloads'),
-      'music': ('MUSIC', 'MyMusic', 'Music'),
-      'pictures': ('PICTURES', 'MyPictures', 'Pictures'),
-      'photos': ('PICTURES', 'MyPictures', 'Pictures'),
-      'videos': ('VIDEOS', 'MyVideos', 'Videos'),
+      'desktop': ('DESKTOP', 'Desktop'),
+      'documents': ('DOCUMENTS', 'Documents'),
+      'downloads': ('DOWNLOAD', 'Downloads'),
+      'music': ('MUSIC', 'Music'),
+      'pictures': ('PICTURES', 'Pictures'),
+      'photos': ('PICTURES', 'Pictures'),
+      'videos': ('VIDEOS', 'Videos'),
     };
     final kind = kinds[key];
     if (kind == null) return null;
-    final (xdg, windows, plain) = kind;
+    final (xdg, plain) = kind;
     String? asked;
     try {
-      if (Platform.isWindows && windows.isNotEmpty) {
-        final r = await Process.run('powershell', [
-          '-NoProfile',
-          '-Command',
-          "[Environment]::GetFolderPath('$windows')",
-        ]);
-        asked = (r.stdout as String).trim();
+      if (Platform.isWindows) {
+        asked = await WindowsNative.knownFolder(plain.toLowerCase());
       } else if (Platform.isLinux) {
-        final r = await Process.run('xdg-user-dir', [xdg]);
-        asked = (r.stdout as String).trim();
-        // xdg-user-dir answers home itself for a folder it doesn't know.
+        asked = PosixNative.xdgUserDir(xdg);
         if (asked == homeDir) asked = null;
       }
     } catch (_) {

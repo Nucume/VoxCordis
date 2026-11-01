@@ -225,9 +225,10 @@ class AppTheme {
       base = base.tinted(
         background: Color(light ? colorway.lightBase! : colorway.base!),
         glass: Color(light ? colorway.lightPanel! : colorway.panel!),
-        highlight: colorway.highlight == null
-            ? null
-            : Color(colorway.highlight!),
+        highlight: switch (colorway.highlightIn(light: light)) {
+          final int c => Color(c),
+          null => null,
+        },
       );
     }
     base = base.withRim(

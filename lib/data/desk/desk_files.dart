@@ -4,6 +4,7 @@ import 'dart:math';
 import 'package:intl/intl.dart';
 import 'package:path/path.dart' as p;
 
+import '../../services/import/import_temp.dart';
 import '../../services/secret_store.dart';
 import '../settings.dart';
 import 'pictures.dart';
@@ -74,7 +75,12 @@ class DeskFiles {
     final source = File(path);
     if (!Pictures.hasImageExtension(path) || !await source.exists()) return;
     if (!await Pictures.isImage(source)) return;
-    await Pictures.setAvatar(folder, source);
+    // An imported portrait may bring its video and 18+ version beside it.
+    if (ImportTemp.holds(path)) {
+      await Pictures.setAvatarSet(folder, source);
+    } else {
+      await Pictures.setAvatar(folder, source);
+    }
   }
 
   /// Files from before name and pronouns moved into personality.md get

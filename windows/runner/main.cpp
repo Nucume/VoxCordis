@@ -1,5 +1,6 @@
 #include <flutter/dart_project.h>
 #include <flutter/flutter_view_controller.h>
+#include <shobjidl.h>
 #include <windows.h>
 
 #include "flutter_window.h"
@@ -7,6 +8,24 @@
 
 int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
                       _In_ wchar_t *command_line, _In_ int show_command) {
+  // One VoxCordis at a time: a second launch brings the running window
+  // forward (out of the tray or the taskbar too) and quits.
+  HANDLE single_instance =
+      ::CreateMutexW(nullptr, TRUE, L"Local\\com.nucume.companion.single");
+  if (single_instance != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+    HWND existing = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"VoxCordis");
+    if (existing != nullptr) {
+      if (!::IsWindowVisible(existing)) ::ShowWindow(existing, SW_SHOW);
+      if (::IsIconic(existing)) ::ShowWindow(existing, SW_RESTORE);
+      ::SetForegroundWindow(existing);
+    }
+    ::CloseHandle(single_instance);
+    return EXIT_SUCCESS;
+  }
+
+  // The name Windows shows on notifications and groups the taskbar by.
+  ::SetCurrentProcessExplicitAppUserModelID(L"com.nucume.companion");
+
   // Attach to console when present (e.g., 'flutter run') or create a
   // new console when running with a debugger.
   if (!::AttachConsole(ATTACH_PARENT_PROCESS) && ::IsDebuggerPresent()) {

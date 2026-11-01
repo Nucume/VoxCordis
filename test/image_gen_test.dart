@@ -6,6 +6,7 @@ import 'package:companion/data/database.dart';
 import 'package:companion/data/database_key.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/features/chat/chat_controller.dart';
+import 'package:companion/services/images/clip_prompt.dart';
 import 'package:companion/services/images/draw_tools.dart';
 import 'package:companion/services/images/image_catalog.dart';
 import 'package:companion/services/images/image_engine.dart';
@@ -38,6 +39,7 @@ cp "${png.path}" "\$out"
 }
 
 void main() {
+  clipPromptTests();
   late Directory tmp;
   setUp(() async => tmp = await Directory.systemTemp.createTemp('draw'));
   tearDown(() => tmp.delete(recursive: true));
@@ -66,7 +68,7 @@ void main() {
   });
 
   test('every catalog file is pinned', () {
-    for (final m in ImageCatalog.models) {
+    for (final m in ImageCatalog.allModels) {
       for (final f in m.files) {
         expect(f.sha256, matches(RegExp(r'^[0-9a-f]{64}$')), reason: f.path);
         expect(f.revision, matches(RegExp(r'^[0-9a-f]{40}$')), reason: f.path);
@@ -134,6 +136,167 @@ void main() {
     expect(SdRun.progressIn('loading model'), isNull);
   });
 
+  test('builds sd-cli arguments for a clip from the Wan card', () {
+    final wan = ImageCatalog.videoModels.first;
+    final args = SdRun.videoArgs(
+      AnimateRequest(
+        model: wan,
+        prompt: 'she smiles <lora:x:1>\nslowly',
+        image: File('/pics/a.png'),
+        frames: 49,
+        shape: 'portrait',
+      ),
+      modelsDir: Directory('/m'),
+      out: File('/o/x.webm'),
+      seed: 7,
+    );
+    String after(String flag) => args[args.indexOf(flag) + 1];
+    expect(args.take(2), ['-M', 'vid_gen']);
+    expect(after('--diffusion-model'), '/m/Wan2.2-TI2V-5B-Q5_K_M.gguf');
+    expect(after('--vae'), '/m/Wan2.2_VAE.safetensors');
+    expect(after('--t5xxl'), '/m/umt5-xxl-encoder-Q5_K_M.gguf');
+    expect(after('-i'), '/pics/a.png');
+    expect(after('-p'), 'she smiles slowly');
+    expect(after('--video-frames'), '49');
+    // The 5B needs a bigger frame than the 14B: it packs 16 x 16 pixels
+    // into each step, so at 384x512 it drew distorted, flashing bodies.
+    expect(after('-W'), '640');
+    expect(after('-H'), '896');
+    expect(args, containsAll(['--offload-to-cpu', '--diffusion-fa']));
+    expect(after('-o'), '/o/x.webm');
+    for (var sec = VideoModel.shortest; sec <= VideoModel.longest; sec++) {
+      expect((wan.framesFor(sec) - 1) % 4, 0, reason: 'Wan needs 4n + 1');
+    }
+    expect(wan.framesFor(2), 49);
+    expect(wan.framesFor(15), 361);
+    // Memory use follows what was measured on a 3090 at 384x512 (about
+    // 10 GB for 2 s, 15 GB for 10 s) and grows with the frame's area.
+    final area = 640 * 896 / (384 * 512);
+    expect(wan.usedGb(2), closeTo(9.2 + 0.6 * 2 * area, 0.01));
+    expect(wan.usedGb(10), closeTo(9.2 + 0.6 * 10 * area, 0.01));
+    expect(wan.safeSeconds(24), 7);
+    expect(wan.safeSeconds(12), 0);
+    expect(wan.mostSeconds(16), 7);
+    expect(wan.mostSeconds(8), 0);
+    expect(args, isNot(contains('--vae-tiling')));
+  });
+
+  test('video models: LTX 2.5 makes a small clip, enlarges it, has sound', () {
+    final ltx = ImageCatalog.videoModels.firstWhere((m) => m.id == 'ltx25');
+    final args = SdRun.videoArgs(
+      AnimateRequest(
+        model: ltx,
+        prompt: 'x',
+        image: File('/a.png'),
+        shape: 'portrait',
+        frames: ltx.framesFor(5),
+      ),
+      modelsDir: Directory('/v'),
+      out: File('/o/x.webm'),
+      seed: 1,
+    );
+    String after(String f) => args[args.indexOf(f) + 1];
+    expect(after('--diffusion-model'), endsWith('distilled-UD-Q4_K_XL.gguf'));
+    expect(after('--llm'), '/v/gemma4-12b-with-proj-ltx-2.5-Q8_0.gguf');
+    expect(after('--vae'), endsWith('video-vae-conv-bf16.safetensors'));
+    expect(after('--audio-vae'), endsWith('audio-vae-bf16.safetensors'));
+    // The upscaler is found by name, never passed as a file.
+    expect(args.where((a) => a.contains('upscaler-x2-bf16-1.0.')), isEmpty);
+    expect(after('--hires-upscalers-dir'), '/v');
+    expect(
+      after('--hires-upscaler'),
+      'ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0',
+    );
+    expect(args, contains('--hires'));
+    expect(after('--hires-sigmas'), '0.85,0.725,0.421875,0.0');
+    expect(after('--sigmas'), startsWith('1.0,0.99375'));
+    expect(args, isNot(contains('--steps')));
+    expect(args, isNot(contains('--flow-shift')));
+    expect(after('--cfg-scale'), '1.0');
+    expect((int.parse(after('--video-frames')) - 1) % 8, 0);
+    expect(ltx.framesFor(5), 121);
+    expect(after('-W'), '384');
+    expect(after('-H'), '512');
+    expect(ltx.hasSound, isTrue);
+    expect(ImageCatalog.videoModels.first.hasSound, isFalse);
+    // The bf16 text encoder is squeezed once; the install check looks for
+    // the squeezed file.
+    final enc = ltx.files.firstWhere((f) => f.role == ImageFileRole.llm);
+    expect(enc.sourceName, endsWith('bf16.safetensors'));
+    expect(enc.fileName, endsWith('Q8_0.gguf'));
+  });
+
+  test('video models: MiniMax H3 uses 17k + 5 frames and the CPU random', () {
+    final h3 = ImageCatalog.videoModels.firstWhere((m) => m.id == 'minimax-h3');
+    final args = SdRun.videoArgs(
+      AnimateRequest(
+        model: h3,
+        prompt: 'x',
+        image: File('/a.png'),
+        shape: 'portrait',
+        frames: h3.framesFor(2),
+      ),
+      modelsDir: Directory('/v'),
+      out: File('/o/x.webm'),
+      seed: 1,
+    );
+    String after(String f) => args[args.indexOf(f) + 1];
+    expect(h3.framesFor(2), 56);
+    for (var sec = VideoModel.shortest; sec <= VideoModel.longest; sec++) {
+      expect((h3.framesFor(sec) - 5) % 17, 0);
+    }
+    expect(after('--diffusion-model'), endsWith('fl2va_pruned-Q4_K_M.gguf'));
+    expect(after('--llm'), endsWith('qwen3vl_32b_minimax_h3-Q4_K_M.gguf'));
+    expect(after('--audio-vae'), endsWith('audio_vae_fp32.safetensors'));
+    expect(after('--rng'), 'cpu');
+    expect(after('--cfg-scale'), '1.0');
+    expect(args, isNot(contains('--flow-shift')));
+    expect(args, isNot(contains('--hires')));
+    // Sizes must be multiples of 32.
+    expect(int.parse(after('-W')) % 32, 0);
+    expect(int.parse(after('-H')) % 32, 0);
+    expect(h3.hasSound, isTrue);
+  });
+
+  test('video models: the 14B pair, and the human\'s own file', () async {
+    final big = ImageCatalog.videoModels.firstWhere((m) => m.id == 'wan22-14b');
+    final args = SdRun.videoArgs(
+      AnimateRequest(model: big, prompt: 'x', image: File('/a.png')),
+      modelsDir: Directory('/v'),
+      out: File('/o/x.webm'),
+      seed: 1,
+    );
+    String after(String f) => args[args.indexOf(f) + 1];
+    expect(after('--diffusion-model'), endsWith('LowNoise-Q4_K_S.gguf'));
+    expect(
+      after('--high-noise-diffusion-model'),
+      endsWith('HighNoise-Q4_K_S.gguf'),
+    );
+    expect(after('--steps'), '10');
+    expect(after('--high-noise-steps'), '8');
+    // Measured on a 3090: peaks near 15.8 GB for a 4 s clip.
+    expect(big.usedGb(4), closeTo(15.8, 0.3));
+
+    final dir = Directory.systemTemp.createTempSync('vox_video');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    File(p.join(dir.path, 'my-finetune.gguf')).writeAsBytesSync([0]);
+    final own = ImageCatalog.ownVideo(dir);
+    expect(own.map((m) => m.name), ['my-finetune']);
+    // Without Wan's VAE and text encoder beside it, it can't run yet.
+    expect(ImageCatalog.availableVideo(dir), isEmpty);
+    for (final f in ImageCatalog.videoModels.first.files.skip(1)) {
+      File(p.join(dir.path, f.fileName)).writeAsBytesSync([0]);
+    }
+    expect(ImageCatalog.availableVideo(dir).map((m) => m.id), [
+      'my-finetune.gguf',
+    ]);
+    // The catalog's own files are never taken for the human's.
+    for (final f in ImageCatalog.videoModels.first.files) {
+      File(p.join(dir.path, f.fileName)).writeAsBytesSync([0]);
+    }
+    expect(ImageCatalog.ownVideo(dir), hasLength(1));
+  });
+
   test('finds the human\'s own models and LoRAs', () async {
     final s = AppSettings(modelsFolder: tmp.path);
     final dir = ImageCatalog.dirFor(s)..createSync(recursive: true);
@@ -167,6 +330,40 @@ void main() {
       aboutDrawing(s, const [], const []),
       contains('can\'t draw pictures yet'),
     );
+  });
+
+  test('animating a picture makes a clip and keeps its first frame', () async {
+    final folder = p.join(tmp.path, 'Mira');
+    var settings = AppSettings(
+      companionName: 'Mira',
+      companionFolder: folder,
+      modelsFolder: tmp.path,
+      llmMode: LlmMode.external,
+      imageEngine: ImageEngineChoice.builtIn,
+    );
+    final engine = ImageEngine(
+      supportDir: tmp,
+      runtime: RuntimeController(tmp),
+      settings: () => settings,
+      findExe: (_) async => await _fakeSdCli(tmp),
+    );
+    final still = File(p.join(tmp.path, 'fixture.png'));
+    await _fakeSdCli(tmp);
+    expect(await engine.animate(still, folder: folder), isNull);
+
+    final dir = ImageCatalog.videoFor(settings)..createSync(recursive: true);
+    for (final f in ImageCatalog.videoModels.first.files) {
+      File(p.join(dir.path, f.fileName)).writeAsStringSync('x');
+    }
+    final job = (await engine.animate(still, folder: folder, prompt: 'wave'))!;
+    final clip = await job.done;
+    expect(p.extension(clip.path), '.webm');
+    expect(p.basename(clip.path), startsWith('animated-'));
+    expect(ImageEngine.thumbnailOf(clip).existsSync(), isTrue);
+    final args = File(p.join(tmp.path, 'args.txt')).readAsLinesSync();
+    expect(args, containsAll(['-M', 'vid_gen', 'wave']));
+    settings = settings.copyWith(imageEngine: ImageEngineChoice.invoke);
+    expect(await engine.animate(still, folder: folder), isNull);
   });
 
   test('the companion asks for a picture, and it is drawn after', () async {
@@ -478,5 +675,60 @@ void main() {
     expect(((nodes as Map)['model'] as Map)['type'], 'main_model_loader');
     expect((nodes['lora0'] as Map)['weight'], 0.5);
     expect((nodes['noise'] as Map)['width'], 512);
+  });
+}
+
+void clipPromptTests() {
+  group('ClipPrompt', () {
+    test('tidy strips labels, quotes and thinking', () {
+      expect(
+        ClipPrompt.tidy(
+          '<think>hm</think>Prompt: "She laughs and puts on her sunglasses."',
+        ),
+        'She laughs and puts on her sunglasses.',
+      );
+      expect(ClipPrompt.tidy('ok'), isNull);
+    });
+    test('tidy cuts a long answer at a sentence', () {
+      final long = '${'A sentence goes here. ' * 100}tail without end';
+      final out = ClipPrompt.tidy(long)!;
+      expect(out.length, lessThanOrEqualTo(ClipPrompt.maxChars));
+      expect(out.endsWith('.'), isTrue);
+    });
+    test('instructions carry the length and the model', () {
+      final short = ClipPrompt.instructions(
+        detailed: false,
+        seconds: 2,
+        model: 'Wan 2.2 5B',
+      );
+      expect(short, contains('2 seconds'));
+      expect(short, contains('one small action only'));
+      expect(short, contains('Wan 2.2 5B'));
+      expect(
+        ClipPrompt.instructions(detailed: true, seconds: 12),
+        contains('three or four actions'),
+      );
+    });
+    test('the word target follows the model\'s prompt length', () {
+      expect(
+        ClipPrompt.instructions(detailed: false, chars: 300),
+        contains('about 40 to 60 words'),
+      );
+      expect(
+        ClipPrompt.instructions(detailed: true, chars: 1500),
+        contains('about 200 to 300 words'),
+      );
+      expect(
+        ClipPrompt.tidy('Ok then. ' * 100, max: 120)!.length,
+        lessThanOrEqualTo(120),
+      );
+    });
+    test('instructions differ by model style', () {
+      expect(
+        ClipPrompt.instructions(detailed: true),
+        contains('double quotes'),
+      );
+      expect(ClipPrompt.instructions(detailed: false), contains('silent'));
+    });
   });
 }

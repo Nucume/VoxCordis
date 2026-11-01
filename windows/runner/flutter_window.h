@@ -42,6 +42,14 @@ class FlutterWindow : public Win32Window {
   NOTIFYICONDATA tray_icon_{};
   bool tray_shown_ = false;
 
+  // Windows' own answers for Dart over "voxcordis/system".
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      system_channel_;
+
+  // Toasts from Dart over "voxcordis/notify"; a click comes back as "open".
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      notify_channel_;
+
   // VoxCordis' own title bar draws its maximise button in Flutter. Windows 11
   // only offers Snap Layouts over a real one, so the spot of that button
   // (from Dart over "voxcordis/window", in the Flutter view's physical

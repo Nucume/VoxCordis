@@ -5,7 +5,10 @@ import 'package:archive/archive_io.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
+import '../release_signature.dart';
+import '../updater.dart' show updateRepo;
 import 'download.dart';
+import '../system/posix_native.dart';
 
 /// Gets a `llama-server` binary onto the machine.
 ///
@@ -14,14 +17,133 @@ import 'download.dart';
 /// directory. The GPU build is picked per platform: Vulkan on Linux and
 /// Windows (NVIDIA, AMD and Intel), Metal on macOS.
 class RuntimeInstaller {
-  RuntimeInstaller(this.supportDir, {http.Client? client})
-    : _http = client ?? http.Client();
+  RuntimeInstaller(
+    this.supportDir, {
+    http.Client? client,
+    Future<int?> Function()? nvidiaDriver,
+  }) : _http = client ?? http.Client(),
+       _nvidiaDriver = nvidiaDriver ?? detectNvidiaDriver;
 
   /// llama.cpp release the app is tested against. Bump deliberately.
   static const pinnedTag = 'b11400';
 
   final Directory supportDir;
   final http.Client _http;
+  final Future<int?> Function() _nvidiaDriver;
+
+  /// Oldest NVIDIA driver (major version) that runs CUDA 12.x builds. With an
+  /// older one the CUDA backend would fail to load and llama.cpp would quietly
+  /// fall back to the CPU, which is far slower than Vulkan.
+  static const minCudaDriver = 528;
+
+  /// Same for the Linux CUDA 12.4 build (the Windows number is higher only
+  /// because Windows drivers are numbered differently).
+  static const minCudaDriverLinux = 525;
+
+  /// Major version of the installed NVIDIA driver, or null without one.
+  static Future<int?> detectNvidiaDriver() async {
+    try {
+      final r = await Process.run('nvidia-smi', [
+        '--query-gpu=driver_version',
+        '--format=csv,noheader',
+      ]);
+      if (r.exitCode != 0) return null;
+      return parseDriverMajor(r.stdout as String);
+    } on ProcessException {
+      return null;
+    }
+  }
+
+  /// `551.61` (one line per card) -> 551.
+  static int? parseDriverMajor(String out) {
+    for (final line in out.split('\n')) {
+      final m = RegExp(r'^\s*(\d+)\.').firstMatch(line);
+      if (m != null) return int.parse(m.group(1)!);
+    }
+    return null;
+  }
+
+  Future<bool> _wantCuda() async {
+    if (Platform.isMacOS) return false;
+    // Tried again a day later, so a release that gains a CUDA build, or a
+    // network that was down, gets another go.
+    final marker = File(_noCudaMarker);
+    if (await marker.exists() &&
+        DateTime.now().difference(await marker.lastModified()) <
+            const Duration(days: 1)) {
+      return false;
+    }
+    final v = await _nvidiaDriver();
+    return v != null &&
+        v >= (Platform.isWindows ? minCudaDriver : minCudaDriverLinux);
+  }
+
+  /// Written when no CUDA build could be had for this system, so the Vulkan
+  /// install is used without looking again every launch.
+  String get _noCudaMarker =>
+      p.join(supportDir.path, 'runtime', '$pinnedTag.no-cuda');
+
+  /// The CUDA `llama-server` the release workflow builds for Linux and
+  /// attaches to the app's own release (llama.cpp publishes none). It is
+  /// installed only when the release key signed it, like an update.
+  static String get linuxCudaAsset =>
+      'llama-server-cuda-$pinnedTag-linux-x64.tar.gz';
+
+  Future<String?> _installLinuxCuda({DownloadProgress? onProgress}) async {
+    try {
+      if (!updateRepo.contains('/')) return null;
+      final res = await _http.get(
+        Uri.parse('https://api.github.com/repos/$updateRepo/releases/latest'),
+        headers: {'Accept': 'application/vnd.github+json'},
+      );
+      if (res.statusCode != 200) return null;
+      final assets = (jsonDecode(res.body) as Map)['assets'] as List;
+      Map? file;
+      Map? sig;
+      for (final a in assets.cast<Map>()) {
+        if (a['name'] == linuxCudaAsset) file = a;
+        if (a['name'] == '$linuxCudaAsset.sig') sig = a;
+      }
+      final sha = sha256Digest(file?['digest']);
+      if (file == null || sig == null || sha == null) return null;
+
+      final sigRes = await _http.get(
+        Uri.parse(sig['browser_download_url'] as String),
+      );
+      if (sigRes.statusCode != 200 ||
+          !await ReleaseSignature.verify(sha, sigRes.bodyBytes)) {
+        return null;
+      }
+      final tmp = Directory(p.join(supportDir.path, 'runtime', '.download'));
+      await tmp.create(recursive: true);
+      final archive = File(p.join(tmp.path, linuxCudaAsset));
+      await downloadFile(
+        _http,
+        Uri.parse(file['browser_download_url'] as String),
+        archive,
+        onProgress: onProgress,
+      );
+      await verifySha256(archive, sha);
+      final staging = Directory('${cudaInstallDir.path}.partial');
+      if (await staging.exists()) await staging.delete(recursive: true);
+      await staging.create(recursive: true);
+      await extractFileToDisk(archive.path, staging.path);
+      await archive.delete();
+      if (await cudaInstallDir.exists()) {
+        await cudaInstallDir.delete(recursive: true);
+      }
+      await staging.rename(cudaInstallDir.path);
+      final exe = await _findIn(cudaInstallDir);
+      if (exe != null) PosixNative.makeExecutable(exe);
+      return exe;
+    } on Object {
+      // Offline, no such file yet, bad signature: Vulkan it is.
+      return null;
+    }
+  }
+
+  Directory get cudaInstallDir =>
+      Directory(p.join(supportDir.path, 'runtime', '$pinnedTag-cuda'));
 
   static String get exeName =>
       Platform.isWindows ? 'llama-server.exe' : 'llama-server';
@@ -35,6 +157,9 @@ class RuntimeInstaller {
       p.join(p.dirname(Platform.resolvedExecutable), 'runtime', exeName),
     );
     if (await bundled.exists()) return bundled.path;
+    // An NVIDIA card gets the CUDA build, which is quicker than Vulkan; a
+    // Vulkan install from before then counts as missing so it is upgraded.
+    if (await _wantCuda()) return _findIn(cudaInstallDir);
     return _findIn(installDir);
   }
 
@@ -43,12 +168,28 @@ class RuntimeInstaller {
     final existing = await find();
     if (existing != null) return existing;
 
+    final wantCuda = await _wantCuda();
+    if (wantCuda && Platform.isLinux) {
+      final exe = await _installLinuxCuda(onProgress: onProgress);
+      if (exe != null) return exe;
+      await File(_noCudaMarker).create(recursive: true);
+      await File(_noCudaMarker).setLastModified(DateTime.now());
+      final vulkan = await _findIn(installDir);
+      if (vulkan != null) return vulkan;
+    }
     final assets = await _releaseAssets();
     final picks = pickAssets(
       assets.keys,
       os: Platform.operatingSystem,
       arm: _isArm64(),
+      cuda: wantCuda,
     );
+    final cuda = wantCuda && picks.any((n) => n.contains('cuda'));
+    if (wantCuda && !cuda && Platform.isWindows) {
+      await File(_noCudaMarker).create(recursive: true);
+      await File(_noCudaMarker).setLastModified(DateTime.now());
+    }
+    final target = cuda ? cudaInstallDir : installDir;
     if (picks.isEmpty) {
       throw RuntimeInstallException(
         'No llama.cpp build for ${Platform.operatingSystem} in $pinnedTag.',
@@ -57,7 +198,7 @@ class RuntimeInstaller {
 
     final tmp = Directory(p.join(supportDir.path, 'runtime', '.download'));
     await tmp.create(recursive: true);
-    final staging = Directory('${installDir.path}.partial');
+    final staging = Directory('${target.path}.partial');
     if (await staging.exists()) await staging.delete(recursive: true);
     await staging.create(recursive: true);
 
@@ -82,15 +223,15 @@ class RuntimeInstaller {
       await file.delete();
     }
 
-    if (await installDir.exists()) await installDir.delete(recursive: true);
-    await staging.rename(installDir.path);
-    final exe = await _findIn(installDir);
+    if (await target.exists()) await target.delete(recursive: true);
+    await staging.rename(target.path);
+    final exe = await _findIn(target);
     if (exe == null) {
       throw RuntimeInstallException('$exeName missing from the download.');
     }
     if (!Platform.isWindows) {
       // Archives don't always keep the executable bit.
-      await Process.run('chmod', ['+x', exe]);
+      PosixNative.makeExecutable(exe);
     }
     return exe;
   }
@@ -123,8 +264,9 @@ class RuntimeInstaller {
     Iterable<String> names, {
     required String os,
     required bool arm,
+    bool cuda = false,
   }) {
-    final list = names.where((n) => !n.startsWith('cudart')).toList();
+    final list = names.toList();
     String? find(String pattern) {
       final re = RegExp(pattern);
       for (final n in list) {
@@ -148,7 +290,19 @@ class RuntimeInstaller {
         return [?pick];
       case 'windows':
         final cpu = find(r'bin-win-cpu-x64\.zip$');
-        final vulkan = find(r'bin-win-vulkan-x64\.zip$');
+        if (cuda) {
+          // CUDA 12.x only: 13 needs a newer driver than most people have.
+          // The runtime DLLs ship in a separate archive of the same version.
+          final build = find(r'^llama-.*bin-win-cuda-12\.\d+-x64\.zip$');
+          final version = build == null
+              ? null
+              : RegExp(r'cuda-(12\.\d+)').firstMatch(build)!.group(1);
+          final rt = version == null
+              ? null
+              : find('^cudart-.*cuda-${RegExp.escape(version)}-x64\\.zip\$');
+          if (build != null && rt != null) return [?cpu, build, rt];
+        }
+        final vulkan = find(r'^llama-.*bin-win-vulkan-x64\.zip$');
         return [?cpu, ?vulkan];
     }
     return const [];

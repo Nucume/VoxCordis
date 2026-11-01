@@ -70,6 +70,10 @@ set_target_properties(${BINARY_NAME}
 )
 
 
+# media_kit would download and build mimalloc to replace malloc; the app
+# doesn't link it, so skip that.
+set(MIMALLOC_USE_STATIC_LIBS OFF CACHE BOOL "" FORCE)
+
 # Generated plugin build rules, which manage building the plugins and adding
 # them to the application.
 include(flutter/generated_plugins.cmake)
@@ -78,12 +82,15 @@ include(flutter/generated_plugins.cmake)
 # installed. Linking it would stop the app from starting without it, so the
 # runner loads it at startup instead (runner/webview_loader.cc) and the
 # importer falls back to the exporter bookmarklet when it is missing.
+# The same goes for the video plugin and libmpv, which plays a companion's
+# video portrait; without it the portrait shows its still picture.
 get_target_property(app_libraries ${BINARY_NAME} LINK_LIBRARIES)
-list(REMOVE_ITEM app_libraries desktop_webview_window_plugin)
+list(REMOVE_ITEM app_libraries desktop_webview_window_plugin media_kit_video_plugin)
 set_target_properties(${BINARY_NAME} PROPERTIES LINK_LIBRARIES "${app_libraries}")
-add_dependencies(${BINARY_NAME} desktop_webview_window_plugin)
+add_dependencies(${BINARY_NAME} desktop_webview_window_plugin media_kit_video_plugin)
 target_include_directories(${BINARY_NAME} PRIVATE
-  "${CMAKE_CURRENT_SOURCE_DIR}/flutter/ephemeral/.plugin_symlinks/desktop_webview_window/linux/include")
+  "${CMAKE_CURRENT_SOURCE_DIR}/flutter/ephemeral/.plugin_symlinks/desktop_webview_window/linux/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/flutter/ephemeral/.plugin_symlinks/media_kit_video/linux/include")
 target_link_libraries(${BINARY_NAME} PRIVATE ${CMAKE_DL_LIBS})
 
 

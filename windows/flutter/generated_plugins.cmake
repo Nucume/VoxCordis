@@ -7,6 +7,8 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_webview_window
   file_selector_windows
   flutter_acrylic
+  media_kit_libs_windows_video
+  media_kit_video
   pasteboard
   screen_retriever_windows
   url_launcher_windows

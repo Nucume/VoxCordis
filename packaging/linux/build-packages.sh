@@ -59,7 +59,7 @@ Architecture: amd64
 Maintainer: $maintainer
 Installed-Size: $size_kb
 Depends: libc6 (>= 2.35), libstdc++6, liblzma5, libgtk-3-0 | libgtk-3-0t64
-Recommends: libwebkit2gtk-4.1-0
+Recommends: libwebkit2gtk-4.1-0, libmpv2 | libmpv1
 Section: net
 Priority: optional
 Homepage: $home
@@ -67,7 +67,7 @@ Description: $summary
 $(printf '%s\n' "$blurb" | sed 's/^/ /')
  .
  libwebkit2gtk-4.1 is only needed for the sign-in windows of character
- importers.
+ importers, and libmpv only to play video portraits.
 EOF
 dpkg-deb --root-owner-group --build "$deb" "$out/voxcordis_${pkgver}_amd64.deb" >/dev/null
 
@@ -102,6 +102,7 @@ Requires:   gtk3
 Requires:   xz-libs
 Requires:   libstdc++
 Recommends: webkit2gtk4.1
+Recommends: mpv-libs
 
 %description
 $blurb

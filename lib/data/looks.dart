@@ -15,6 +15,7 @@ class Look {
     this.lightColors,
     this.rim,
     this.highlight,
+    this.lightHighlight,
   });
 
   final String id;
@@ -47,26 +48,31 @@ class Look {
 
   /// A sharp accent for a few spots only, when [accent] is kept quiet.
   final int? highlight;
+  final int? lightHighlight;
+
+  /// The [highlight] to show in the [light] or dark theme.
+  int? highlightIn({required bool light}) =>
+      light ? lightHighlight ?? highlight : highlight;
 
   /// Colorways that recolour everything, not just the glows and accent.
   static const special = [
     Look(
       'haru',
       'Haru',
-      // Monochrome: a pale grey does the everyday tinting, and red only
-      // marks the few things that matter.
-      0xFFCFCFCF,
+      // Monochrome with red: red is the main accent (links, *actions*),
+      // and a pale white only marks a few spots.
+      0xFFE5383B,
       [0xFFFFFFFF, 0xFF3A3A3A, 0xFF7A1517],
       0.2,
       base: 0xFF0A0A0A,
       panel: 0xD9161616,
       lightBase: 0xFFF2F2F2,
       lightPanel: 0xE6FFFFFF,
-      // On white the grey turns to ink and the glows to soft greys.
-      lightAccent: 0xFF2E2E2E,
+      // On white the glows turn to soft greys and the white highlight to ink.
       lightColors: [0xFFBDBDBD, 0xFFE0E0E0, 0xFFE5383B],
       rim: [0xFF8A8A8A, 0xFF2E2E2E],
-      highlight: 0xFFE5383B,
+      highlight: 0xFFCFCFCF,
+      lightHighlight: 0xFF2E2E2E,
     ),
     Look(
       'vibecoder',

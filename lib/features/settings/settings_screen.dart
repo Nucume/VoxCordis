@@ -13,6 +13,7 @@ import '../../data/desk/desk_files.dart';
 import '../../data/desk/pictures.dart';
 import '../../data/looks.dart';
 import '../../data/settings.dart';
+import '../../services/avatar_video.dart';
 import '../../services/folder_service.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass_popover.dart';
@@ -27,9 +28,11 @@ import 'internet_settings.dart';
 import 'logs_settings.dart';
 import '../update/whats_new_dialog.dart';
 import 'model_picker.dart';
+import 'social_links.dart';
 import '../../shell/window_frame.dart';
 import '../../shell/runtime_status.dart';
 import 'recall_settings.dart';
+import 'settings_tabs.dart';
 import 'sight_settings.dart';
 
 /// Minimal v1 Settings: General, Brain (the model) and Images. Other tabs arrive with the systems
@@ -90,6 +93,7 @@ class SettingsScreenState extends State<SettingsScreen> {
     // System access applies at once on its page, and "Always allow" in
     // the chat adds to the list while this page is open.
     systemAccess: current.systemAccess,
+    allowEverything: current.allowEverything,
     // Logs turn on and off at once on their page.
     keepLogs: current.keepLogs,
     logsOff: current.logsOff,
@@ -105,6 +109,9 @@ class SettingsScreenState extends State<SettingsScreen> {
     themeChoice: current.themeChoice,
     statusLight: current.statusLight,
     backgroundDim: current.backgroundDim,
+    interfaceScale: current.interfaceScale,
+    playVideoPortraits: current.playVideoPortraits,
+    showNsfwAvatar: current.showNsfwAvatar,
     clearBackground:
         current.backgroundColors.isEmpty && current.backgroundLayout == null,
     userName: _userName.text.trim(),
@@ -182,8 +189,9 @@ class SettingsScreenState extends State<SettingsScreen> {
     final services = AppScope.of(context);
     services.runtime.touch(next);
     await services.settings.update(next);
-    // Load the (possibly new) model in the background so chat is ready.
-    services.runtime.ensureReady(next).ignore();
+    // Load the (possibly new) model in the background so chat is ready;
+    // not mid-reply, which a restart would cut off. The next reply loads it.
+    if (!services.runtime.busy) services.runtime.ensureReady(next).ignore();
     if (!mounted) return true;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -212,66 +220,49 @@ class SettingsScreenState extends State<SettingsScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(16, 4, 16, 0),
-            child: TabBar(
-              isScrollable: true,
-              tabAlignment: TabAlignment.start,
-              dividerColor: Colors.transparent,
-              tabs: [
-                Tab(text: 'General'),
-                Tab(text: 'Appearance'),
-                Tab(text: 'Images'),
-                Tab(text: 'Brain'),
-                Tab(text: 'Computer'),
-                Tab(text: 'Internet'),
-                Tab(text: 'Privacy'),
-                Tab(text: 'Logs'),
-                Tab(text: 'About'),
-              ],
-            ),
-          ),
           Expanded(
-            child: TabBarView(
-              children: [
-                _page(_general()),
-                _page(_appearance()),
-                _page([
-                  ImageSettings(
-                    value: _draft,
-                    onChanged: (v) => setState(() => _draft = v),
-                  ),
-                ]),
-                _page([
-                  const SizedBox(height: 14),
-                  ModelPicker(
-                    value: _draft,
-                    onChanged: (v) => setState(() => _draft = v),
-                  ),
-                  const SizedBox(height: 28),
-                  SightSettings(
-                    value: _draft,
-                    onChanged: (v) => setState(() => _draft = v),
-                  ),
-                  const SizedBox(height: 28),
-                  RecallSettings(value: _draft),
-                  const SizedBox(height: 28),
-                  BrainAdvanced(
-                    value: _draft,
-                    onChanged: (v) => setState(() => _draft = v),
-                  ),
-                ]),
-                _page(const [_SystemAccess()]),
-                _page([
-                  InternetSettings(
-                    value: _draft,
-                    onChanged: (v) => setState(() => _draft = v),
-                  ),
-                ]),
-                _page(const [_Section('Encryption'), EncryptionSettings()]),
-                _page(const [LogsSettings()]),
-                _page(const [_About()]),
-              ],
+            child: _withTabs(
+              TabBarView(
+                children: [
+                  _page(_general()),
+                  _page(_appearance()),
+                  _page([
+                    ImageSettings(
+                      value: _draft,
+                      onChanged: (v) => setState(() => _draft = v),
+                    ),
+                  ]),
+                  _page([
+                    const SizedBox(height: 14),
+                    ModelPicker(
+                      value: _draft,
+                      onChanged: (v) => setState(() => _draft = v),
+                    ),
+                    const SizedBox(height: 28),
+                    SightSettings(
+                      value: _draft,
+                      onChanged: (v) => setState(() => _draft = v),
+                    ),
+                    const SizedBox(height: 28),
+                    RecallSettings(value: _draft),
+                    const SizedBox(height: 28),
+                    BrainAdvanced(
+                      value: _draft,
+                      onChanged: (v) => setState(() => _draft = v),
+                    ),
+                  ]),
+                  _page(const [_SystemAccess()]),
+                  _page([
+                    InternetSettings(
+                      value: _draft,
+                      onChanged: (v) => setState(() => _draft = v),
+                    ),
+                  ]),
+                  _page(const [_Section('Encryption'), EncryptionSettings()]),
+                  _page(const [LogsSettings()]),
+                  _page(const [_About()]),
+                ],
+              ),
             ),
           ),
           // One Save for every page, so nothing is lost switching pages.
@@ -290,6 +281,50 @@ class SettingsScreenState extends State<SettingsScreen> {
       ),
     );
   }
+
+  static const _pages = <SettingsPage>[
+    (label: 'General', icon: Icons.tune_rounded),
+    (label: 'Appearance', icon: Icons.palette_outlined),
+    (label: 'Images', icon: Icons.image_outlined),
+    (label: 'Brain', icon: Icons.psychology_outlined),
+    (label: 'Computer', icon: Icons.computer_rounded),
+    (label: 'Internet', icon: Icons.language_rounded),
+    (label: 'Privacy', icon: Icons.shield_outlined),
+    (label: 'Logs', icon: Icons.receipt_long_outlined),
+    (label: 'About', icon: Icons.info_outline_rounded),
+  ];
+
+  /// The glass tabs across the top of [pages], or down their left, as
+  /// picked in Appearance; it switches at once.
+  Widget _withTabs(Widget pages) => ListenableBuilder(
+    listenable: AppScope.of(context).settings,
+    builder: (context, _) {
+      final layout = AppScope.of(context).settings.value.settingsTabs;
+      final tabs = SettingsTabBar(pages: _pages, layout: layout);
+      if (layout == SettingsTabs.side) {
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 0, 0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              tabs,
+              Expanded(child: pages),
+            ],
+          ),
+        );
+      }
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+            child: tabs,
+          ),
+          Expanded(child: pages),
+        ],
+      );
+    },
+  );
 
   Widget _page(List<Widget> children) => ListView(
     padding: const EdgeInsets.fromLTRB(24, 0, 24, 16),
@@ -403,6 +438,107 @@ class SettingsScreenState extends State<SettingsScreen> {
                 'also right-click the light to move it.',
           ),
         ],
+      ),
+      const SizedBox(height: 14),
+      Row(
+        children: [
+          Text(
+            'Settings tabs',
+            style: TextStyle(color: context.palette.textMuted),
+          ),
+          const SizedBox(width: 12),
+          ListenableBuilder(
+            listenable: AppScope.of(context).settings,
+            builder: (context, _) {
+              final store = AppScope.of(context).settings;
+              return GlassSelect<SettingsTabs>(
+                value: store.value.settingsTabs,
+                options: const [
+                  GlassOption(SettingsTabs.top, 'Across the top'),
+                  GlassOption(SettingsTabs.side, 'Down the side'),
+                ],
+                onChanged: (v) =>
+                    store.update(store.value.copyWith(settingsTabs: v)),
+              );
+            },
+          ),
+        ],
+      ),
+      const SizedBox(height: 14),
+      Row(
+        children: [
+          Text(
+            'Interface size',
+            style: TextStyle(color: context.palette.textMuted),
+          ),
+          SizedBox(
+            width: 220,
+            child: ListenableBuilder(
+              listenable: AppScope.of(context).settings,
+              builder: (context, _) {
+                final store = AppScope.of(context).settings;
+                return Slider(
+                  value: store.value.interfaceScale,
+                  min: minInterfaceScale,
+                  max: maxInterfaceScale,
+                  divisions: 14,
+                  label: '${(store.value.interfaceScale * 100).round()}%',
+                  onChanged: (v) =>
+                      store.update(store.value.copyWith(interfaceScale: v)),
+                );
+              },
+            ),
+          ),
+          const SizedBox(width: 4),
+          const InfoIcon(
+            message:
+                "Makes everything bigger or smaller, text included, on top of "
+                "your computer's own scaling. It never goes bigger than the "
+                'window has room for; make the window larger to go further.',
+          ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      ListenableBuilder(
+        listenable: AppScope.of(context).settings,
+        builder: (context, _) {
+          final store = AppScope.of(context).settings;
+          return SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: store.value.playVideoPortraits,
+            onChanged: (on) =>
+                store.update(store.value.copyWith(playVideoPortraits: on)),
+            title: const Text('Play video portraits'),
+            subtitle: Text(
+              AvatarVideo.available
+                  ? 'A portrait that is a short video plays, muted and '
+                        'looping, while the window is in front. Off, it shows '
+                        'as a still picture.'
+                  : 'Needs libmpv, which isn\'t installed ("libmpv2" on '
+                        'Debian and Ubuntu, "mpv-libs" on Fedora). Until '
+                        'then video portraits show as a still picture.',
+              style: TextStyle(fontSize: 12, color: context.palette.textMuted),
+            ),
+          );
+        },
+      ),
+      ListenableBuilder(
+        listenable: AppScope.of(context).settings,
+        builder: (context, _) {
+          final store = AppScope.of(context).settings;
+          return SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            value: store.value.showNsfwAvatar,
+            onChanged: (on) =>
+                store.update(store.value.copyWith(showNsfwAvatar: on)),
+            title: const Text('Show 18+ portraits'),
+            subtitle: Text(
+              'When a companion\'s portrait has an 18+ version (Soulkyn '
+              'characters can bring one), show that one instead.',
+              style: TextStyle(fontSize: 12, color: context.palette.textMuted),
+            ),
+          );
+        },
       ),
       if (TitleBarChoice.supported) ...[
         const SizedBox(height: 6),
@@ -551,16 +687,42 @@ class _Background extends StatelessWidget {
           ),
         ),
         if (!Platform.isMacOS)
-          SwitchListTile(
-            contentPadding: EdgeInsets.zero,
-            value: value.startWithComputer,
-            onChanged: (on) => onChanged(value.copyWith(startWithComputer: on)),
-            title: const Text('Start with my computer'),
-            subtitle: Text(
-              value.keepRunning
-                  ? 'Starts in the system tray when you log in.'
-                  : 'Starts when you log in.',
-              style: muted,
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Start with my computer',
+                        style: TextStyle(color: context.palette.text),
+                      ),
+                      Text(switch (value.startMode) {
+                        StartMode.off => 'VoxCordis waits until you open it.',
+                        StartMode.onScreen =>
+                          'Opens its window when you log in.',
+                        StartMode.minimized =>
+                          value.keepRunning
+                              ? 'Starts in the system tray when you log in.'
+                              : 'Starts in the taskbar when you log in.',
+                      }, style: muted),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 12),
+                GlassSelect<StartMode>(
+                  minWidth: _Poke.pickerWidth,
+                  value: value.startMode,
+                  options: const [
+                    GlassOption(StartMode.off, 'Disabled'),
+                    GlassOption(StartMode.onScreen, 'Start On-Screen'),
+                    GlassOption(StartMode.minimized, 'Start Minimized'),
+                  ],
+                  onChanged: (m) => onChanged(value.copyWith(startMode: m)),
+                ),
+              ],
             ),
           ),
         const SizedBox(height: 6),
@@ -771,7 +933,57 @@ class _SystemAccess extends StatelessWidget {
       );
       if (ok != true) return;
     }
-    await store.update(store.value.copyWith(systemAccess: on));
+    // Turning access off also takes "Allow everything" back.
+    await store.update(
+      store.value.copyWith(
+        systemAccess: on,
+        allowEverything: on ? store.value.allowEverything : false,
+      ),
+    );
+  }
+
+  Future<void> _toggleEverything(BuildContext context, bool on) async {
+    final store = AppScope.of(context).settings;
+    if (on) {
+      final name = store.value.companionName;
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          icon: const Icon(Icons.dangerous_rounded, color: Colors.redAccent),
+          title: const Text('Allow everything?'),
+          content: SizedBox(
+            width: 420,
+            child: Text(
+              '$name will run commands and open files, folders, web '
+              'addresses and programs without asking you first, as you, with '
+              'everything you can reach.\n\n'
+              'This can be highly destructive. A command can delete or '
+              'change files, send data away or break your system, and it '
+              'cannot be undone. A model can misunderstand, or be talked '
+              'into something by text it reads.\n\n'
+              'You use this at your own risk. Nucume and the contributors '
+              'of VoxCordis accept no liability for anything $name does on '
+              'your machine, or for any loss or damage that follows.\n\n'
+              'Every action is still written to the log. You can turn this '
+              'off again at any time.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              style: FilledButton.styleFrom(backgroundColor: Colors.redAccent),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('I understand, allow everything'),
+            ),
+          ],
+        ),
+      );
+      if (ok != true) return;
+    }
+    await store.update(store.value.copyWith(allowEverything: on));
   }
 
   @override
@@ -800,6 +1012,24 @@ class _SystemAccess extends StatelessWidget {
                 ),
               ),
             ),
+            if (s.systemAccess)
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                value: s.allowEverything,
+                onChanged: (on) => _toggleEverything(context, on),
+                title: const Text(
+                  'Allow everything',
+                  style: TextStyle(color: Colors.redAccent),
+                ),
+                subtitle: Text(
+                  'Run commands and open things without asking each time. '
+                  'Risky: can be highly destructive.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: context.palette.textMuted,
+                  ),
+                ),
+              ),
             const _Section('Always allowed'),
             if (s.allowedSystemActions.isEmpty)
               Padding(
@@ -1257,6 +1487,8 @@ class _About extends StatelessWidget {
           icon: const Icon(Icons.forum_outlined),
           label: const Text('Join the VoxCordis Discord'),
         ),
+        const SizedBox(height: 12),
+        const SocialLinks(),
         const _Section('Version'),
         const SizedBox(height: 8),
         const _UpdateRow(),

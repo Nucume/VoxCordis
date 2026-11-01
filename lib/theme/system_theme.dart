@@ -2,6 +2,8 @@ import 'dart:io';
 
 import 'package:flutter/widgets.dart';
 
+import '../services/system/windows_native.dart';
+
 /// Whether the computer is set to light or dark, for the System theme.
 ///
 /// Flutter reports light whenever the desktop doesn't say (no portal, an
@@ -24,13 +26,11 @@ class SystemTheme {
         return WidgetsBinding.instance.platformDispatcher.platformBrightness;
       }
       if (Platform.isWindows) {
-        return parseWindows(
-          await _run('reg', [
-            'query',
-            r'HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
-            '/v',
+        return fromDword(
+          await WindowsNative.userDword(
+            r'Software\Microsoft\Windows\CurrentVersion\Themes\Personalize',
             'AppsUseLightTheme',
-          ]),
+          ),
         );
       }
       if (Platform.isLinux) {
@@ -76,16 +76,12 @@ class SystemTheme {
     return null;
   }
 
-  /// `reg query` output: AppsUseLightTheme is 0x0 (dark) or 0x1 (light).
-  static Brightness? parseWindows(String? out) {
-    final m = RegExp(
-      r'AppsUseLightTheme\s+REG_DWORD\s+0x([0-9a-fA-F]+)',
-    ).firstMatch(out ?? '');
-    if (m == null) return null;
-    return int.parse(m[1]!, radix: 16) == 0
-        ? Brightness.dark
-        : Brightness.light;
-  }
+  /// AppsUseLightTheme: 0 is dark, anything else light, null unknown.
+  static Brightness? fromDword(int? value) => value == null
+      ? null
+      : value == 0
+      ? Brightness.dark
+      : Brightness.light;
 
   /// The portal's colour scheme, e.g. `(<<uint32 1>>,)`: 1 prefers dark,
   /// 2 prefers light, 0 has no preference.

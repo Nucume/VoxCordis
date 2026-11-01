@@ -1,5 +1,8 @@
+import 'dart:io';
+
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:path/path.dart' as p;
 import 'package:uuid/uuid.dart';
 
@@ -15,13 +18,14 @@ import '../../services/import/import_writer.dart';
 import '../../theme/app_theme.dart';
 import '../../shell/portrait.dart';
 import '../settings/model_picker.dart';
+import '../images/soulkyn_download_dialog.dart';
 import 'character_pickers.dart';
 import 'import_step.dart';
 
 enum _Step {
   welcome('', Size(560, 440)),
   import_('Import', Size(640, 500)),
-  character('Character', Size(640, 400)),
+  character('Character', Size(760, 400)),
   personality('Personality', Size(1000, 760)),
   story('Story', Size(1000, 780)),
   you('You', Size(640, 380)),
@@ -67,6 +71,12 @@ class _SetupWizardState extends State<SetupWizard> {
   /// Set while the user goes the import way, and once a file is read.
   bool _importing = false;
   ImportedCharacter? _imported;
+
+  /// The imported Kyn's Soulkyn pictures and videos, downloaded on the
+  /// character step into a temporary folder, and how many there are. They
+  /// move into the companion's `images/` when setup finishes.
+  Directory? _gallery;
+  int _galleryCount = 0;
   final _story = TextEditingController();
   final _looks = {
     for (final k in DeskFiles.looksKeys) k: TextEditingController(),
@@ -180,6 +190,7 @@ class _SetupWizardState extends State<SetupWizard> {
   void _start({required bool import}) {
     if (!import && _imported != null) {
       _imported = null;
+      _dropGallery();
       _draft = _initial;
       _name.text = _initial.companionName == 'Companion'
           ? ''
@@ -195,6 +206,7 @@ class _SetupWizardState extends State<SetupWizard> {
   void _onImported(ImportedCharacter c) {
     setState(() {
       _imported = c;
+      _dropGallery();
       _draft = _initial.copyWith(
         pronouns: c.pronouns ?? _initial.pronouns,
         traits: c.traits.isEmpty ? null : c.traits,
@@ -256,6 +268,7 @@ class _SetupWizardState extends State<SetupWizard> {
         db: db,
       );
     }
+    await _settleGallery(_folder);
     await CoreRules.load(s);
     await DeskFiles.ensure(s);
     final portrait = await _settlePortrait(s.portraitPath);
@@ -270,7 +283,12 @@ class _SetupWizardState extends State<SetupWizard> {
         accentColor: s.accentColor,
       ),
     );
-    await services.switchCompanion(next, nextDb: db);
+    await services.switchCompanion(
+      Pictures.hasNsfwBeside(portrait)
+          ? next.copyWith(showNsfwAvatar: _draft.showNsfwAvatar)
+          : next,
+      nextDb: db,
+    );
     services.addingCompanion.value = false;
   }
 
@@ -319,6 +337,7 @@ class _SetupWizardState extends State<SetupWizard> {
       );
       if (brought.memories > 0) services.memoryChanged();
     }
+    await _settleGallery(_folder);
     await CoreRules.load(next);
     await DeskFiles.ensure(next);
     next = next.copyWith(
@@ -329,6 +348,59 @@ class _SetupWizardState extends State<SetupWizard> {
     services.rewriteIfAsked().ignore();
   }
 
+  void _dropGallery() {
+    final dir = _gallery;
+    _gallery = null;
+    _galleryCount = 0;
+    if (dir != null) dir.delete(recursive: true).ignore();
+  }
+
+  /// Downloads the imported Kyn's whole Soulkyn gallery now, so setup can
+  /// say how much came.
+  Future<void> _downloadGallery(Uri page) async {
+    final dir = _gallery ??= await ImportTemp.create();
+    if (!mounted) return;
+    await showSoulkynDownload(context, into: dir, link: page, start: true);
+    final n = await dir
+        .list()
+        .where((e) => e is File && !p.basename(e.path).startsWith('.'))
+        .length;
+    if (mounted) setState(() => _galleryCount = n);
+  }
+
+  /// Moves what [_downloadGallery] fetched into [folder]'s `images/`, and
+  /// remembers the Kyn's link for Pictures' download button.
+  Future<void> _settleGallery(String folder) async {
+    final page = _imported?.soulkynPage;
+    if (page != null) await rememberSoulkynLink(folder, page);
+    final dir = _gallery;
+    if (dir == null) return;
+    final images = CompanionFolder(folder).images;
+    Future<void> move(Directory from, Directory to) async {
+      await to.create(recursive: true);
+      await for (final e in from.list()) {
+        final target = p.join(to.path, p.basename(e.path));
+        if (e is Directory) {
+          await move(e, Directory(target));
+        } else if (e is File && !await File(target).exists()) {
+          try {
+            await e.rename(target);
+          } on FileSystemException {
+            // Another disk: copy instead.
+            await e.copy(target);
+          }
+        }
+      }
+    }
+
+    try {
+      await move(dir, images);
+    } on FileSystemException {
+      // What moved stays; the rest can be fetched again from Pictures.
+    }
+    _dropGallery();
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -336,8 +408,13 @@ class _SetupWizardState extends State<SetupWizard> {
         builder: (context, constraints) {
           // Never bigger than the window, minus a margin.
           // The picture offer on the character step needs a little room.
-          final size = _step == _Step.character && _pictureOffer != null
-              ? Size(_step.size.width, _step.size.height + 70)
+          final size = _step == _Step.character
+              ? Size(
+                  _step.size.width,
+                  _characterBody == null
+                      ? _step.size.height
+                      : _characterBody! + _frameHeight,
+                )
               : _step.size;
           final width = size.width.clamp(0.0, constraints.maxWidth - 48);
           // Adding another has one more button on the welcome.
@@ -498,7 +575,16 @@ class _SetupWizardState extends State<SetupWizard> {
               child: SingleChildScrollView(
                 controller: _scrolls[_step],
                 padding: const EdgeInsets.only(right: 16),
-                child: _body(),
+                child: _step == _Step.character
+                    ? _SizeReporter(
+                        onSize: (size) {
+                          if (_characterBody != size.height) {
+                            setState(() => _characterBody = size.height);
+                          }
+                        },
+                        child: _body(),
+                      )
+                    : _body(),
               ),
             ),
           ),
@@ -536,9 +622,33 @@ class _SetupWizardState extends State<SetupWizard> {
     _ => 'Choose $_nameValue\'s brain',
   };
 
+  /// The character step's content height as last laid out, so the card
+  /// fits it exactly: no dead space, and a scrollbar only when the window
+  /// is too small.
+  double? _characterBody;
+
+  /// Everything around the step's content: padding, title row and buttons.
+  static const _frameHeight = 26 + 32 + 20 + 16 + 40 + 22 + 8.0;
+
   /// The imported character's linked picture, while no portrait is set.
   Uri? get _pictureOffer =>
       _draft.portraitPath == null ? _imported?.avatarUrl : null;
+
+  /// The picture setup shows: the 18+ version when one came with the
+  /// import and the human ticked it.
+  String? get _shownPortrait {
+    final path = _draft.portraitPath;
+    if (path == null || !_draft.showNsfwAvatar) return path;
+    return Pictures.avatarIn(p.dirname(path), nsfw: true)?.path ?? path;
+  }
+
+  /// The imported character's portrait set, until it is downloaded.
+  AvatarSet? get _avatarOffer =>
+      _draft.portraitPath != null &&
+          (Pictures.avatarVideoBeside(_draft.portraitPath) != null ||
+              Pictures.hasNsfwBeside(_draft.portraitPath))
+      ? null
+      : _imported?.avatars;
 
   /// "she" for she/her, "they" for they/them; falls back to the name.
   String _pronounSubject() {
@@ -577,8 +687,9 @@ class _SetupWizardState extends State<SetupWizard> {
                     child: GestureDetector(
                       onTap: _pickPortrait,
                       child: Portrait(
-                        path: _draft.portraitPath,
-                        size: 140,
+                        path: _shownPortrait,
+                        size: 210,
+                        maxHeight: 330,
                         placeholder: Icon(
                           Icons.add_a_photo_outlined,
                           size: 30,
@@ -632,15 +743,81 @@ class _SetupWizardState extends State<SetupWizard> {
                     onChanged: (v) =>
                         setState(() => _draft = _draft.copyWith(pronouns: v)),
                   ),
+                  if (Pictures.hasNsfwBeside(_draft.portraitPath)) ...[
+                    const SizedBox(height: 10),
+                    // A row, not a SwitchListTile: the glass card would hide a
+                    // tile's ink.
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text('Show the 18+ avatar'),
+                              Text(
+                                'Both versions are kept. Switch any time in '
+                                'Settings → Appearance.',
+                                style: TextStyle(
+                                  fontSize: 12,
+                                  color: context.palette.textMuted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        Switch(
+                          value: _draft.showNsfwAvatar,
+                          onChanged: (on) => setState(
+                            () => _draft = _draft.copyWith(showNsfwAvatar: on),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                  if (_imported?.soulkynPage case final page?) ...[
+                    const SizedBox(height: 10),
+                    Wrap(
+                      spacing: 12,
+                      runSpacing: 6,
+                      crossAxisAlignment: WrapCrossAlignment.center,
+                      children: [
+                        OutlinedButton.icon(
+                          onPressed: () => _downloadGallery(page),
+                          icon: const Icon(Icons.download_rounded, size: 18),
+                          label: const Text('Download all Images & Videos'),
+                        ),
+                        Text(
+                          _galleryCount > 0
+                              ? '$_galleryCount ready for $_nameValue\'s '
+                                    'Pictures.'
+                              : 'Everything in the Kyn\'s Soulkyn gallery.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: context.palette.textMuted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                   const SizedBox(height: 14),
-                  if (_pictureOffer case final url?)
+                  if (_avatarOffer case final set?)
+                    PortraitDownload(
+                      avatars: set,
+                      still: _draft.portraitPath == null
+                          ? null
+                          : File(_draft.portraitPath!),
+                      onPortrait: (f) => setState(
+                        () => _draft = _draft.copyWith(portraitPath: f.path),
+                      ),
+                    )
+                  else if (_pictureOffer case final url?)
                     PortraitDownload(
                       url: url,
                       onPortrait: (f) => setState(
                         () => _draft = _draft.copyWith(portraitPath: f.path),
                       ),
                     )
-                  else
+                  else if (_draft.portraitPath == null)
                     Text(
                       'No picture? Your companion can choose a look once it '
                       'knows who it is.',
@@ -799,5 +976,38 @@ class _StepDot extends StatelessWidget {
         ],
       ),
     );
+  }
+}
+
+/// Tells [onSize] its child's size after each layout that changed it.
+class _SizeReporter extends SingleChildRenderObjectWidget {
+  const _SizeReporter({required this.onSize, super.child});
+
+  final ValueChanged<Size> onSize;
+
+  @override
+  RenderObject createRenderObject(BuildContext context) =>
+      _RenderSizeReporter(onSize);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    _RenderSizeReporter renderObject,
+  ) => renderObject.onSize = onSize;
+}
+
+class _RenderSizeReporter extends RenderProxyBox {
+  _RenderSizeReporter(this.onSize);
+
+  ValueChanged<Size> onSize;
+  Size? _last;
+
+  @override
+  void performLayout() {
+    super.performLayout();
+    if (size == _last) return;
+    _last = size;
+    final now = size;
+    WidgetsBinding.instance.addPostFrameCallback((_) => onSize(now));
   }
 }

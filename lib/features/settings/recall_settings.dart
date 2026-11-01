@@ -4,6 +4,7 @@ import '../../app_scope.dart';
 import '../../data/settings.dart';
 import '../../services/runtime/model_catalog.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/download_bar.dart';
 
 /// Settings → Brain → Recall: the small embedding model that finds
 /// memories and older chat by meaning.
@@ -156,21 +157,8 @@ class _RecallSettingsState extends State<RecallSettings> {
                       mainAxisSize: MainAxisSize.min,
                       children: [
                         SizedBox(
-                          width: 120,
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            borderRadius: BorderRadius.circular(4),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          progress == null
-                              ? '…'
-                              : '${(progress * 100).round()}%',
-                          style: TextStyle(
-                            fontSize: 12,
-                            color: context.palette.textMuted,
-                          ),
+                          width: 170,
+                          child: DownloadBar(progress: progress),
                         ),
                         IconButton(
                           tooltip: 'Pause download',

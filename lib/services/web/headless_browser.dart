@@ -10,6 +10,7 @@ import '../import/untrusted_text.dart';
 import '../logs/app_log.dart';
 import '../runtime/download.dart';
 import 'web_guard.dart';
+import '../system/posix_native.dart';
 
 /// A browser the companion uses without a window: Chrome, Edge, Chromium,
 /// Brave or Vivaldi already on the computer, started headless and driven
@@ -204,7 +205,7 @@ class HeadlessBrowser {
     await staging.rename(dir.path);
     final exe = await _downloaded();
     if (exe == null) throw 'The download had no browser in it.';
-    if (!Platform.isWindows) await Process.run('chmod', ['+x', exe]);
+    if (!Platform.isWindows) PosixNative.makeExecutable(exe);
     return exe;
   }
 
@@ -316,7 +317,7 @@ class HeadlessBrowser {
       '--hide-scrollbars',
       '--window-size=1280,900',
       // Chromium refuses its sandbox as root (only seen in containers).
-      if (await _isRoot()) '--no-sandbox',
+      if (_isRoot()) '--no-sandbox',
       'about:blank',
     ]);
     _process = process;
@@ -494,16 +495,7 @@ class HeadlessBrowser {
   /// The page session of each call waiting for an answer, by its id.
   final _pageCalls = <int, String?>{};
 
-  static bool? _root;
-  static Future<bool> _isRoot() async {
-    if (Platform.isWindows) return false;
-    try {
-      return _root ??=
-          ((await Process.run('id', ['-u'])).stdout as String).trim() == '0';
-    } on Object {
-      return _root = false;
-    }
-  }
+  static bool _isRoot() => !Platform.isWindows && PosixNative.isRoot();
 
   void _reset() {
     for (final c in _pending.values) {

@@ -16,6 +16,8 @@ class ImportedCharacter {
     this.sections = const [],
     this.portrait,
     this.avatarUrl,
+    this.avatars,
+    this.soulkynPage,
     this.lessons,
     this.privacy,
     this.userName,
@@ -46,6 +48,14 @@ class ImportedCharacter {
   /// pressing Download (see `avatar_download.dart`).
   final Uri? avatarUrl;
 
+  /// A portrait set the import links to: Soulkyn's avatar as a picture and
+  /// a short video, in a regular and an 18+ version. Like [avatarUrl], only
+  /// fetched when the human presses Download.
+  final AvatarSet? avatars;
+
+  /// The Soulkyn page it came from, so setup can offer its whole gallery.
+  final Uri? soulkynPage;
+
   /// Whole lessons.md and privacy.md, from a Nemini export.
   final String? lessons;
   final String? privacy;
@@ -65,6 +75,25 @@ class ImportedCharacter {
     for (final s in sections)
       if (s.text.trim().isNotEmpty) '# ${s.heading}\n\n${s.text.trim()}',
   ].join('\n\n');
+}
+
+/// The files of an imported portrait, each optional: the still picture
+/// and video, and their 18+ versions.
+class AvatarSet {
+  const AvatarSet({this.still, this.video, this.nsfwStill, this.nsfwVideo});
+
+  final Uri? still;
+  final Uri? video;
+  final Uri? nsfwStill;
+  final Uri? nsfwVideo;
+
+  bool get hasVideo => video != null || nsfwVideo != null;
+  bool get hasNsfw => nsfwStill != null || nsfwVideo != null;
+  bool get isEmpty => !hasVideo && still == null && nsfwStill == null;
+
+  /// Where the files are, for the human.
+  String get host =>
+      (still ?? video ?? nsfwStill ?? nsfwVideo)?.host ?? 'the web';
 }
 
 class ImportSection {

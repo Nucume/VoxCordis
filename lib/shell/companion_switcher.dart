@@ -11,6 +11,7 @@ import '../features/chat/chat_controller.dart';
 import '../features/export/export_dialog.dart';
 import '../theme/app_theme.dart';
 import '../theme/glass_popover.dart';
+import 'portrait.dart';
 
 /// Wraps the portrait and name on the companion card: a tap drops a glass
 /// panel of every companion, to switch to, and "Add another companion".
@@ -30,8 +31,9 @@ class CompanionSwitcher extends StatefulWidget {
   final Widget Function(BuildContext context, bool open) builder;
 
   /// The picture the companion chose, else the one from its setup.
-  static String? avatarOf(CompanionProfile c) =>
-      Pictures.avatarIn(c.folder)?.path ?? c.portraitPath;
+  /// With [nsfw], its 18+ version when it has one.
+  static String? avatarOf(CompanionProfile c, {bool nsfw = false}) =>
+      Pictures.avatarIn(c.folder, nsfw: nsfw)?.path ?? c.portraitPath;
 
   /// How many of [count] companions the menu lists in [maxHeight] of room;
   /// the rest are behind "More…".
@@ -422,7 +424,10 @@ class _CompanionRow extends StatelessWidget {
         child: Row(
           children: [
             _MiniPortrait(
-              path: CompanionSwitcher.avatarOf(companion),
+              path: CompanionSwitcher.avatarOf(
+                companion,
+                nsfw: AppScope.of(context).settings.value.showNsfwAvatar,
+              ),
               ring: colour,
               glow: current || hover,
             ),
@@ -596,6 +601,7 @@ class _MiniPortrait extends StatelessWidget {
               ? Image.file(
                   file,
                   fit: BoxFit.cover,
+                  alignment: Portrait.alignment,
                   cacheWidth: (size * 3).round(),
                 )
               : Padding(
@@ -1055,7 +1061,10 @@ class _CompanionCard extends StatelessWidget {
               child: LayoutBuilder(
                 builder: (context, c) => Center(
                   child: _MiniPortrait(
-                    path: CompanionSwitcher.avatarOf(companion),
+                    path: CompanionSwitcher.avatarOf(
+                      companion,
+                      nsfw: AppScope.of(context).settings.value.showNsfwAvatar,
+                    ),
                     ring: colour,
                     glow: current || hover,
                     size: c.biggest.shortestSide,

@@ -7,6 +7,8 @@ import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import 'avatar_download.dart';
+import 'import_temp.dart';
 import 'imported_character.dart';
 import 'soulkyn_link.dart';
 
@@ -49,13 +51,62 @@ class SoulkynBrowser {
   return true;
 })()''';
 
-  /// The avatar's address as the browser resolved it.
+  /// The avatar's address as the browser resolved it. When the avatar is
+  /// a short video (`<video aria-label="Avatar video for …">`), its poster, or else one of its frames as a
+  /// `data:image/jpeg` address. Soulkyn's `<video>` has no `crossorigin`,
+  /// so drawing it would taint the canvas; a second, CORS-enabled copy of
+  /// the clip is loaded instead, and 'pending' returned until it is ready.
   static const _avatar = r'''(() => {
   const imgs = [...document.images];
-  const a = imgs.find(i => /persona avatar/i.test(i.alt)) ||
-    imgs.filter(i => /soulkyn\.(io|com)/.test(i.currentSrc || i.src))
-      .sort((x, y) => y.naturalWidth * y.naturalHeight - x.naturalWidth * x.naturalHeight)[0];
-  return a ? (a.currentSrc || a.src) : null;
+  const a = imgs.find(i => /persona avatar/i.test(i.alt));
+  if (a) return a.currentSrc || a.src;
+  const area = e => e.clientWidth * e.clientHeight;
+  const named = e => /avatar video/i.test(e.getAttribute('aria-label') || '');
+  const vids = [...document.querySelectorAll('video')];
+  const v = vids.find(named) || vids
+    .filter(e => area(e) >= 120 * 120 &&
+      (/soulkyn\.(io|com)/.test(e.currentSrc || e.src || e.poster || '') ||
+       e.closest('[class*="avatar" i],[aria-label*="avatar" i],[alt*="avatar" i]')))
+    .sort((x, y) => area(y) - area(x))[0];
+  if (v && v.poster) return v.poster;
+  const src = v && (v.currentSrc || v.src);
+  if (src) {
+    const st = window.__vcFrame || (window.__vcFrame = { src: '', state: '' });
+    if (st.src !== src) {
+      st.src = src;
+      st.state = 'pending';
+      const c = document.createElement('video');
+      c.crossOrigin = 'anonymous';
+      c.muted = true;
+      c.preload = 'auto';
+      c.onloadeddata = () => {
+        try {
+          const k = Math.min(1, 1280 / Math.max(c.videoWidth, c.videoHeight));
+          const cv = document.createElement('canvas');
+          cv.width = Math.round(c.videoWidth * k);
+          cv.height = Math.round(c.videoHeight * k);
+          cv.getContext('2d').drawImage(c, 0, 0, cv.width, cv.height);
+          st.state = cv.toDataURL('image/jpeg', 0.9);
+        } catch (e) { st.state = 'failed'; }
+      };
+      c.onerror = () => { st.state = 'failed'; };
+      c.src = src;
+    }
+    if (st.state !== 'failed') return st.state;
+  }
+  const b = imgs.filter(i => /soulkyn\.(io|com)/.test(i.currentSrc || i.src))
+    .sort((x, y) => y.naturalWidth * y.naturalHeight - x.naturalWidth * x.naturalHeight)[0];
+  return b ? (b.currentSrc || b.src) : null;
+})()''';
+
+  /// The address of the avatar's video, when the avatar is one.
+  static const _avatarVideo = r'''(() => {
+  const vids = [...document.querySelectorAll('video')];
+  const area = e => e.clientWidth * e.clientHeight;
+  const v = vids.find(e => /avatar video/i.test(e.getAttribute('aria-label') || '')) ||
+    vids.filter(e => /soulkyn\.io\//.test(e.currentSrc || e.src || ''))
+      .sort((x, y) => area(y) - area(x))[0];
+  return v ? (v.currentSrc || v.src) : null;
 })()''';
 
   /// Whether the page, as [_probe] described it, can be read now.
@@ -84,8 +135,8 @@ class SoulkynBrowser {
   }
 
   /// Only Soulkyn, its Cloudflare check and the sign-in services its
-  /// login page may send to open in the window.
-  @visibleForTesting
+  /// login page may send to open in the window. The gallery download's
+  /// window uses it too.
   static bool allowed(String url) {
     final u = Uri.tryParse(url);
     if (u == null || u.scheme != 'https') return false;
@@ -166,12 +217,7 @@ class SoulkynBrowser {
   Future<ImportedCharacter> read(Uri url, {bool editor = false}) async {
     final Webview view;
     try {
-      final windows = _windows = WindowsWebviewOptions(
-        userDataFolder: p.join(
-          (await getApplicationSupportDirectory()).path,
-          'WebView2',
-        ),
-      );
+      final windows = await windowsOptions();
       view = _view = await WebviewWindow.create(
         configuration: CreateConfiguration(
           windowWidth: 1100,
@@ -240,12 +286,44 @@ class SoulkynBrowser {
         }
         _readNow = false;
         status.value = 'Reading the page...';
-        final avatar = await view.evaluateJavaScript(_avatar);
-        final hint = avatar is String ? avatar : null;
+        var avatar = await view.evaluateJavaScript(_avatar);
+        // A video avatar's frame takes a moment to load.
+        for (var i = 0; i < 20 && avatar == 'pending'; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 250));
+          avatar = await view.evaluateJavaScript(_avatar);
+        }
+        if (avatar == 'pending') avatar = null;
+        // Both versions of the avatar from the page's data, or else the
+        // video it shows.
+        Object? read;
+        try {
+          read = await view.evaluateJavaScript(soulkynPersonaAvatars);
+        } on PlatformException {
+          read = null;
+        }
+        var avatars = SoulkynLink.avatarSetFrom(read);
+        if (avatars == null) {
+          final clip = await view.evaluateJavaScript(_avatarVideo);
+          final video = SoulkynLink.videoFrom([if (clip is String) clip], page);
+          if (video != null) avatars = AvatarSet(video: video);
+        }
+        var hint = avatar is String ? avatar : null;
+        File? frame;
+        if (hint != null && hint.startsWith('data:image/')) {
+          // A still of the video avatar.
+          frame = await AvatarDownload.saveFrame(hint);
+          hint = null;
+        }
         if (editor) {
           final fields = await view.evaluateJavaScript(soulkynEditorReader);
           if (fields is Map) {
-            return SoulkynLink.fromEditor(fields, page, avatarHint: hint);
+            return SoulkynLink.fromEditor(
+              fields,
+              page,
+              avatarHint: hint,
+              avatars: avatars,
+              portrait: frame,
+            );
           }
         }
         await view.evaluateJavaScript(_syncFields);
@@ -253,8 +331,15 @@ class SoulkynBrowser {
           'document.documentElement.outerHTML',
         );
         if (html is! String || html.length > _maxHtml) continue;
-        final c = SoulkynLink.fromHtml(html, page, avatarHint: hint);
+        final c = SoulkynLink.fromHtml(
+          html,
+          page,
+          avatarHint: hint,
+          avatars: avatars,
+          portrait: frame,
+        );
         if (c != null) return c;
+        if (frame != null) await ImportTemp.remove(frame.path);
         status.value = 'The page has no character details yet.';
       }
       throw const SoulkynLinkFailed('The page never showed the character.');
@@ -263,9 +348,9 @@ class SoulkynBrowser {
     }
   }
 
-  /// Closes the window and wipes what it kept: cookies, the Soulkyn
-  /// login and its storage, which would otherwise stay on disk in the
-  /// browser's own files. The next import signs in again.
+  /// Closes the window. The Soulkyn login stays in the browser's own
+  /// files, so the next import, avatar or gallery download doesn't ask
+  /// again, until [logOut].
   Future<void> close() async {
     final view = _view;
     _view = null;
@@ -276,17 +361,24 @@ class SoulkynBrowser {
         // Already gone.
       }
     }
-    final windows = _windows;
-    _windows = null;
-    if (windows != null) {
-      try {
-        await WebviewWindow.clearAll(windows: windows);
-      } on Object {
-        // No browser, or its files are busy; tried again next time.
-      }
-    }
   }
 
-  /// Set once a window was opened, so [close] knows what to wipe.
-  WindowsWebviewOptions? _windows;
+  /// The browser's own files, shared by every Soulkyn window.
+  static Future<WindowsWebviewOptions> windowsOptions() async =>
+      WindowsWebviewOptions(
+        userDataFolder: p.join(
+          (await getApplicationSupportDirectory()).path,
+          'WebView2',
+        ),
+      );
+
+  /// Wipes what the Soulkyn windows kept: cookies, the login and their
+  /// storage. The next one signs in again.
+  static Future<void> logOut() async {
+    try {
+      await WebviewWindow.clearAll(windows: await windowsOptions());
+    } on Object {
+      // No browser, or its files are busy.
+    }
+  }
 }

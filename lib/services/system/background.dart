@@ -1,5 +1,6 @@
 import 'dart:io';
-import 'dart:ui' show Size;
+import 'dart:math' as math;
+import 'dart:ui' show PlatformDispatcher, Size;
 
 import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
@@ -8,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 import '../../data/settings.dart';
 import '../folder_service.dart';
 import 'tray.dart';
+import 'windows_native.dart';
 
 /// Keeps VoxCordis running when its window is closed, so reminders and
 /// automations still happen: with Settings → General → "Close to the system
@@ -30,6 +32,33 @@ class Background with WindowListener {
   /// a 1366×768 laptop screen.
   static const minWindowSize = Size(1140, 720);
 
+  /// [minWindowSize], held to what the screen has room for: at 200% scaling a
+  /// 1080p screen has only 960×540 to give. Narrower windows shrink the
+  /// interface to fit (see InterfaceScale). A window that opened bigger than
+  /// the screen is brought back onto it.
+  Future<Size> _fitToScreen() async {
+    final display = PlatformDispatcher.instance.displays.firstOrNull;
+    if (display == null || display.devicePixelRatio <= 0) return minWindowSize;
+    final room = display.size / display.devicePixelRatio;
+    // Leaves the taskbar and window frame their share.
+    final usable = Size(room.width * 0.95, room.height * 0.88);
+    final min = Size(
+      math.min(minWindowSize.width, usable.width),
+      math.min(minWindowSize.height, usable.height),
+    );
+    final size = await windowManager.getSize();
+    if (size.width > usable.width || size.height > usable.height) {
+      await windowManager.setSize(
+        Size(
+          math.min(size.width, usable.width),
+          math.min(size.height, usable.height),
+        ),
+      );
+      await windowManager.center();
+    }
+    return min;
+  }
+
   bool _ready = false;
   bool _keepRunning = false;
 
@@ -42,26 +71,26 @@ class Background with WindowListener {
     try {
       await windowManager.ensureInitialized();
       // Below this the card, the tabs and the chat squeeze into each other.
-      await windowManager.setMinimumSize(minWindowSize);
+      await windowManager.setMinimumSize(await _fitToScreen());
       windowManager.addListener(this);
       _ready = true;
       await _apply();
       settings.addListener(_onSettings);
-      if (startHidden && settings.value.keepRunning) {
+      if (startHidden) {
         // Once the first frame is up, out of the way.
         Future.delayed(const Duration(seconds: 2), _putAway);
       }
     } on Object catch (e) {
       debugPrint('Window hooks unavailable: $e');
     }
-    await syncLoginItem(settings.value.startWithComputer).catchError((_) {});
+    await syncLoginItem(settings.value.startMode).catchError((_) {});
   }
 
   void _onSettings() {
     final s = settings.value;
     if (s.keepRunning != _keepRunning) _apply().ignore();
-    if (s.startWithComputer != _loginItem) {
-      syncLoginItem(s.startWithComputer).ignore();
+    if (s.startMode != _loginItem) {
+      syncLoginItem(s.startMode).ignore();
     }
   }
 
@@ -137,7 +166,7 @@ class Background with WindowListener {
     }
   }
 
-  bool? _loginItem;
+  StartMode? _loginItem;
 
   /// The command that starts this copy of VoxCordis: the AppImage itself
   /// when it runs from one (the binary inside lives in a temporary mount).
@@ -150,40 +179,30 @@ class Background with WindowListener {
     'com.nucume.companion.desktop',
   );
 
-  static const _windowsRunKey =
-      r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
-
-  /// Adds or removes VoxCordis from what starts when the human logs in.
-  Future<void> syncLoginItem(bool on) async {
-    _loginItem = on;
+  /// Adds or removes VoxCordis from what starts when the human logs in, with
+  /// the window put away ([StartMode.minimized]) or showing.
+  Future<void> syncLoginItem(StartMode mode) async {
+    _loginItem = mode;
+    final on = mode != StartMode.off;
+    final hidden = mode == StartMode.minimized;
     if (Platform.isLinux) {
       final file = File(_linuxAutostart);
       if (on) {
         await file.parent.create(recursive: true);
-        await file.writeAsString(linuxAutostartEntry(launchCommand));
+        await file.writeAsString(
+          linuxAutostartEntry(launchCommand, hidden: hidden),
+        );
       } else if (await file.exists()) {
         await file.delete();
       }
     } else if (Platform.isWindows) {
-      await Process.run('reg', [
-        if (on) ...[
-          'add',
-          _windowsRunKey,
-          '/v',
-          'VoxCordis',
-          '/t',
-          'REG_SZ',
-          '/d',
-          '"$launchCommand" $startHiddenArg',
-          '/f',
-        ] else ...[
-          'delete',
-          _windowsRunKey,
-          '/v',
-          'VoxCordis',
-          '/f',
-        ],
-      ]);
+      await WindowsNative.setLoginItem(
+        !on
+            ? null
+            : hidden
+            ? '"$launchCommand" $startHiddenArg'
+            : '"$launchCommand"',
+      );
     }
   }
 
@@ -192,13 +211,13 @@ class Background with WindowListener {
       '"${command.replaceAll(r'\', r'\\\\').replaceAll('"', r'\"').replaceAll(r'$', r'\$').replaceAll('`', r'\`')}"';
 
   /// The autostart .desktop file for [command], quoted as the spec asks.
-  static String linuxAutostartEntry(String command) {
+  static String linuxAutostartEntry(String command, {bool hidden = true}) {
     final quoted = quoteExec(command);
     return '[Desktop Entry]\n'
         'Type=Application\n'
         'Name=VoxCordis\n'
         'Comment=Keeps your companion\'s reminders running\n'
-        'Exec=$quoted $startHiddenArg\n'
+        'Exec=$quoted${hidden ? ' $startHiddenArg' : ''}\n'
         'Icon=com.nucume.companion\n'
         'X-GNOME-Autostart-enabled=true\n'
         'Terminal=false\n';

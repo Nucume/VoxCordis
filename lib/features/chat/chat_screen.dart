@@ -23,6 +23,7 @@ import '../../services/sight.dart';
 import '../../theme/app_theme.dart';
 import 'chat_controller.dart';
 import 'chat_text.dart';
+import 'edit_lesson.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, required this.chat});
@@ -508,6 +509,13 @@ class _ChatScreenState extends State<ChatScreen> {
     final deletable = !_chat.busy;
     final regenerable =
         m.id == lastAssistant && !_chat.busy && _chat.viewingDay == null;
+    final editable =
+        m.role == 'assistant' &&
+        !_chat.busy &&
+        SharedFiles.withoutMarkers(m.content).isNotEmpty;
+    final offer = _chat.lessonOffer?.messageId == m.id
+        ? _chat.lessonOffer
+        : null;
     final from = (
       m,
       newDay,
@@ -516,6 +524,8 @@ class _ChatScreenState extends State<ChatScreen> {
       thinkingLive,
       deletable,
       regenerable,
+      editable,
+      offer,
     );
     final cached = _rows[m.id];
     if (cached != null && cached.$1 == from) return cached.$2;
@@ -533,7 +543,15 @@ class _ChatScreenState extends State<ChatScreen> {
           onDelete: deletable ? () => _confirmDelete(m) : null,
           onRegenerate: regenerable ? _confirmRegenerate : null,
           onChoose: regenerable ? (o) => _chat.send(o) : null,
+          onEdit: editable ? (text) => _chat.editReply(m, text) : null,
         ),
+        if (offer != null)
+          _LessonCard(
+            key: ValueKey('lesson-${m.id}'),
+            offer: offer,
+            onKeep: (rule) => _chat.keepLesson(rule: rule),
+            onSkip: _chat.skipLesson,
+          ),
       ],
     );
     _rows[m.id] = (from, row);
@@ -959,8 +977,8 @@ class _DaySeparator extends StatelessWidget {
 
 enum _DeleteChoice { only, fromHere }
 
-/// One message. Hovering shows its time and actions: copy, delete, and on the
-/// newest reply, regenerate.
+/// One message. Hovering shows its time and actions: copy, delete, on the
+/// companion's replies edit, and on the newest reply, regenerate.
 class _Bubble extends StatefulWidget {
   const _Bubble({
     super.key,
@@ -971,9 +989,13 @@ class _Bubble extends StatefulWidget {
     this.onDelete,
     this.onRegenerate,
     this.onChoose,
+    this.onEdit,
   });
 
   final ChatMessage message;
+
+  /// Saves the human's rewrite of a reply; null when it can't be edited.
+  final Future<void> Function(String text)? onEdit;
 
   /// Sends the option picked from a question's buttons; null when they
   /// aren't to be pressed (not the newest reply, or a reply being written).
@@ -997,6 +1019,51 @@ class _Bubble extends StatefulWidget {
 class _BubbleState extends State<_Bubble> {
   bool _hover = false;
 
+  /// The reply's words while the human edits them, or null.
+  TextEditingController? _edit;
+  bool _saving = false;
+
+  @override
+  void didUpdateWidget(_Bubble old) {
+    super.didUpdateWidget(old);
+    // A reply starting elsewhere closes the editor; nothing is saved.
+    if (widget.onEdit == null && _edit != null && !_saving) _closeEditor();
+  }
+
+  @override
+  void dispose() {
+    _edit?.dispose();
+    super.dispose();
+  }
+
+  void _openEditor() => setState(() {
+    _edit = TextEditingController(
+      text: SharedFiles.withoutMarkers(widget.message.content),
+    );
+  });
+
+  void _closeEditor() {
+    final c = _edit;
+    setState(() => _edit = null);
+    WidgetsBinding.instance.addPostFrameCallback((_) => c?.dispose());
+  }
+
+  Future<void> _save() async {
+    final c = _edit;
+    final onEdit = widget.onEdit;
+    if (c == null || onEdit == null || _saving) return;
+    if (c.text.trim().isEmpty) return;
+    setState(() => _saving = true);
+    try {
+      await onEdit(c.text);
+    } finally {
+      if (mounted) {
+        _saving = false;
+        _closeEditor();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final message = widget.message;
@@ -1010,8 +1077,9 @@ class _BubbleState extends State<_Bubble> {
     // Older replies were saved with the model's stray blank lines.
     final text = mine ? raw : tidyBlankLines(raw);
 
+    final editing = _edit != null;
     final actions = AnimatedOpacity(
-      opacity: _hover && message.content.isNotEmpty ? 1 : 0,
+      opacity: _hover && !editing && message.content.isNotEmpty ? 1 : 0,
       duration: const Duration(milliseconds: 150),
       child: Row(
         mainAxisSize: MainAxisSize.min,
@@ -1026,6 +1094,12 @@ class _BubbleState extends State<_Bubble> {
             onTap: () =>
                 Clipboard.setData(ClipboardData(text: message.content)),
           ),
+          if (widget.onEdit != null && !editing)
+            _Action(
+              icon: Icons.edit_outlined,
+              tooltip: 'Edit',
+              onTap: _openEditor,
+            ),
           if (widget.onRegenerate != null)
             _Action(
               icon: Icons.refresh_rounded,
@@ -1080,6 +1154,9 @@ class _BubbleState extends State<_Bubble> {
                   color: mine
                       ? accent.withValues(alpha: 0.30)
                       : context.palette.bubble,
+                  border: editing
+                      ? Border.all(color: accent.withValues(alpha: 0.8))
+                      : null,
                   borderRadius: BorderRadius.circular(18).copyWith(
                     bottomRight: mine ? const Radius.circular(6) : null,
                     bottomLeft: mine ? null : const Radius.circular(6),
@@ -1091,64 +1168,80 @@ class _BubbleState extends State<_Bubble> {
                   children: [
                     if (message.reasoning case final r? when r.isNotEmpty)
                       _Thoughts(text: r, live: widget.thinkingLive),
-                    if (pictures.isNotEmpty)
-                      Padding(
-                        padding: EdgeInsets.only(bottom: text.isEmpty ? 0 : 8),
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final rel in pictures)
-                              _SharedPicture(
-                                file: widget.folder == null
-                                    ? null
-                                    : Pictures.fileIn(widget.folder!, rel),
-                                drawn: message.via == 'picture',
-                              ),
-                          ],
+                    if (_edit case final edit?)
+                      _ReplyEditor(
+                        controller: edit,
+                        saving: _saving,
+                        onSave: _save,
+                        onCancel: _closeEditor,
+                      )
+                    else ...[
+                      if (pictures.isNotEmpty)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            bottom: text.isEmpty ? 0 : 8,
+                          ),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final rel in pictures)
+                                _SharedPicture(
+                                  file: widget.folder == null
+                                      ? null
+                                      : Pictures.fileIn(widget.folder!, rel),
+                                  drawn: message.via == 'picture',
+                                ),
+                            ],
+                          ),
                         ),
-                      ),
-                    if (files.isNotEmpty)
-                      Padding(
-                        padding: EdgeInsets.only(bottom: text.isEmpty ? 0 : 8),
-                        child: Wrap(
-                          spacing: 8,
-                          runSpacing: 8,
-                          children: [
-                            for (final rel in files)
-                              _SharedFile(folder: widget.folder, path: rel),
-                          ],
+                      if (files.isNotEmpty)
+                        Padding(
+                          padding: EdgeInsets.only(
+                            bottom: text.isEmpty ? 0 : 8,
+                          ),
+                          child: Wrap(
+                            spacing: 8,
+                            runSpacing: 8,
+                            children: [
+                              for (final rel in files)
+                                _SharedFile(folder: widget.folder, path: rel),
+                            ],
+                          ),
                         ),
-                      ),
-                    if (text.isNotEmpty)
-                      for (final block in chatBlocks(text))
-                        if (block.code)
-                          _CodeBlock(text: block.text, lang: block.lang)
-                        else if (block.choices case final options?)
-                          _Choices(options: options, onChoose: widget.onChoose)
-                        else if (block.rows case final rows?)
-                          _TableBlock(
-                            rows: rows,
-                            actionColor: Color.lerp(
-                              context.palette.text,
-                              accent,
-                              0.7,
-                            )!,
-                          )
-                        else
-                          _ChatText(
-                            block.text,
-                            actionColor: Color.lerp(
-                              context.palette.text,
-                              accent,
-                              0.7,
-                            )!,
-                            codeFill: context.palette.codeFill,
-                            linkColor: accent,
-                          )
-                    else if (widget.live &&
-                        message.reasoning?.isNotEmpty != true)
-                      const _Typing(),
+                      if (text.isNotEmpty)
+                        for (final block in chatBlocks(text))
+                          if (block.code)
+                            _CodeBlock(text: block.text, lang: block.lang)
+                          else if (block.choices case final options?)
+                            _Choices(
+                              options: options,
+                              onChoose: widget.onChoose,
+                            )
+                          else if (block.rows case final rows?)
+                            _TableBlock(
+                              rows: rows,
+                              actionColor: Color.lerp(
+                                context.palette.text,
+                                accent,
+                                0.7,
+                              )!,
+                            )
+                          else
+                            _ChatText(
+                              block.text,
+                              actionColor: Color.lerp(
+                                context.palette.text,
+                                accent,
+                                0.7,
+                              )!,
+                              codeFill: context.palette.codeFill,
+                              linkColor: accent,
+                            )
+                      else if (widget.live &&
+                          message.reasoning?.isNotEmpty != true)
+                        const _Typing(),
+                    ],
                   ],
                 ),
               ),
@@ -1746,6 +1839,307 @@ class _ThoughtsState extends State<_Thoughts> {
                   ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// The companion's reply opened for editing, in place: Ctrl+Enter saves,
+/// Escape puts it back as it was.
+class _ReplyEditor extends StatelessWidget {
+  const _ReplyEditor({
+    required this.controller,
+    required this.saving,
+    required this.onSave,
+    required this.onCancel,
+  });
+
+  final TextEditingController controller;
+  final bool saving;
+  final VoidCallback onSave;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = TextStyle(fontSize: 11, color: context.palette.textMuted);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.enter, control: true):
+                onSave,
+            const SingleActivator(LogicalKeyboardKey.enter, meta: true): onSave,
+            const SingleActivator(LogicalKeyboardKey.escape): onCancel,
+          },
+          child: TextField(
+            controller: controller,
+            autofocus: true,
+            enabled: !saving,
+            minLines: 2,
+            maxLines: 16,
+            keyboardType: TextInputType.multiline,
+            style: TextStyle(color: context.palette.text, height: 1.4),
+            decoration: const InputDecoration(
+              isDense: true,
+              filled: false,
+              border: InputBorder.none,
+              enabledBorder: InputBorder.none,
+              focusedBorder: InputBorder.none,
+              disabledBorder: InputBorder.none,
+              contentPadding: EdgeInsets.symmetric(vertical: 4),
+            ),
+          ),
+        ),
+        const SizedBox(height: 6),
+        Row(
+          children: [
+            Expanded(
+              child: Text(
+                'Ctrl+Enter saves · Esc cancels',
+                style: muted,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            TextButton(
+              onPressed: saving ? null : onCancel,
+              child: const Text('Cancel'),
+            ),
+            const SizedBox(width: 4),
+            FilledButton(
+              onPressed: saving ? null : onSave,
+              child: const Text('Save'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// Under a reply the human edited: what the companion makes of the change,
+/// to keep as a lesson (reworded if they like) or skip.
+class _LessonCard extends StatefulWidget {
+  const _LessonCard({
+    super.key,
+    required this.offer,
+    required this.onKeep,
+    required this.onSkip,
+  });
+
+  final LessonOffer offer;
+
+  /// Saves the lesson with the rule as shown; returns why it couldn't be.
+  final Future<String?> Function(String rule) onKeep;
+  final VoidCallback onSkip;
+
+  @override
+  State<_LessonCard> createState() => _LessonCardState();
+}
+
+class _LessonCardState extends State<_LessonCard> {
+  final _rule = TextEditingController();
+  String? _problem;
+  bool _saving = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _rule.text = widget.offer.rule ?? '';
+  }
+
+  @override
+  void didUpdateWidget(_LessonCard old) {
+    super.didUpdateWidget(old);
+    if (old.offer.rule == null && widget.offer.rule != null) {
+      _rule.text = widget.offer.rule!;
+    }
+  }
+
+  @override
+  void dispose() {
+    _rule.dispose();
+    super.dispose();
+  }
+
+  Future<void> _keep() async {
+    if (_saving || _rule.text.trim().isEmpty) return;
+    setState(() {
+      _saving = true;
+      _problem = null;
+    });
+    final problem = await widget.onKeep(_rule.text);
+    if (mounted) {
+      setState(() {
+        _saving = false;
+        _problem = problem;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final accent = Theme.of(context).colorScheme.primary;
+    final name = AppScope.of(context).settings.value.companionName;
+    final muted = TextStyle(fontSize: 12, color: palette.textMuted);
+    final offer = widget.offer;
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: const Duration(milliseconds: 260),
+        curve: Curves.easeOutCubic,
+        builder: (context, t, child) => Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, -6 * (1 - t)),
+            child: child,
+          ),
+        ),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 620),
+          margin: const EdgeInsets.only(top: 2, bottom: 8),
+          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          decoration: BoxDecoration(
+            color: palette.glass,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: palette.glassBorder),
+            boxShadow: [
+              BoxShadow(
+                color: accent.withValues(alpha: 0.12),
+                blurRadius: 18,
+                blurStyle: BlurStyle.outer,
+              ),
+            ],
+          ),
+          child: AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topLeft,
+            child: offer.thinking
+                ? Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      SizedBox.square(
+                        dimension: 14,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: accent,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Flexible(
+                        child: Text(
+                          '$name is working out what to learn from your edit',
+                          style: muted,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      TextButton(
+                        onPressed: widget.onSkip,
+                        style: TextButton.styleFrom(
+                          visualDensity: VisualDensity.compact,
+                        ),
+                        child: const Text('Skip'),
+                      ),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(Icons.school_outlined, size: 16, color: accent),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Learn from this edit?',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: palette.text,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      CallbackShortcuts(
+                        bindings: {
+                          const SingleActivator(LogicalKeyboardKey.enter):
+                              _keep,
+                        },
+                        child: TextField(
+                          controller: _rule,
+                          enabled: !_saving,
+                          maxLength: EditLesson.maxRule,
+                          style: TextStyle(fontSize: 13, color: palette.text),
+                          decoration: InputDecoration(
+                            isDense: true,
+                            counterText: '',
+                            filled: true,
+                            fillColor: palette.tile,
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 8,
+                            ),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(
+                                color: palette.glassBorder,
+                              ),
+                            ),
+                            enabledBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(
+                                color: palette.glassBorder,
+                              ),
+                            ),
+                            focusedBorder: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(10),
+                              borderSide: BorderSide(color: accent),
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Why: ${offer.why}. Goes into $name\'s lessons, '
+                        'read before every reply.',
+                        style: muted,
+                      ),
+                      if (_problem case final problem?) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          problem,
+                          style: muted.copyWith(
+                            color: Theme.of(context).colorScheme.error,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 4),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          TextButton(
+                            onPressed: _saving ? null : widget.onSkip,
+                            child: const Text('Skip'),
+                          ),
+                          const SizedBox(width: 4),
+                          FilledButton.icon(
+                            onPressed: _saving ? null : _keep,
+                            icon: const Icon(Icons.check_rounded, size: 18),
+                            label: const Text('Keep as lesson'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+          ),
+        ),
       ),
     );
   }

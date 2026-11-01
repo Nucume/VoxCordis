@@ -15,6 +15,7 @@ import '../../services/runtime/model_catalog.dart';
 import '../../services/sight.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass_popover.dart';
+import '../../widgets/download_bar.dart';
 
 /// Chooses the companion's brain: a model for the built-in runtime (download
 /// one or attach a .gguf), or a server-hosted OpenAI-compatible API: a
@@ -891,18 +892,7 @@ class _ModelCard extends StatelessWidget {
       action = Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          SizedBox(
-            width: 120,
-            child: LinearProgressIndicator(
-              value: progress,
-              borderRadius: BorderRadius.circular(4),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Text(
-            progress == null ? '…' : '${(progress! * 100).round()}%',
-            style: TextStyle(fontSize: 12, color: context.palette.textMuted),
-          ),
+          SizedBox(width: 170, child: DownloadBar(progress: progress)),
           IconButton(
             tooltip: 'Pause download',
             onPressed: onCancel,

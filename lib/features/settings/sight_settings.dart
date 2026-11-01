@@ -9,6 +9,7 @@ import '../../data/settings.dart';
 import '../../services/runtime/model_catalog.dart';
 import '../../theme/app_theme.dart';
 import 'model_picker.dart' show InfoIcon;
+import '../../widgets/download_bar.dart';
 
 /// Settings → Brain → Sight: whether the companion sees the pictures its
 /// human shares, a vision file for an attached model, and Eyes, the small
@@ -217,21 +218,8 @@ class _SightSettingsState extends State<SightSettings> {
                         mainAxisSize: MainAxisSize.min,
                         children: [
                           SizedBox(
-                            width: 120,
-                            child: LinearProgressIndicator(
-                              value: progress,
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            progress == null
-                                ? '…'
-                                : '${(progress * 100).round()}%',
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: context.palette.textMuted,
-                            ),
+                            width: 170,
+                            child: DownloadBar(progress: progress),
                           ),
                           IconButton(
                             tooltip: 'Pause download',

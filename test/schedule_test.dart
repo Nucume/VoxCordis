@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:companion/data/database.dart';
 import 'package:companion/data/schedule/schedule_repository.dart';
 import 'package:companion/data/schedule/schedule_tools.dart';
+import 'package:companion/data/settings.dart';
 import 'package:companion/services/schedule/scheduler.dart';
 import 'package:companion/services/system/background.dart';
 import 'package:companion/services/system/desktop_notifier.dart';
@@ -178,6 +179,24 @@ void main() {
     expect(
       entry,
       contains(r'Exec="/home/a b/Vox\"Cordis\$.AppImage" --background'),
+    );
+  });
+
+  test('a visible autostart has no --background', () {
+    final entry = Background.linuxAutostartEntry('/opt/vox', hidden: false);
+    expect(entry, contains('Exec="/opt/vox"\n'));
+    expect(entry, isNot(contains('--background')));
+  });
+
+  test('old startWithComputer settings start minimized', () {
+    expect(
+      AppSettings.fromJson({'startWithComputer': true}).startMode,
+      StartMode.minimized,
+    );
+    expect(AppSettings.fromJson({}).startMode, StartMode.off);
+    expect(
+      AppSettings.fromJson({'startMode': 'onScreen'}).startMode,
+      StartMode.onScreen,
     );
   });
 

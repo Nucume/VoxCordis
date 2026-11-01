@@ -7,15 +7,51 @@ import 'package:path/path.dart' as p;
 /// or .webp), which the companion picks itself, and the pictures its human
 /// shares in the chat, saved under `images/`. A shared picture shows in the
 /// message as a line `[image: images/<file>]`.
+///
+/// An imported portrait can come as a set: a video (`avatar.mp4`) that
+/// plays over the still, and an 18+ version of both (`avatar-nsfw.png`,
+/// `avatar-nsfw.mp4`) shown instead when the human chose so.
 class Pictures {
   static const extensions = ['png', 'jpg', 'jpeg', 'webp'];
+
+  /// A video portrait (`avatar.mp4`), which plays over the still one.
+  static const videoExtensions = ['mp4', 'webm'];
   static const sharedFolder = 'images';
   static final _marker = RegExp(r'^\[image: ([^\]\n]+)\]$', multiLine: true);
 
-  /// The portrait in [folder], if there is one.
-  static File? avatarIn(String folder) {
+  /// Every file of a portrait set: `avatar.png`, `avatar-nsfw.mp4`…
+  static final _avatarFile = RegExp(
+    r'^avatar(-nsfw)?\.(png|jpe?g|webp|mp4|webm)$',
+  );
+
+  /// The portrait in [folder], if there is one; with [nsfw], its 18+
+  /// version when it has one.
+  static File? avatarIn(String folder, {bool nsfw = false}) {
+    final main = _still(folder, 'avatar');
+    if (!nsfw || main == null) return main;
+    return _still(folder, 'avatar-nsfw') ?? main;
+  }
+
+  static File? _still(String folder, String stem) {
     for (final ext in extensions) {
-      final f = File(p.join(folder, 'avatar.$ext'));
+      final f = File(p.join(folder, '$stem.$ext'));
+      if (f.existsSync()) return f;
+    }
+    return null;
+  }
+
+  /// Whether the portrait at [still] has an 18+ version beside it.
+  static bool hasNsfwBeside(String? still) =>
+      still != null && _still(p.dirname(still), 'avatar-nsfw') != null;
+
+  /// The clip that goes with the still portrait at [still] (`avatar.png`
+  /// or `avatar-nsfw.png`): the `.mp4` or `.webm` of the same name.
+  static File? avatarVideoBeside(String? still) {
+    if (still == null) return null;
+    final stem = p.basenameWithoutExtension(still);
+    if (stem != 'avatar' && stem != 'avatar-nsfw') return null;
+    for (final ext in videoExtensions) {
+      final f = File(p.join(p.dirname(still), '$stem.$ext'));
       if (f.existsSync()) return f;
     }
     return null;
@@ -90,8 +126,9 @@ class Pictures {
     return null;
   }
 
-  /// Copies [source] to `avatar.<ext>` in [folder] and removes any other
-  /// portrait, so there is only ever one.
+  /// Copies [source] to `avatar.<ext>` in [folder] and removes every
+  /// other portrait file, so there is only ever one. A video portrait and
+  /// an 18+ version go too, since they belong to the old picture.
   static Future<File> setAvatar(String folder, File source) async {
     var ext = p.extension(source.path).replaceFirst('.', '').toLowerCase();
     if (ext == 'jpeg') ext = 'jpg';
@@ -99,13 +136,39 @@ class Pictures {
     if (!p.equals(p.absolute(source.path), p.absolute(target.path))) {
       await source.copy(target.path);
     }
-    for (final e in extensions) {
-      final other = File(p.join(folder, 'avatar.$e'));
-      if (other.path != target.path && await other.exists()) {
-        await other.delete();
+    await _dropAvatarFiles(folder, keep: {target.path});
+    return target;
+  }
+
+  /// Copies the portrait [still] and the rest of its set beside it (its
+  /// video, the 18+ still and video) into [folder], replacing the old set.
+  static Future<File> setAvatarSet(String folder, File still) async {
+    final from = p.dirname(still.path);
+    final kept = <String>{};
+    for (final e in Directory(from).listSync()) {
+      final name = p.basename(e.path);
+      if (e is! File || !_avatarFile.hasMatch(name)) continue;
+      final target = p.join(folder, name.replaceFirst('.jpeg', '.jpg'));
+      if (!p.equals(p.absolute(e.path), p.absolute(target))) {
+        await e.copy(target);
+      }
+      kept.add(target);
+    }
+    await _dropAvatarFiles(folder, keep: kept);
+    return avatarIn(folder)!;
+  }
+
+  static Future<void> _dropAvatarFiles(
+    String folder, {
+    required Set<String> keep,
+  }) async {
+    for (final e in Directory(folder).listSync()) {
+      if (e is File &&
+          _avatarFile.hasMatch(p.basename(e.path)) &&
+          !keep.any((k) => p.equals(k, e.path))) {
+        await e.delete();
       }
     }
-    return target;
   }
 
   /// Copies a picture the human shares into `images/` and returns its path

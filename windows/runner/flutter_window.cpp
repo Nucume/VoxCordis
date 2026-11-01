@@ -9,6 +9,8 @@
 
 #include "flutter/generated_plugin_registrant.h"
 #include "resource.h"
+#include "system_info.h"
+#include "toast.h"
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "comctl32.lib")
@@ -19,6 +21,33 @@ namespace {
 constexpr UINT kTrayMessage = WM_APP + 0x51;
 constexpr UINT kTrayOpen = 1;
 constexpr UINT kTrayQuit = 2;
+
+// Posted when a toast is clicked.
+constexpr UINT kToastClicked = WM_APP + 0x52;
+
+std::string ToUtf8(const std::wstring& text) {
+  if (text.empty()) return "";
+  const int size = WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, nullptr, 0,
+                                       nullptr, nullptr);
+  if (size <= 1) return "";
+  std::string out(static_cast<size_t>(size) - 1, '\0');
+  WideCharToMultiByte(CP_UTF8, 0, text.c_str(), -1, out.data(), size, nullptr,
+                      nullptr);
+  return out;
+}
+
+// The text of a string in a method call's map, or empty.
+std::wstring MapString(const flutter::EncodableMap& map, const char* key) {
+  const auto it = map.find(flutter::EncodableValue(key));
+  if (it == map.end()) return L"";
+  const auto* text = std::get_if<std::string>(&it->second);
+  if (text == nullptr || text->empty()) return L"";
+  const int size = MultiByteToWideChar(CP_UTF8, 0, text->c_str(), -1, nullptr, 0);
+  if (size <= 1) return L"";
+  std::wstring out(static_cast<size_t>(size) - 1, L'\0');
+  MultiByteToWideChar(CP_UTF8, 0, text->c_str(), -1, out.data(), size);
+  return out;
+}
 
 // Explorer restarted: the icon has to be added again.
 const UINT kTaskbarCreated = RegisterWindowMessage(L"TaskbarCreated");
@@ -63,6 +92,70 @@ bool FlutterWindow::OnCreate() {
         } else {
           result->NotImplemented();
         }
+      });
+  system_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "voxcordis/system",
+          &flutter::StandardMethodCodec::GetInstance());
+  system_channel_->SetMethodCallHandler(
+      [](const flutter::MethodCall<flutter::EncodableValue>& call,
+         std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+             result) {
+        const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+        if (call.method_name() == "displayAdapters") {
+          flutter::EncodableList list;
+          for (const auto& [name, bytes] : DisplayAdapters()) {
+            list.push_back(flutter::EncodableValue(flutter::EncodableMap{
+                {flutter::EncodableValue("name"),
+                 flutter::EncodableValue(ToUtf8(name))},
+                {flutter::EncodableValue("bytes"),
+                 flutter::EncodableValue(static_cast<int64_t>(bytes))}}));
+          }
+          result->Success(flutter::EncodableValue(list));
+        } else if (call.method_name() == "knownFolder" && args != nullptr) {
+          result->Success(flutter::EncodableValue(
+              ToUtf8(KnownFolderPath(MapString(*args, "name")))));
+        } else if (call.method_name() == "userDword" && args != nullptr) {
+          unsigned long value = 0;
+          if (ReadUserDword(MapString(*args, "key"), MapString(*args, "name"),
+                            &value)) {
+            result->Success(flutter::EncodableValue(static_cast<int64_t>(value)));
+          } else {
+            result->Success();
+          }
+        } else if (call.method_name() == "processName" && args != nullptr) {
+          const auto* pid = std::get_if<int32_t>(&args->at(flutter::EncodableValue("pid")));
+          result->Success(flutter::EncodableValue(
+              pid == nullptr ? std::string()
+                             : ToUtf8(ProcessImageName(
+                                   static_cast<unsigned long>(*pid)))));
+        } else if (call.method_name() == "open" && args != nullptr) {
+          result->Success(flutter::EncodableValue(
+              OpenWithShell(MapString(*args, "target"))));
+        } else if (call.method_name() == "setLoginItem" && args != nullptr) {
+          result->Success(flutter::EncodableValue(
+              SetLoginItem(MapString(*args, "command"))));
+        } else {
+          result->NotImplemented();
+        }
+      });
+  notify_channel_ =
+      std::make_unique<flutter::MethodChannel<flutter::EncodableValue>>(
+          flutter_controller_->engine()->messenger(), "voxcordis/notify",
+          &flutter::StandardMethodCodec::GetInstance());
+  notify_channel_->SetMethodCallHandler(
+      [this](const flutter::MethodCall<flutter::EncodableValue>& call,
+             std::unique_ptr<flutter::MethodResult<flutter::EncodableValue>>
+                 result) {
+        const auto* args = std::get_if<flutter::EncodableMap>(call.arguments());
+        if (call.method_name() != "show" || args == nullptr) {
+          result->NotImplemented();
+          return;
+        }
+        result->Success(flutter::EncodableValue(ShowToast(
+            MapString(*args, "appId"), MapString(*args, "title"),
+            MapString(*args, "body"), MapString(*args, "image"), MapString(*args, "icon"), GetHandle(),
+            kToastClicked)));
       });
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
 
@@ -268,6 +361,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;
+    case kToastClicked:
+      notify_channel_->InvokeMethod("open", nullptr);
+      return 0;
     case kTrayMessage:
       switch (LOWORD(lparam)) {
         case WM_LBUTTONUP:

@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:math';
 
+import '../system/windows_native.dart';
+
 /// What we could find out about the graphics card, to recommend a model.
 class GpuInfo {
   const GpuInfo({this.name, this.memoryGb, this.shared = false});
@@ -27,10 +29,10 @@ class GpuInfo {
   static Future<GpuInfo> detect() async {
     try {
       if (Platform.isMacOS) return await _mac();
+      if (Platform.isWindows) return await _windowsAdapters() ?? unknown;
       final nvidia = await _nvidiaSmi();
       if (nvidia != null) return nvidia;
       if (Platform.isLinux) return await _linuxDrm() ?? unknown;
-      if (Platform.isWindows) return await _windowsRegistry() ?? unknown;
     } catch (_) {
       // Fall through: no recommendation is better than a wrong one.
     }
@@ -94,29 +96,20 @@ class GpuInfo {
   }
 
   /// Display adapters record their real VRAM size (64-bit) in the registry;
-  /// WMI's AdapterRAM caps at 4 GB.
-  static Future<GpuInfo?> _windowsRegistry() async {
-    final r = await Process.run('powershell', [
-      '-NoProfile',
-      '-Command',
-      r"Get-ItemProperty 'HKLM:\SYSTEM\ControlSet001\Control\Class\{4d36e968-e325-11ce-bfc1-08002be10318}\0*' -ErrorAction SilentlyContinue | "
-          r"ForEach-Object { '{0}|{1}' -f $_.DriverDesc, $_.'HardwareInformation.qwMemorySize' }",
-    ]);
-    if (r.exitCode != 0) return null;
-    return parseWindowsRegistry(r.stdout as String);
-  }
+  /// WMI's AdapterRAM caps at 4 GB. Asked of Windows itself.
+  static Future<GpuInfo?> _windowsAdapters() async => fromAdapters([
+    for (final a in await WindowsNative.displayAdapters())
+      (name: a.name, bytes: a.bytes),
+  ]);
 
-  /// `AMD Radeon RX 6700 XT|12868124672` per line; takes the largest.
-  static GpuInfo? parseWindowsRegistry(String out) {
+  /// The adapter with the most video memory.
+  static GpuInfo? fromAdapters(List<({String name, int bytes})> adapters) {
     GpuInfo? best;
-    for (final line in out.split('\n')) {
-      final parts = line.trim().split('|');
-      if (parts.length != 2) continue;
-      final bytes = int.tryParse(parts[1].trim());
-      if (bytes == null || bytes <= 0) continue;
-      final gb = bytes / (1024 * 1024 * 1024);
+    for (final a in adapters) {
+      if (a.bytes <= 0) continue;
+      final gb = a.bytes / (1024 * 1024 * 1024);
       if (best == null || gb > best.memoryGb!) {
-        best = GpuInfo(name: parts[0].trim(), memoryGb: gb);
+        best = GpuInfo(name: a.name.trim(), memoryGb: gb);
       }
     }
     return best;

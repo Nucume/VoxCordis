@@ -11,14 +11,20 @@ import '../llm_client.dart';
 import '../recall/embedder.dart';
 import 'download.dart';
 import 'gpu_info.dart';
+import '../system/windows_native.dart';
 import 'llama_server.dart';
 import 'model_catalog.dart';
 import 'runtime_installer.dart';
+import '../system/posix_native.dart';
 
 enum RuntimeState { idle, installing, loading, ready, error, external }
 
 /// Where chat requests go: the built-in server or the user's own.
 typedef LlmTarget = ({String baseUrl, String model, String apiKey});
+
+/// How the built-in chat server ended: its exit code, whether the app
+/// stopped it on purpose, and the last lines it printed.
+typedef ServerExit = ({int code, bool onPurpose, String log});
 
 typedef _ServerConfig = ({
   String model,
@@ -51,6 +57,10 @@ class RuntimeController extends ChangeNotifier {
 
   LlamaServer? _server;
   _ServerConfig? _serverConfig;
+
+  /// The chat server started last, kept after it ends so a reply whose
+  /// connection dropped can ask what happened to it.
+  LlamaServer? _lastServer;
   Future<LlmTarget>? _starting;
 
   /// Catalog downloads in flight: model id → progress 0..1 (or null).
@@ -138,6 +148,7 @@ class RuntimeController extends ChangeNotifier {
       );
       _server = server;
       _serverConfig = config;
+      _lastServer = server;
       unawaited(
         server.exitCode.then((_) {
           if (_server != server) return;
@@ -153,6 +164,20 @@ class RuntimeController extends ChangeNotifier {
       error = '$e';
       _set(RuntimeState.error);
       rethrow;
+    }
+  }
+
+  /// After the connection to [baseUrl] dropped mid-reply: how the built-in
+  /// chat server there ended, or null when it is still running or isn't
+  /// ours. Waits a moment, as the process can end just after its socket.
+  Future<ServerExit?> exitOf(String baseUrl) async {
+    final s = _lastServer;
+    if (s == null || s.baseUrl != baseUrl) return null;
+    try {
+      final code = await s.exitCode.timeout(const Duration(seconds: 3));
+      return (code: code, onPurpose: s.stopRequested, log: s.recentLog);
+    } on TimeoutException {
+      return null;
     }
   }
 
@@ -187,7 +212,13 @@ class RuntimeController extends ChangeNotifier {
     if (_holds > 0) return;
     _idleTimer = Timer(idleUnload, () {
       _idleTimer = null;
-      if (_holds == 0) unawaited(freeGpu());
+      if (_holds > 0) return;
+      unawaited(
+        stopEyes().then((_) async {
+          // A reply may have begun while Eyes was stopping.
+          if (_holds == 0) await stop();
+        }),
+      );
     });
   }
 
@@ -321,17 +352,9 @@ class RuntimeController extends ChangeNotifier {
       if (Platform.isLinux) {
         name = await File('/proc/$pid/cmdline').readAsString();
       } else if (Platform.isWindows) {
-        name =
-            (await Process.run('tasklist', [
-                  '/FI',
-                  'PID eq $pid',
-                  '/NH',
-                ])).stdout
-                as String;
+        name = await WindowsNative.processName(pid);
       } else {
-        name =
-            (await Process.run('ps', ['-p', '$pid', '-o', 'comm='])).stdout
-                as String;
+        name = PosixNative.macProcessName(pid);
       }
       return name.contains('llama-server');
     } catch (_) {

@@ -55,9 +55,9 @@ class CompanionCard extends StatelessWidget {
     Color accent,
     BoxConstraints box,
   ) {
-    final portrait = (box.maxHeight - _belowPortrait).clamp(
+    final portraitHeight = (box.maxHeight - _belowPortrait).clamp(
       _minPortrait,
-      box.maxWidth,
+      double.infinity,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -75,10 +75,15 @@ class CompanionCard extends StatelessWidget {
                 Stack(
                   children: [
                     Portrait(
-                      size: portrait,
+                      size: box.maxWidth,
+                      maxHeight: portraitHeight,
+                      play: s.playVideoPortraits,
                       path: s.companionFolder == null
                           ? s.portraitPath
-                          : Pictures.avatarIn(s.companionFolder!)?.path ??
+                          : Pictures.avatarIn(
+                                  s.companionFolder!,
+                                  nsfw: s.showNsfwAvatar,
+                                )?.path ??
                                 s.portraitPath,
                     ),
                     if (s.statusLight == StatusLight.portrait)

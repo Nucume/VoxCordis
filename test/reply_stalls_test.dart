@@ -9,6 +9,7 @@ import 'package:companion/data/settings.dart';
 import 'package:companion/features/chat/chat_controller.dart';
 import 'package:companion/features/chat/prompt_history.dart';
 import 'package:companion/services/llm_client.dart';
+import 'package:companion/services/runtime/llama_server.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -252,5 +253,76 @@ void main() {
     await chat.send('hi');
     expect(chat.error, isNull);
     expect(chat.messages.last.content, '*waves* Hi there!');
+  });
+
+  /// Writes [first] of a long answer, then drops the connection, the way
+  /// a crashing llama-server does.
+  Future<void> drop(HttpResponse res, String first) async {
+    res.contentLength = 1 << 20;
+    final socket = await res.detachSocket();
+    socket.write(_delta({'content': first}));
+    await socket.flush();
+    socket.destroy();
+  }
+
+  test('a connection that drops mid-reply is tried once more', () async {
+    var n = 0;
+    final (server, requests) = await _server((res) async {
+      if (n++ == 0) return drop(res, 'Half a tho');
+      res.write(_delta({'content': 'A whole thought.'}));
+      await res.close();
+    });
+    final chat = await _chat(server);
+    await chat.send('hi');
+    expect(chat.error, isNull);
+    expect(requests, hasLength(2));
+    // What the dropped attempt wrote is not kept twice.
+    expect(chat.messages.last.content, 'A whole thought.');
+  });
+
+  test('a connection that keeps dropping ends in plain words', () async {
+    final (server, requests) = await _server((res) => drop(res, 'Half'));
+    final chat = await _chat(server);
+    await chat.send('hi');
+    expect(requests, hasLength(2));
+    expect(chat.error, contains('The connection to the server dropped'));
+    expect(chat.error, isNot(contains('ClientException')));
+    expect(chat.canRetry, isTrue);
+  });
+
+  group('serverExitHint', () {
+    test('names running out of memory', () {
+      expect(
+        serverExitHint(
+          1,
+          'load_tensors: offloading 40 layers\n'
+          'ggml_vulkan: Device memory allocation of size 512 failed.\n'
+          'ggml_vulkan: vk::Device::allocateMemory: '
+          'ErrorOutOfDeviceMemory',
+        ),
+        'it ran out of memory',
+      );
+    });
+
+    test('names a lost graphics device', () {
+      expect(
+        serverExitHint(1, 'vk::Queue::submit: ErrorDeviceLost'),
+        'the graphics driver stopped it',
+      );
+    });
+
+    test('quotes the last error line of a crash', () {
+      expect(
+        serverExitHint(
+          134,
+          'srv  update_slots: decoding\n'
+          '/src/ggml.c:1234: GGML_ASSERT(n_tokens > 0) failed\n'
+          'Aborted',
+        ),
+        'it crashed (exit code 134: /src/ggml.c:1234: '
+        'GGML_ASSERT(n_tokens > 0) failed)',
+      );
+      expect(serverExitHint(3, 'all fine'), 'it crashed (exit code 3)');
+    });
   });
 }
