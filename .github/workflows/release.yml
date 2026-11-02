@@ -125,7 +125,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: llama-cuda
-          key: llama-server-cuda-${{ env.LLAMA_TAG }}-v1
+          key: llama-server-cuda-${{ env.LLAMA_TAG }}-v2
       - name: Build tools
         if: steps.cache.outputs.cache-hit != 'true'
         run: apt-get update && apt-get install -y --no-install-recommends git cmake ninja-build g++ ca-certificates
@@ -137,11 +137,17 @@ jobs:
           # an NVIDIA card. Cards up to the RTX 40 series get real code; newer
           # ones (RTX 50) get PTX, which the driver compiles on first start.
           cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_SHARED_LIBS=OFF -DGGML_STATIC=ON -DGGML_CUDA=ON \
+            -DBUILD_SHARED_LIBS=OFF -DGGML_STATIC=ON -DGGML_CUDA=ON -DGGML_CUDA_NCCL=OFF \
             -DCMAKE_CUDA_ARCHITECTURES="61-real;70-real;75-real;80-real;86-real;89" \
             -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON \
             -DLLAMA_CURL=OFF -DLLAMA_BUILD_TESTS=OFF -DLLAMA_BUILD_EXAMPLES=OFF
           cmake --build build --target llama-server -j"$(nproc)"
+          # The user's machine has the NVIDIA driver (libcuda) and the basic
+          # system libraries, nothing else: fail the build if the binary
+          # wants anything more (NCCL, cudart, cuBLAS...).
+          ldd build/bin/llama-server
+          extra=$(ldd build/bin/llama-server | awk '{print $1}' | grep -Ev '^(linux-vdso|/lib64/ld-linux|libc\.so|libm\.so|libdl\.so|librt\.so|libpthread\.so|libcuda\.so|libgcc_s|libstdc\+\+)' || true)
+          if [ -n "$extra" ]; then echo "::error::llama-server needs extra libraries: $extra"; exit 1; fi
           mkdir -p llama-cuda/pack
           cp build/bin/llama-server llama-cuda/pack/
           cp src/LICENSE llama-cuda/pack/LICENSE-llama.cpp
