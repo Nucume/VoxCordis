@@ -27,10 +27,10 @@ class Background with WindowListener {
   /// The argument the login item starts VoxCordis with.
   static const startHiddenArg = '--background';
 
-  /// The smallest the window may get: room for the companion card with its
-  /// portrait, every tab with its name and a readable chat, and still fits
-  /// a 1366×768 laptop screen.
-  static const minWindowSize = Size(1140, 720);
+  /// The smallest the window may get: every tab with its name and a
+  /// readable chat, with the companion card folded into the menu button
+  /// (it folds below HomeShell.roomForCard).
+  static const minWindowSize = Size(820, 720);
 
   /// [minWindowSize], held to what the screen has room for: at 200% scaling a
   /// 1080p screen has only 960×540 to give. Narrower windows shrink the

@@ -120,7 +120,7 @@ class _UpdateDialog extends StatelessWidget {
                   const SizedBox(height: 6),
                   Text(
                     updater.status == UpdateStatus.installing
-                        ? 'Restarting…'
+                        ? (updater.error == null ? 'Restarting…' : 'Closing…')
                         : _downloaded(updater.progress, info.assetSize),
                     style: TextStyle(
                       fontSize: 12,
@@ -146,7 +146,10 @@ class _UpdateDialog extends StatelessWidget {
                     ? null
                     : () => updater.install(
                         info,
-                        beforeExit: services.closeForExit,
+                        beforeExit: services.runtime.stopAll,
+                        // Only once the new version is in place: should
+                        // the update fail, the chats keep working.
+                        atExit: services.closeForExit,
                       ),
                 icon: const Icon(Icons.download_rounded),
                 label: const Text('Update and restart'),

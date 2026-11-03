@@ -249,6 +249,11 @@ void main() {
     expect(after('--llm'), endsWith('qwen3vl_32b_minimax_h3-Q4_K_M.gguf'));
     expect(after('--audio-vae'), endsWith('audio_vae_fp32.safetensors'));
     expect(after('--rng'), 'cpu');
+    expect(args, containsAll(['--mmap', '--vae-tiling']));
+    final lighter = ImageCatalog.videoModels.firstWhere(
+      (m) => m.id == 'minimax-h3-lighter',
+    );
+    expect(lighter.sizeGb, lessThan(h3.sizeGb - 4));
     expect(after('--cfg-scale'), '1.0');
     expect(args, isNot(contains('--flow-shift')));
     expect(args, isNot(contains('--hires')));

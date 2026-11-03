@@ -115,10 +115,6 @@ Pre-releases (tags with a dash) are skipped. Builds know their version from
 builds are `<pubspec version>-dev.<run>`, which counts as older than the
 release of the same number.
 
-Video generation (Animate and the video models) is behind
-`--dart-define=VIDEO_GEN=true` and is off without it, so release builds
-leave it out. Add the define to a test build to try it.
-
 **The release repository has to be public.** GitHub hides releases of a
 private repository from everyone without access, so the update check sees
 nothing. Either make this repository public, or keep the code private and

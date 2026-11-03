@@ -106,13 +106,26 @@ class DatabaseKey {
     var key = await secrets.read(secretName);
     final next = await secrets.read(nextName);
     if (next != null) {
-      // A change was cut short: move the rest over to the new key.
+      // A change was cut short: move the rest over to the new key, from
+      // whichever stored copy opens it (the keyring's may be stale).
+      final olds = await secrets.readAll(secretName);
       for (final f in databases()) {
-        if (isPlain(f)) continue;
-        if (!opens(f, next) && key != null && opens(f, key)) {
-          _rekey(f, key, next);
+        if (isPlain(f) || opens(f, next)) continue;
+        for (final from in olds) {
+          if (opens(f, from)) {
+            _rekey(f, from, next);
+            break;
+          }
         }
       }
+      // The change drops the key it replaced, but not one kept on purpose
+      // (a stale copy [change] kept for chats set aside).
+      final earlier = await _earlierKeys();
+      await _keepOthers({
+        next,
+        for (final k in olds)
+          if (!earlier.contains(k)) k,
+      });
       await secrets.write(secretName, next);
       await secrets.delete(nextName);
       key = next;
@@ -135,6 +148,7 @@ class DatabaseKey {
       ];
       if (fits.isEmpty) return false;
       key = fits.first;
+      await _keepOthers({key});
       await secrets.write(secretName, key);
     }
     _use(key);
@@ -150,16 +164,33 @@ class DatabaseKey {
     ...await _earlierKeys(),
   }.toList();
 
+  /// The kept keys from every copy of the list (keyring and file), which
+  /// differ when one was written while the keyring was locked.
   Future<List<String>> _earlierKeys() async {
-    final saved = await secrets.read(earlierName);
-    if (saved == null) return const [];
-    try {
-      return [
-        for (final k in jsonDecode(saved) as List)
-          if (k is String && k.isNotEmpty) k,
-      ];
-    } on FormatException {
-      return const [];
+    final keys = <String>{};
+    for (final saved in await secrets.readAll(earlierName)) {
+      try {
+        final list = jsonDecode(saved);
+        if (list is! List) continue;
+        keys.addAll([
+          for (final k in list)
+            if (k is String && k.isNotEmpty) k,
+        ]);
+      } on FormatException {
+        // Not a list we wrote: nothing to keep from it.
+      }
+    }
+    return keys.toList();
+  }
+
+  /// Before a new key replaces the stored key: keeps every other key still
+  /// stored (a copy in the keyring, one in the file) with the earlier ones,
+  /// so chats set aside with it can still be brought back. [drop] are the
+  /// new key and any key that is not to be kept.
+  Future<void> _keepOthers(Set<String> drop) async {
+    final keep = {...await _knownKeys()}..removeAll(drop);
+    if (keep.isNotEmpty) {
+      await secrets.write(earlierName, jsonEncode(keep.toList()));
     }
   }
 
@@ -170,6 +201,7 @@ class DatabaseKey {
     for (final f in databases()) {
       if (!isPlain(f) && !opens(f, password)) return false;
     }
+    await _keepOthers({password});
     await secrets.write(secretName, password);
     _use(password);
     await markSaved();
@@ -193,6 +225,9 @@ class DatabaseKey {
   }) async {
     final old = value;
     if (next == old) return;
+    // The old key is dropped, but a stale copy of another one (left in the
+    // keyring while it was locked) may be the key to chats set aside.
+    await _keepOthers({old, next});
     await secrets.write(nextName, next);
     for (final f in databases()) {
       if (p.equals(f.path, openPath)) {
@@ -229,14 +264,12 @@ class DatabaseKey {
     }
     // Whatever key was there may be the right one after all (a locked
     // keyring, a database left half-written): keep it for bringing the
-    // chats back, rather than writing over its only copy.
-    final keep = await _knownKeys();
-    if (keep.isNotEmpty) {
-      await secrets.write(earlierName, jsonEncode(keep));
-    }
+    // chats back, rather than writing over its only copy. A copy in a
+    // keyring that is locked now is kept once it can be read ([unlock]).
+    final key = generate();
+    await _keepOthers({key});
     await secrets.delete(nextName);
     await markUnsaved();
-    final key = generate();
     await secrets.write(secretName, key);
     _use(key);
     return to;

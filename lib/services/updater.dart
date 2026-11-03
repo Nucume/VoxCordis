@@ -17,11 +17,6 @@ const appVersion = String.fromEnvironment(
   defaultValue: '0.2.0-dev',
 );
 
-/// Whether Animate (picture to clip) and the video models show up. Off in
-/// release builds; test builds pass --dart-define=VIDEO_GEN=true. The code
-/// stays, so clips already made still play in Pictures either way.
-const videoGenEnabled = bool.fromEnvironment('VIDEO_GEN');
-
 /// Where releases are published. It has to be readable without signing in,
 /// so a private repository only works for its collaborators' tokens.
 const updateRepo = String.fromEnvironment(
@@ -92,13 +87,32 @@ class Updater extends ChangeNotifier {
     http.Client? client,
     Map<String, String>? environment,
     String? packageType,
+    @visibleForTesting
+    Future<void> Function(String program, List<String> args)? start,
+    @visibleForTesting void Function()? quit,
+    @visibleForTesting this.failedStartPause = const Duration(seconds: 8),
   }) : _client = client ?? http.Client(),
        _env = environment ?? Platform.environment,
        packageType =
-           packageType ?? (environment == null ? installedPackageType() : null);
+           packageType ?? (environment == null ? installedPackageType() : null),
+       _start = start ?? _startDetached,
+       _quit = quit ?? (() => exit(0));
 
   final http.Client _client;
   final Map<String, String> _env;
+  final Future<void> Function(String program, List<String> args) _start;
+  final void Function() _quit;
+
+  /// How long the error shows when the new version didn't start after the
+  /// database was closed, before the app quits all the same.
+  final Duration failedStartPause;
+
+  static Future<void> _startDetached(String program, List<String> args) =>
+      Process.start(program, args, mode: ProcessStartMode.detached);
+
+  /// The most [install]'s atExit may take: a slow close never stops the
+  /// app from quitting.
+  static const atExitLimit = Duration(seconds: 10);
 
   /// "deb" or "rpm" when a package manager installed this copy. Such a copy
   /// never updates itself; the apt or dnf repository delivers new versions.
@@ -172,12 +186,42 @@ class Updater extends ChangeNotifier {
     }
   }
 
+  /// Deletes installers that earlier updates left in the temporary folder.
+  /// The app quits to let the installer run, so nothing else ever removes
+  /// them. One still running can't be deleted; it goes at the next start.
+  static Future<void> deleteLeftoverInstallers({Directory? temp}) async {
+    if (temp == null && !Platform.isWindows) return;
+    final dir = temp ?? Directory.systemTemp;
+    final ours = RegExp(r'^VoxCordis-[\w.+-]+-setup\.exe$');
+    try {
+      await for (final e in dir.list(followLinks: false)) {
+        if (e is! File || !ours.hasMatch(e.uri.pathSegments.last)) continue;
+        try {
+          await e.delete();
+        } on FileSystemException {
+          // In use, or already gone.
+        }
+      }
+    } on FileSystemException {
+      // No temporary folder to look in.
+    }
+  }
+
   /// Downloads [info] and hands over to it. On success this never returns:
-  /// [beforeExit] runs (stop the model server) and the app quits so the new
-  /// version can take its place.
+  /// [beforeExit] runs (stop the model server), the new version is put in
+  /// place, [atExit] runs (close the database) and the app quits so the new
+  /// version can take its place. When a step before [atExit] fails, the app
+  /// keeps running, so [beforeExit] must not close what it still needs.
+  ///
+  /// The new AppImage starts only after [atExit]: Linux lets one copy of the
+  /// app run, so a new copy started while this one is still open hands over
+  /// to it and stops, and nothing is left running once this one quits. The
+  /// Windows installer takes a while before it starts the app, so there
+  /// [atExit] runs once the installer has started.
   Future<void> install(
     UpdateInfo info, {
     required Future<void> Function() beforeExit,
+    Future<void> Function()? atExit,
   }) async {
     if (!info.canInstall) return;
     error = null;
@@ -199,21 +243,56 @@ class Updater extends ChangeNotifier {
         // Replacing the file under a running AppImage is safe: the old one
         // stays mounted until this process exits.
         await target.rename(appImage);
-        await Process.start(appImage, [], mode: ProcessStartMode.detached);
+        // The new version is in place: from here the app quits either way.
+        await _closeForExit(atExit);
+        try {
+          await _start(appImage, []);
+        } on Object catch (e) {
+          // The database is closed, so this copy can't carry on. The new
+          // version starts the next time the app is opened.
+          error =
+              'The new version is installed but did not start ($e). '
+              'VoxCordis will close now: open it again to use the new version.';
+          progress = null;
+          // Still "installing", so the dialog keeps its buttons off: the
+          // chats can't be used any more, and a second update must not start.
+          _set(UpdateStatus.installing);
+          await Future<void>.delayed(failedStartPause);
+        }
       } else {
         // /update=1 makes the installer start the app again when done.
-        await Process.start(target.path, [
+        await _start(target.path, [
           '/SILENT',
           '/SUPPRESSMSGBOXES',
           '/NORESTART',
           '/update=1',
-        ], mode: ProcessStartMode.detached);
+        ]);
+        await _closeForExit(atExit);
       }
-      exit(0);
+      _quit();
     } catch (e) {
+      // A half-finished or rejected download is no use to anyone.
+      try {
+        final image = _appImage;
+        final partial = image == null ? null : File('$image.update');
+        if (partial != null && await partial.exists()) await partial.delete();
+      } on FileSystemException {
+        // Leave it.
+      }
+      if (_appImage == null) deleteLeftoverInstallers().ignore();
       error = 'The update failed: $e';
       progress = null;
       _set(UpdateStatus.failed);
+    }
+  }
+
+  /// Runs [atExit] for at most [atExitLimit]; a failure doesn't stop the
+  /// app from quitting.
+  static Future<void> _closeForExit(Future<void> Function()? atExit) async {
+    try {
+      await atExit?.call().timeout(atExitLimit);
+    } on Object {
+      // The new version is on its way: quit all the same.
     }
   }
 

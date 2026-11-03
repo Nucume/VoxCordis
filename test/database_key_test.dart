@@ -176,6 +176,133 @@ void main() {
     expect(await secrets.read(DatabaseKey.secretName), fresh.value);
   });
 
+  group('with a keyring that can be locked', () {
+    late Map<String, String> ring;
+    late bool ringLocked;
+
+    setUp(() {
+      ring = {};
+      ringLocked = false;
+      secrets = SecretStore(
+        Directory(p.join(dir.path, 'secrets')),
+        backend: SecretBackend.memory(ring, locked: () => ringLocked),
+      );
+    });
+
+    test('starting over while it is locked keeps the key inside it', () async {
+      final key = keyFor();
+      expect(await key.unlock(), isTrue);
+      final original = key.value;
+      expect(ring[DatabaseKey.secretName], original);
+      await write(first(), 'from before', key: original);
+
+      // At login the keyring is still locked, and the human starts over.
+      ringLocked = true;
+      final locked = keyFor();
+      expect(await locked.unlock(), isFalse);
+      final folder = await locked.setAside();
+      await write(first(), 'after', key: locked.value);
+      expect(ring[DatabaseKey.secretName], original);
+
+      // Next login the keyring opens: the new key takes the keyring's
+      // place, and the one it held is kept for the chats set aside.
+      ringLocked = false;
+      final next = keyFor();
+      expect(await next.unlock(), isTrue);
+      expect(next.value, locked.value);
+      expect(ring[DatabaseKey.secretName], locked.value);
+      expect(await next.keptKeyFor(folder), original);
+      expect(await keyFor().keptKeyFor(folder), original);
+    });
+
+    test('a new password keeps the key left in the keyring', () async {
+      final key = keyFor();
+      expect(await key.unlock(), isTrue);
+      final original = key.value;
+      await write(first(), 'from before', key: original);
+
+      // The human starts over while the keyring is locked, so the old key
+      // stays in it and the new one goes to the file.
+      ringLocked = true;
+      final locked = keyFor();
+      expect(await locked.unlock(), isFalse);
+      final folder = await locked.setAside();
+      await write(first(), 'after', key: locked.value);
+
+      // The keyring opens, and they set their own password in Settings.
+      ringLocked = false;
+      final open = await openAppDatabase(first(), key: locked.value);
+      await locked.change('my own password', open: open, openPath: first());
+      await open.close();
+      expect(ring[DatabaseKey.secretName], 'my own password');
+      expect(await locked.keptKeyFor(folder), original);
+      expect(await keyFor().keptKeyFor(folder), original);
+    });
+
+    test('a change cut short keeps the key left in the keyring', () async {
+      final key = keyFor();
+      expect(await key.unlock(), isTrue);
+      final original = key.value;
+      await write(first(), 'from before', key: original);
+
+      ringLocked = true;
+      final locked = keyFor();
+      expect(await locked.unlock(), isFalse);
+      final folder = await locked.setAside();
+      await write(first(), 'after', key: locked.value);
+
+      // A database the old key doesn't open stops the change half-way.
+      ringLocked = false;
+      await write(second(), 'stray', key: 'some other key');
+      final open = await openAppDatabase(first(), key: locked.value);
+      await expectLater(
+        locked.change('my own password', open: open, openPath: first()),
+        throwsA(anything),
+      );
+      await open.close();
+      await File(second()).delete();
+
+      final next = keyFor();
+      expect(await next.unlock(), isTrue);
+      expect(next.value, 'my own password');
+      expect(ring[DatabaseKey.secretName], 'my own password');
+      expect(await next.keptKeyFor(folder), original);
+    });
+
+    test('a key typed in keeps the one it replaces', () async {
+      // The keyring still holds the key of chats set aside, which doesn't
+      // open today's chats.
+      final folder = Directory(p.join(dir.path, 'locked-x'));
+      await write(
+        p.join(folder.path, 'companion.db'),
+        'from before',
+        key: 'the old key',
+      );
+      await write(first(), 'today', key: 'the new key');
+      ring[DatabaseKey.secretName] = 'the old key';
+
+      final key = keyFor();
+      expect(await key.unlock(), isFalse);
+      expect(await key.tryPassword('the new key'), isTrue);
+      expect(ring[DatabaseKey.secretName], 'the new key');
+      expect(await key.keptKeyFor(folder), 'the old key');
+    });
+
+    test('earlier keys are read from every copy', () async {
+      ring[DatabaseKey.earlierName] = '["in the keyring"]';
+      final file = File(p.join(dir.path, 'secrets', DatabaseKey.earlierName));
+      await file.parent.create(recursive: true);
+      await file.writeAsString('["in the file"]');
+      final a = p.join(dir.path, 'locked-a', 'companion.db');
+      final b = p.join(dir.path, 'locked-b', 'companion.db');
+      await write(a, 'old', key: 'in the file');
+      await write(b, 'older', key: 'in the keyring');
+      final key = keyFor();
+      expect(await key.keptKeyFor(Directory(p.dirname(a))), 'in the file');
+      expect(await key.keptKeyFor(Directory(p.dirname(b))), 'in the keyring');
+    });
+  });
+
   test('the key counts as kept once copied, typed in or chosen', () async {
     final key = keyFor();
     await key.unlock();

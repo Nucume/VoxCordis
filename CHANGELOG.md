@@ -12,6 +12,38 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+### New
+- **Video generation (extreme early access).** Open any picture in Images and press **Animate** to turn it into a short clip, made on your computer. This is very new and barely tested: expect crashes, running out of memory, odd or broken-looking clips, and slow runs of many minutes. It has only been tried on one graphics card so far, so the length ruler (green, amber, red) is a rough guess. Models are in Settings → Images → Video models: Wan 2.2 (5B and the bigger 14B; silent clips), LTX 2.5 and MiniMax H3 (both make sound too, and both are huge downloads of 30 to 43 GB that want a lot of computer memory). "Write it for me" turns a few words into a prompt that suits the model. Clips show in the gallery with a play symbol. If something goes wrong, Settings → Logs has what the engine printed; please report it.
+- **Room for small windows.** The window can now be as narrow as 820 pixels (it was 1140). Below 1140, the companion card folds away into a menu button left of Chat, and that button brings the card back over the page. Make the window wider again and the card unfolds into its place.
+- **LoRAs fold away.** In Images → Draw → Advanced, the LoRAs sit under a header you can open and close. Closed, only the ones you picked stay, with their strength sliders, and the header says how many are on. It remembers whether you left it open.
+- **Arrows on the Settings tabs.** When the window is too narrow for every Settings tab, an arrow appears on the side with more tabs; click it to move along.
+
+### Fixed
+- **Resizing the window keeps what you were doing.** Making the window narrow enough to fold the companion card (or wide again) rebuilt the tabs, so a reply you were editing, the chat's scroll position and a prompt typed in Draw were lost.
+- **The Animate window fits narrow windows.** Its buttons no longer run off the edge.
+- **Switching companions waits for a reply that started meanwhile.** A reminder reply that began while the "Save your changes?" question was open could end up in the other companion's chat.
+- **A model that finishes downloading is chosen even if you moved to another Settings page.** Before, it was only chosen if you stayed on Brain.
+- **A CUDA llama-server that hangs while loading uses Vulkan on the next try.** It no longer tries CUDA again for the rest of that run.
+- **Chats set aside can always be brought back on Linux.** If "I lost the key" was used while the keyring was still locked, the next start (or setting your own password later) wrote over the old key that was still in the keyring, so the set-aside chats could never be opened again. Every key the app replaces is now kept for Settings → Privacy → Chats set aside.
+- **The unlock screen no longer gets in the way of typing the key.** Its check every 5 seconds took the cursor out of the key field and ignored Enter while it ran. If starting over can't move the chats aside, it now says so instead of freezing.
+- **A failed update leaves your chats working.** If the update could not be put in place (an antivirus holding the installer, say), the chats stayed closed until a restart. The chats are now closed only once the new version is on its way.
+- **Updating while the old version is still open no longer moves its data away.** If VoxCordis 0.3.7 or older was still running (in the tray, say) when the new version started, the new one moved the data folder out from under it, and what the old window saved from then on was lost. The new version now brings the old window forward instead and says to quit it first.
+- **Your data comes along even when part of it won't move.** If something in the old data folder couldn't be moved (on another drive, or held open), the app could start as if it were new and never try again. It now copies what is on another drive, always brings your settings, and tries the rest again at the next start.
+- **The system title bar shows on the first start after updating.** On Linux, with "Use the system title bar" on, the first start of the renamed app had no title bar at all.
+- **Old update installers are cleaned up.** On Windows each update left its `VoxCordis-x.y.z-setup.exe` in the temporary folder for good. The app now deletes them at the next start, and a failed download is removed straight away.
+- **A reply you are editing stays open when a reminder comes in.** If a reminder, task or nudge made the companion reply while you were rewriting one of its messages, your rewrite was thrown away. It now stays open and you can save it once the reply is written.
+- **Lessons keep your last letter.** Pressing Enter right after typing a lesson (or Ctrl+Enter in a reply you edited) could drop the last letter on Linux.
+- **Saving Settings no longer puts the tabs back across the top.** Picking "Down the side" in Appearance and pressing Save switched it back; it now stays.
+- **Save in Settings only saves what you changed there.** Anything changed elsewhere while Settings was open (a video's volume, a model you moved, a look or theme the companion picked) is no longer put back the way it was when the page opened.
+- **Switching companions asks about unsaved Settings first.** Switching or adding a companion while Settings had unsaved changes threw them away without asking; now you get Save, Discard or Cancel.
+- **Reset and Delete wait for the reply to finish.** Resetting or deleting a companion mid-reply could send the rest of that reply's memories, reminders and restyling to the next companion, or back into the one just wiped.
+- **A companion can't take another's folder in Settings.** Two companions sharing a folder could make one of them vanish from the list.
+- **After deleting your only companion, the next one starts fresh.** It no longer inherits the old one's colour and pronouns.
+- **A CUDA runtime that won't start is replaced by Vulkan.** If the NVIDIA (CUDA) llama-server can't start, for example because a library is missing, VoxCordis tries the Vulkan one by itself and says why in Settings → Logs, instead of showing a runtime error. It only switches when Vulkan really does start the model: a model file that won't load anywhere, or no internet to fetch Vulkan, no longer turns CUDA off for a day. Pictures (Eyes) and memory search (Recall) switch the same way, and once CUDA has failed it stays off until the app restarts.
+
+
+## 0.3.8
+
 ### Changed
 - **The browser the app downloads is checked.** The headless Chrome it fetches for web pages is now one pinned version whose SHA-256 is checked before it is unpacked, like the other downloaded programs.
 - **The Windows installer says who made it.** Its file properties now name Nucume and VoxCordis, which helps antivirus programs trust it.
@@ -24,7 +56,6 @@ the ids); it is left out of the release page.
 
 ### Changed
 - **The program is now called voxcordisai.** On Windows it is `voxcordisai.exe` (it was `companion.exe`) and on Linux the binary is `voxcordisai`, so there is no doubt what it is in Task Manager or a virus scan. The app's id is now `com.nucume.voxcordis` too (your data folder on Linux is `~/.local/share/com.nucume.voxcordis/`). The first start moves everything over from the old folder, and updating removes the old program file.
-
 
 ## 0.3.7
 

@@ -5,6 +5,7 @@ import 'dart:math' as math;
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_scope.dart';
@@ -38,10 +39,15 @@ import 'sight_settings.dart';
 /// Minimal v1 Settings: General, Brain (the model) and Images. Other tabs arrive with the systems
 /// they control.
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({super.key, this.initialTab = 0});
+  const SettingsScreen({super.key, this.initialTab = 0, this.replying});
 
   /// The page to open on, e.g. [privacyTab].
   final int initialTab;
+
+  /// Whether the companion is still replying (or running an automation);
+  /// Reset and Delete wait for it, or the rest of the reply would land on
+  /// the next companion or the wiped one.
+  final bool Function()? replying;
 
   /// Privacy: the encryption key ([EncryptionSettings]).
   static const appearanceTab = 1;
@@ -65,7 +71,7 @@ class SettingsScreenState extends State<SettingsScreen> {
     super.didChangeDependencies();
     if (_loaded) return;
     _loaded = true;
-    _draft = AppScope.of(context).settings.value;
+    _draft = _opened = AppScope.of(context).settings.value;
     _userName.text = _draft.userName;
   }
 
@@ -77,45 +83,50 @@ class SettingsScreenState extends State<SettingsScreen> {
 
   Future<void> _pickFolder() async {
     final path = await getDirectoryPath(confirmButtonText: 'Use this folder');
-    if (path == null) return;
+    if (path == null || !mounted) return;
+    // Companions are told apart by their folder: sharing one would lose
+    // one of them from the list.
+    for (final c in AppScope.of(context).settings.value.otherCompanions) {
+      if (p.equals(c.folder, path)) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('That is ${c.name}\'s folder already.')),
+        );
+        return;
+      }
+    }
     setState(() => _draft = _draft.copyWith(companionFolder: path));
   }
 
-  /// What Save would store: this page's copy, minus what is changed
-  /// elsewhere while it is open.
-  AppSettings _merged(AppSettings current) => _draft.copyWith(
-    // After setup name, pronouns, traits and portrait are the companion's
-    // own; keep what it last saved, not this page's copy.
-    companionName: current.companionName,
-    traits: current.traits,
-    pronouns: current.pronouns,
-    portraitPath: current.portraitPath,
-    // System access applies at once on its page, and "Always allow" in
-    // the chat adds to the list while this page is open.
-    systemAccess: current.systemAccess,
-    allowEverything: current.allowEverything,
-    // Logs turn on and off at once on their page.
-    keepLogs: current.keepLogs,
-    logsOff: current.logsOff,
-    allowedSystemActions: current.allowedSystemActions,
-    // Switching and adding companions happen outside this page.
-    otherCompanions: current.otherCompanions,
-    toldAboutMoreCompanions: current.toldAboutMoreCompanions,
-    // The look applies at once, and the companion may restyle it.
-    accentColor: current.accentColor,
-    backgroundColors: current.backgroundColors,
-    backgroundLayout: current.backgroundLayout,
-    colorway: current.colorway ?? '',
-    themeChoice: current.themeChoice,
-    statusLight: current.statusLight,
-    backgroundDim: current.backgroundDim,
-    interfaceScale: current.interfaceScale,
-    playVideoPortraits: current.playVideoPortraits,
-    showNsfwAvatar: current.showNsfwAvatar,
-    clearBackground:
-        current.backgroundColors.isEmpty && current.backgroundLayout == null,
-    userName: _userName.text.trim(),
-  );
+  /// The settings as they were when this page opened, so Save can tell
+  /// what was changed here from what changed elsewhere meanwhile.
+  late AppSettings _opened;
+
+  /// This page's copy, with the name as typed.
+  AppSettings get _mine => _draft.copyWith(userName: _userName.text.trim());
+
+  /// What Save would store: [current] with only what was changed on this
+  /// page laid over it. Everything else stays as [current] has it, so a
+  /// choice that applied at once (the look, the tabs, logs, system access),
+  /// one the companion made while the page was open, or a model moved here
+  /// is never undone by this page's older copy.
+  AppSettings _merged(AppSettings current) {
+    final base = _opened.toJson();
+    final mine = _mine.toJson();
+    final next = current.toJson();
+    for (final key in mine.keys) {
+      if (jsonEncode(mine[key]) != jsonEncode(base[key])) next[key] = mine[key];
+    }
+    // The keys are kept apart from settings.json, so they're not in it.
+    final m = _mine;
+    return AppSettings.fromJson(next).copyWith(
+      llmApiKey: m.llmApiKey != _opened.llmApiKey
+          ? m.llmApiKey
+          : current.llmApiKey,
+      searchApiKey: m.searchApiKey != _opened.searchApiKey
+          ? m.searchApiKey
+          : current.searchApiKey,
+    );
+  }
 
   /// Whether leaving now would lose something changed on this page.
   bool get changed {
@@ -187,11 +198,16 @@ class SettingsScreenState extends State<SettingsScreen> {
     }
     if (!mounted) return false;
     final services = AppScope.of(context);
-    services.runtime.touch(next);
-    await services.settings.update(next);
+    // Merged again: the companion may have restyled the app, or the human
+    // allowed something in the chat, while the checks above waited.
+    final latest = _merged(services.settings.value);
+    services.runtime.touch(latest);
+    await services.settings.update(latest);
+    // What was saved is where the next Save starts from.
+    if (mounted) setState(() => _draft = _opened = latest);
     // Load the (possibly new) model in the background so chat is ready;
     // not mid-reply, which a restart would cut off. The next reply loads it.
-    if (!services.runtime.busy) services.runtime.ensureReady(next).ignore();
+    if (!services.runtime.busy) services.runtime.ensureReady(latest).ignore();
     if (!mounted) return true;
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
@@ -237,6 +253,10 @@ class SettingsScreenState extends State<SettingsScreen> {
                     ModelPicker(
                       value: _draft,
                       onChanged: (v) => setState(() => _draft = v),
+                      // Not once Settings is closed: nothing would save it.
+                      onDownloaded: (choose) {
+                        if (mounted) setState(() => _draft = choose(_draft));
+                      },
                     ),
                     const SizedBox(height: 28),
                     SightSettings(
@@ -337,30 +357,28 @@ class SettingsScreenState extends State<SettingsScreen> {
     final name = _draft.companionName;
     return [
       const SizedBox(height: 14),
-      _Colorways(
-        onPicked: (look) => setState(
-          () => _draft = _draft.copyWith(
-            accentColor: look.accent,
-            backgroundColors: look.colors,
-            backgroundLayout: look.layout,
-            colorway: look.isSpecial ? look.id : '',
-          ),
-        ),
-      ),
+      // The look applies at once, and isn't part of this page's copy: the
+      // companion may restyle it while the page is open.
+      const _Colorways(),
       // The companion may have restyled the background into something no
       // colorway matches; this undoes it.
-      if (_Colorways.current(_draft) == null)
-        Align(
-          alignment: Alignment.centerLeft,
-          child: TextButton(
-            onPressed: () {
-              setState(() => _draft = _draft.copyWith(clearBackground: true));
-              final store = AppScope.of(context).settings;
-              store.update(store.value.copyWith(clearBackground: true));
-            },
-            child: const Text('Reset the look'),
-          ),
-        ),
+      ListenableBuilder(
+        listenable: AppScope.of(context).settings,
+        builder: (context, _) {
+          final store = AppScope.of(context).settings;
+          if (_Colorways.current(store.value) != null) {
+            return const SizedBox.shrink();
+          }
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton(
+              onPressed: () =>
+                  store.update(store.value.copyWith(clearBackground: true)),
+              child: const Text('Reset the look'),
+            ),
+          );
+        },
+      ),
       const SizedBox(height: 14),
       const _BackgroundPicture(),
       const SizedBox(height: 14),
@@ -616,7 +634,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                   foregroundColor: Theme.of(context).colorScheme.error,
                   side: BorderSide(color: Theme.of(context).colorScheme.error),
                 ),
-                onPressed: () => action(context),
+                onPressed: () => action(context, replying: widget.replying),
                 icon: Icon(icon),
                 label: Text(label),
               ),
@@ -1155,9 +1173,7 @@ class _UpdateRow extends StatelessWidget {
 /// glows, the special colorways below them tint the window and panels too.
 /// Applies at once.
 class _Colorways extends StatelessWidget {
-  const _Colorways({required this.onPicked});
-
-  final ValueChanged<Look> onPicked;
+  const _Colorways();
 
   /// The look in use, or null when the colours were set some other way
   /// (by hand or by the companion).
@@ -1217,7 +1233,6 @@ class _Colorways extends StatelessWidget {
                     colorway: look.isSpecial ? look.id : '',
                   ),
                 );
-                onPicked(look);
               },
             ),
             const SizedBox(width: 8),
@@ -1431,9 +1446,6 @@ class _About extends StatelessWidget {
 
   static const _gpl = 'https://www.gnu.org/licenses/gpl-3.0.html';
 
-  /// The community server, for news, help and sharing companions.
-  static const discord = 'https://discord.gg/hJCzp7tVaT';
-
   @override
   Widget build(BuildContext context) {
     final muted = TextStyle(color: context.palette.textMuted, height: 1.4);
@@ -1482,12 +1494,6 @@ class _About extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 14),
-        FilledButton.tonalIcon(
-          onPressed: () => launchUrl(Uri.parse(discord)),
-          icon: const Icon(Icons.forum_outlined),
-          label: const Text('Join the VoxCordis Discord'),
-        ),
-        const SizedBox(height: 12),
         const SocialLinks(),
         const _Section('Version'),
         const SizedBox(height: 8),

@@ -1,0 +1,94 @@
+<div class="app" id="app" style="--ui:1">
+  TITLEBAR
+  <aside class="pane side" aria-label="Companion">
+    <button type="button" class="who" id="whobtn" aria-haspopup="true" aria-expanded="false" title="Switch companion">
+      <span class="portrait">PFP<i class="light" title="Ready: the brain is loaded"></i></span>
+      <span class="name">Voxette <svg class="chev" viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="m7 10 5 5 5-5"/></svg></span>
+    </button>
+    <div class="cmenu" id="cmenu" hidden></div>
+    <div class="traits"><span>curious</span><span>warm</span><span>night owl</span><span>teases about tea</span></div>
+    <div class="dayh">DAYS</div>
+    <div class="daylist" id="days"></div>
+    <div class="wordmark">APPMARK</div>
+    <button type="button" class="tonal" id="openfolder" aria-pressed="false"><i data-i="folder"></i>Open folder</button>
+  </aside>
+  <div class="pane main">
+    <div class="topbar">
+      <div class="tabs" role="tablist" aria-label="App tabs"><i class="hl" aria-hidden="true"></i></div>
+      <span class="ready" title="The brain is loaded on your graphics card"><i></i>Ready</span>
+    </div>
+    <div class="views">
+      <div class="view" data-view="chat" role="tabpanel">
+        <div class="scroll" id="chatscroll"><div class="chat" id="chat" aria-live="polite"></div></div>
+        <button type="button" class="latest" id="latest" hidden><i data-i="down"></i>Latest</button>
+        <div class="past" id="past" hidden><i data-i="history"></i><span id="pastday"></span><button type="button" id="backnow"><i data-i="south"></i>Back to now</button></div>
+        <div class="status" id="status" aria-live="polite"></div>
+        <div class="chips" id="suggest" aria-label="Things Haru could say"></div>
+        <form class="composer" id="composer">
+          <button type="button" class="ib" id="attach" title="Share a picture or file"><i data-i="clip"></i></button>
+          <input id="say" autocomplete="off" placeholder="Message Voxette…" aria-label="Message Voxette">
+          <button class="send" id="send" title="Send"><i data-i="up"></i></button>
+        </form>
+      </div>
+
+      <div class="view" data-view="memory" role="tabpanel" hidden>
+        <div class="vbar"><label class="search"><i data-i="search"></i><input id="msearch" placeholder="Search memories" aria-label="Search memories"></label><button type="button" class="fbtn" id="madd"><i data-i="add"></i>Add</button></div>
+        <div class="scroll"><div class="list" id="mems"></div></div>
+      </div>
+
+      <div class="view" data-view="files" hidden>
+        <div class="path"><i data-i="folder"></i>~/VoxCordis/<b>Voxette</b>/</div>
+        <div class="ftabs" role="tablist" aria-label="Voxette's files"></div>
+        <textarea class="md" id="md" spellcheck="false" aria-label="File contents"></textarea>
+        <div class="saved" id="saved">This is the companion's own folder. Change a line and Voxette reads it before the next reply.</div>
+      </div>
+
+      <div class="view" data-view="plans" role="tabpanel" hidden>
+        <div class="scroll pad">
+          <div class="vhead"><h3>Reminders and tasks</h3><button type="button" class="fbtn" id="padd"><i data-i="alarmadd"></i>Add</button></div>
+          <p class="hint">Ask Voxette in the chat ("remind me at 6 to call Mum", "every morning, check the weather for me"), or add one here. They happen while VoxCordis runs, even with the window closed.</p>
+          <div class="list" id="plist"></div>
+          <div id="ppaused"></div>
+          <div class="runs" id="pruns"></div>
+        </div>
+      </div>
+
+      <div class="view" data-view="skills" role="tabpanel" hidden>
+        <div class="scroll pad">
+          <div class="vhead"><h3>Skills</h3><div class="more"><button type="button" class="ib" id="smore" title="More" aria-haspopup="true"><i data-i="more"></i></button><div class="menu" id="smenu" hidden></div></div><button type="button" class="fbtn" id="snew"><i data-i="add"></i>New skill</button></div>
+          <p class="hint" id="shint"></p>
+          <div id="sreview"></div>
+          <div class="list" id="skilllist"></div>
+        </div>
+      </div>
+
+      <div class="view" data-view="images" role="tabpanel" hidden>
+        <div class="scroll pad">
+          <div class="vhead"><h3>Pictures</h3><button type="button" class="tbtn" id="drawtoggle"><i data-i="brush"></i><span>Draw</span></button><button type="button" class="gbtn" id="dlall" title="Download a whole Soulkyn gallery"><i data-i="download"></i><span>Download all Images &amp; Videos</span></button><button type="button" class="ib" id="psettings" title="Picture settings"><i data-i="tune"></i></button></div>
+          <form class="drawp" id="drawp" hidden>
+            <div class="dtitle">Draw something yourself</div>
+            <textarea id="prompt" rows="2" placeholder="What should it show?">A lighthouse at dusk, warm light on the water</textarea>
+            <details class="adv"><summary>Advanced</summary>
+              <textarea id="neg" rows="1" placeholder="What to leave out (negative prompt)">blurry, text</textarea>
+              <div class="advrow"><label>Model <select id="dmodel"><option>SDXL</option><option>Anime model</option><option>Photo model</option></select></label><label>Guidance <input type="range" id="guid" min="1" max="12" step=".5" value="5"><output id="guidv">5</output></label></div>
+            </details>
+            <div class="drow"><div class="aspect" role="group" aria-label="Shape"><button type="button" data-a="1" title="Square"><i data-i="sq"></i></button><button type="button" data-a=".75" title="Portrait"><i data-i="portrait"></i></button><button type="button" data-a="1.6" aria-pressed="true" title="Landscape"><i data-i="land"></i></button></div><button class="fbtn" id="drawgo"><i data-i="brush"></i>Draw</button></div>
+          </form>
+          <div class="canvaswrap" id="canvaswrap" hidden><canvas class="paint" id="paint" width="640" height="400" aria-label="A picture being drawn"></canvas><div class="drawbar"><span id="dstep"></span><span class="meter"><i id="dmeter"></i></span></div></div>
+          <div class="gallery" id="gallery"></div>
+        </div>
+      </div>
+
+      <div class="view" data-view="settings" role="tabpanel" hidden>
+        <div class="setwrap" id="setwrap">
+          <div class="stabs" id="stabs" role="tablist" aria-label="Settings"></div>
+          <div class="scroll pad" id="spanes"></div>
+        </div>
+        <div class="savebar" id="savebar" hidden><span>Unsaved changes</span><button type="button" class="gbtn" id="sdiscard">Discard</button><button type="button" class="fbtn" id="ssave">Save</button></div>
+      </div>
+    </div>
+  </div>
+  <div class="dlg" id="dlg" hidden><div class="card" role="dialog" aria-modal="true" id="dlgcard"></div></div>
+  <div class="viewer" id="viewer" hidden></div>
+  <div class="toast" id="toast" role="status" hidden></div>
+</div>

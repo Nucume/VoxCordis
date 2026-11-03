@@ -305,3 +305,105 @@ class _LoraButtonState extends State<_LoraButton> {
     );
   }
 }
+
+/// The LoRAs as a section that folds up under its header. Folded, only the
+/// picked ones stay, as the same buttons with their sliders.
+class LoraSection extends StatelessWidget {
+  const LoraSection({
+    super.key,
+    required this.loras,
+    required this.picked,
+    required this.onChanged,
+    required this.open,
+    required this.onToggle,
+  });
+
+  final List<({String name, String note})> loras;
+  final Map<String, double> picked;
+  final void Function(String name, double? weight) onChanged;
+  final bool open;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final accent = Theme.of(context).colorScheme.primary;
+    final on = [
+      for (final l in loras)
+        if (picked.containsKey(l.name)) l,
+    ];
+    final shown = open ? loras : on;
+    final header = MouseRegion(
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: onToggle,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(14, 10, 10, 10),
+          child: Row(
+            children: [
+              Text(
+                'LoRAs',
+                style: TextStyle(
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
+                  color: palette.text,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                on.isEmpty
+                    ? '${loras.length}'
+                    : '${on.length} of ${loras.length} on',
+                style: TextStyle(fontSize: 12.5, color: palette.textMuted),
+              ),
+              const Spacer(),
+              AnimatedRotation(
+                turns: open ? 0.5 : 0,
+                duration: const Duration(milliseconds: 220),
+                curve: Curves.easeOut,
+                child: Icon(
+                  Icons.expand_more_rounded,
+                  size: 22,
+                  color: palette.textMuted,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    return Container(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(14),
+        color: palette.glass.withValues(alpha: palette.glass.a * 0.6),
+        border: Border.all(
+          color: on.isEmpty
+              ? palette.glassBorder
+              : accent.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          header,
+          AnimatedSize(
+            duration: const Duration(milliseconds: 260),
+            curve: Curves.easeOutCubic,
+            alignment: Alignment.topCenter,
+            child: shown.isEmpty
+                ? const SizedBox(width: double.infinity)
+                : Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+                    child: LoraGrid(
+                      loras: shown,
+                      picked: picked,
+                      onChanged: onChanged,
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+}

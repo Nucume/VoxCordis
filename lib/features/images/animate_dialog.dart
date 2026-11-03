@@ -291,7 +291,11 @@ class _AnimateDialogState extends State<AnimateDialog> {
           const SizedBox(height: 8),
           _PromptCounter(length: _prompt.text.length, model: _model),
           const SizedBox(height: 8),
-          Row(
+          // Wraps in narrow windows: "Back to mine" drops below.
+          Wrap(
+            spacing: 6,
+            runSpacing: 4,
+            crossAxisAlignment: WrapCrossAlignment.center,
             children: [
               _GlassButton(
                 onPressed: _writing || _prompt.text.trim().isEmpty
@@ -301,7 +305,6 @@ class _AnimateDialogState extends State<AnimateDialog> {
                 icon: Icons.auto_awesome,
                 label: _writing ? 'Writing…' : 'Write it for me',
               ),
-              const SizedBox(width: 6),
               Tooltip(
                 message:
                     'Turns your idea into the detailed prompt this model '
@@ -313,7 +316,6 @@ class _AnimateDialogState extends State<AnimateDialog> {
                   color: palette.textMuted,
                 ),
               ),
-              const Spacer(),
               if (_before != null && !_writing)
                 TextButton(
                   onPressed: () => setState(() {
@@ -344,15 +346,16 @@ class _AnimateDialogState extends State<AnimateDialog> {
 
     return AlertDialog(
       title: const Text('Bring it to life'),
+      // 880 wide at most; in a narrow window both sides give up some room.
       content: SizedBox(
         width: 880,
         height: 560,
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            SizedBox(width: 400, child: left),
+            Expanded(flex: 10, child: left),
             const SizedBox(width: 28),
-            Expanded(child: right),
+            Expanded(flex: 11, child: right),
           ],
         ),
       ),

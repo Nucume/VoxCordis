@@ -36,7 +36,7 @@ class SecretStore {
         if (await sealed.exists()) {
           return b.unseal(await sealed.readAsBytes());
         }
-      } else if (b is _Libsecret) {
+      } else if (b is _Keyring) {
         final v = await b.read(name);
         if (v != null) return v;
       }
@@ -60,7 +60,7 @@ class SecretStore {
         if (await sealed.exists()) {
           found.add(b.unseal(await sealed.readAsBytes()));
         }
-      } else if (b is _Libsecret) {
+      } else if (b is _Keyring) {
         final v = await b.read(name);
         if (v != null) found.add(v);
       }
@@ -91,7 +91,7 @@ class SecretStore {
         await _deleteIfThere(_plain(name));
         return;
       }
-      if (b is _Libsecret && await b.write(name, value)) {
+      if (b is _Keyring && await b.write(name, value)) {
         await _deleteIfThere(_plain(name));
         return;
       }
@@ -105,7 +105,7 @@ class SecretStore {
     await _deleteIfThere(_plain(name));
     await _deleteIfThere(_sealed(name));
     final b = _backend;
-    if (b is _Libsecret) {
+    if (b is _Keyring) {
       try {
         await b.delete(name);
       } on Object {
@@ -121,7 +121,7 @@ class SecretStore {
       if (b is _Dpapi && await _sealed(name).exists()) {
         return SecretPlace.windows;
       }
-      if (b is _Libsecret && await b.read(name) != null) {
+      if (b is _Keyring && await b.read(name) != null) {
         return SecretPlace.keyring;
       }
     } on Object {
@@ -160,6 +160,50 @@ sealed class SecretBackend {
   /// Linux's keyring, for tests that run against a real one.
   static SecretBackend libsecret({String schema = _Libsecret.appSchema}) =>
       _Libsecret(schema: schema);
+
+  /// A keyring kept in [store], for tests. While [locked] says so it
+  /// refuses every call, the way a locked or missing desktop keyring does.
+  static SecretBackend memory(
+    Map<String, String> store, {
+    bool Function()? locked,
+  }) => _MemoryKeyring(store, locked ?? () => false);
+}
+
+/// A keyring: libsecret, or one in memory for tests.
+sealed class _Keyring extends SecretBackend {
+  Future<String?> read(String name);
+  Future<bool> write(String name, String value);
+  Future<void> delete(String name);
+}
+
+final class _MemoryKeyring extends _Keyring {
+  _MemoryKeyring(this._store, this._locked);
+
+  final Map<String, String> _store;
+  final bool Function() _locked;
+
+  void _refuseIfLocked() {
+    if (_locked()) throw const FileSystemException('The keyring refused');
+  }
+
+  @override
+  Future<String?> read(String name) async {
+    _refuseIfLocked();
+    return _store[name];
+  }
+
+  @override
+  Future<bool> write(String name, String value) async {
+    _refuseIfLocked();
+    _store[name] = value;
+    return true;
+  }
+
+  @override
+  Future<void> delete(String name) async {
+    _refuseIfLocked();
+    _store.remove(name);
+  }
 }
 
 /// Makes [path] readable only by the user who runs the app (0600, or 0700
@@ -309,17 +353,19 @@ final class _Dpapi extends SecretBackend {
 // Linux: libsecret, loaded at run time. Its calls may wait for the human to
 // unlock the keyring, so each runs on its own isolate, never the window's.
 
-final class _Libsecret extends SecretBackend {
+final class _Libsecret extends _Keyring {
   _Libsecret({this.schema = appSchema});
 
   static const appSchema = 'io.github.nucume.VoxCordis';
   final String schema;
 
+  @override
   Future<String?> read(String name) {
     final s = schema;
     return Isolate.run(() => _LibsecretCalls.open()?.lookup(s, name));
   }
 
+  @override
   Future<bool> write(String name, String value) {
     final s = schema;
     return Isolate.run(
@@ -327,6 +373,7 @@ final class _Libsecret extends SecretBackend {
     );
   }
 
+  @override
   Future<void> delete(String name) {
     final s = schema;
     return Isolate.run(() => _LibsecretCalls.open()?.clear(s, name));

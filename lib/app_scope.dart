@@ -26,6 +26,7 @@ import 'data/skills/skill_tools.dart';
 import 'features/chat/prompt_history.dart';
 import 'services/changelog.dart';
 import 'services/import/import_temp.dart';
+import 'services/system/older_copy.dart';
 import 'services/images/clip_prompt.dart';
 import 'services/import/personality_rewrite.dart';
 import 'services/images/draw_tools.dart';
@@ -54,6 +55,7 @@ class AppServices {
     required this.dbKey,
   }) {
     _use(db);
+    runtime.installer.note = (m) => log.add(LogKind.errors, m);
   }
 
   final SettingsStore settings;
@@ -494,9 +496,13 @@ class AppServices {
   /// Settings and the database live in the OS app-support directory, e.g.
   /// `~/.local/share/<app id>/` on Linux, `%APPDATA%\Nucume\VoxCordis\` on
   /// Windows. Downloaded models live in the VoxCordis folder instead.
-  static Future<Directory> supportDir() async {
+  ///
+  /// Null when an older VoxCordis still running there has been asked to
+  /// show its window instead; this copy should quit then, as a second
+  /// launch always has.
+  static Future<Directory?> supportDir() async {
     final Directory dir = await getApplicationSupportDirectory();
-    await _adoptOldFolders(dir);
+    if (!await _adoptOldFolders(dir)) return null;
     await dir.create(recursive: true);
     // Chats, memories, settings and logs: for this user's eyes only, as are
     // the companions' folders (personality, lessons, privacy rules).
@@ -550,10 +556,13 @@ class AppServices {
   ///   builds said "com.nucume" and "companion".
   /// - Linux and macOS name it after the app id, which was
   ///   `com.nucume.companion` until the program became voxcordisai.
-  static Future<void> _adoptOldFolders(Directory dir) => adoptOldFolder(
+  /// False while an older copy still runs on that data (Linux; the Windows
+  /// runner looks for one itself, and macOS has no such check).
+  static Future<bool> _adoptOldFolders(Directory dir) => adoptOldFolder(
     dir,
     oldFolderFor(dir, windows: Platform.isWindows),
     removeEmptyParent: Platform.isWindows,
+    olderCopyRunning: Platform.isLinux ? OlderCopy.showIfRunning : null,
   );
 
   /// Where older builds kept what now belongs in [dir].
@@ -565,40 +574,121 @@ class AppServices {
 
   /// Moves what is in [old] into [dir] unless [dir] already has settings,
   /// then points the paths in settings.json that named [old] at [dir].
+  /// settings.json goes last. Whatever stayed behind (in use, say) is
+  /// named in [pendingFile] and tried again on the next start, even though
+  /// settings.json is there by then.
+  ///
+  /// Returns false, having moved nothing, when [olderCopyRunning] says an
+  /// older VoxCordis is still running on [old]. [rename] is for tests.
   @visibleForTesting
-  static Future<void> adoptOldFolder(
+  static Future<bool> adoptOldFolder(
     Directory dir,
     Directory old, {
     bool removeEmptyParent = false,
+    Future<bool> Function()? olderCopyRunning,
+    Future<void> Function(FileSystemEntity entry, String to) rename =
+        _renameEntry,
   }) async {
-    if (p.equals(old.path, dir.path) || !await old.exists()) return;
-    if (await File(p.join(dir.path, 'settings.json')).exists()) return;
-    await dir.create(recursive: true);
-    await for (final e in old.list()) {
-      final target = p.join(dir.path, p.basename(e.path));
-      if (await FileSystemEntity.type(target) !=
-          FileSystemEntityType.notFound) {
-        continue;
-      }
+    if (p.equals(old.path, dir.path)) return true;
+    final pending = File(p.join(dir.path, pendingFile));
+    if (!await old.exists()) {
+      await _deleteQuietly(pending.path);
+      return true;
+    }
+    // Only what an earlier start left behind, if it did.
+    List<String>? only;
+    if (await pending.exists()) {
       try {
-        await e.rename(target);
+        only = (await pending.readAsLines())
+            .where((n) => n.isNotEmpty)
+            .toList();
       } on FileSystemException {
-        // In use or locked: leave it.
+        only = const [];
+      }
+    } else if (await File(p.join(dir.path, 'settings.json')).exists()) {
+      return true;
+    }
+    // It has the database and settings open: moving them would lose what
+    // it saves from then on.
+    if (olderCopyRunning != null && await olderCopyRunning()) return false;
+    final relinked = only == null && await _relinkOldFolder(dir, old);
+    var fixPaths = relinked;
+    // Left for want of space: too big to copy again on every start, and
+    // their paths in settings keep pointing at them.
+    final full = <String>[];
+    if (!relinked) {
+      await dir.create(recursive: true);
+      final left = <String>[];
+      FileSystemEntity? oldSettings;
+      // Links are moved as links, not copied with all they point at.
+      await for (final e in old.list(followLinks: false)) {
+        final name = p.basename(e.path);
+        // settings.json is never filtered out: a start cut short just
+        // before it moved still has it to move.
+        if (name == 'settings.json') {
+          oldSettings = e;
+          continue;
+        }
+        if (only != null && !only.contains(name)) continue;
+        final target = p.join(dir.path, name);
+        if (await _exists(target)) continue;
+        switch (await _moveEntry(e, target, rename)) {
+          case _Moved.yes:
+            break;
+          case _Moved.no:
+            left.add(name);
+          case _Moved.noSpace:
+            full.add(name);
+        }
+      }
+      // Named before settings.json moves, so a start cut short after it
+      // still finds what is left.
+      if (left.isNotEmpty) await _writePending(pending, left);
+      final settingsTarget = p.join(dir.path, 'settings.json');
+      if (oldSettings != null && !await _exists(settingsTarget)) {
+        if (await _moveEntry(oldSettings, settingsTarget, rename) ==
+                _Moved.yes ||
+            await _copySettings(oldSettings, settingsTarget)) {
+          fixPaths = true;
+        } else {
+          left.add('settings.json');
+        }
+      }
+      if (left.isEmpty) {
+        await _deleteQuietly(pending.path);
+      } else {
+        await _writePending(pending, left);
+      }
+      if (left.isNotEmpty) {
+        debugPrint('Left in ${old.path} until next time: ${left.join(', ')}');
+      }
+      if (full.isNotEmpty) {
+        debugPrint('Left in ${old.path}, no space: ${full.join(', ')}');
       }
     }
     final settings = File(p.join(dir.path, 'settings.json'));
     try {
-      if (await settings.exists()) {
+      if (fixPaths && await settings.exists()) {
         // As written in JSON too, where Windows' backslashes are doubled.
         String json(String path) {
           final quoted = jsonEncode(path);
           return quoted.substring(1, quoted.length - 1);
         }
 
+        // Not followed by a separator and one of the names in [full].
+        final keep = [
+          for (final n in full)
+            r'(?![\\/]+' + RegExp.escape(n) + r'(?![^\\/"]))',
+        ].join();
+        String swap(String text, String from, String to) =>
+            text.replaceAll(RegExp(RegExp.escape(from) + keep), to);
+
         final text = await settings.readAsString();
-        final fixed = text
-            .replaceAll(json(old.path), json(dir.path))
-            .replaceAll(old.path, dir.path);
+        final fixed = swap(
+          swap(text, json(old.path), json(dir.path)),
+          old.path,
+          dir.path,
+        );
         if (fixed != text) await settings.writeAsString(fixed);
       }
     } on FileSystemException {
@@ -610,6 +700,127 @@ class AppServices {
       } on FileSystemException {
         break;
       }
+    }
+    return true;
+  }
+
+  /// Names what [adoptOldFolder] left in the old folder, one per line.
+  @visibleForTesting
+  static const pendingFile = '.adopt-pending';
+
+  static Future<void> _writePending(File pending, List<String> names) async {
+    try {
+      await pending.writeAsString('${names.join('\n')}\n');
+    } on FileSystemException {
+      // Not tried again then.
+    }
+  }
+
+  static Future<bool> _exists(String path) async =>
+      await FileSystemEntity.type(path, followLinks: false) !=
+      FileSystemEntityType.notFound;
+
+  static Future<void> _renameEntry(FileSystemEntity e, String to) =>
+      e.rename(to);
+
+  /// The old folder as a link to somewhere else (another drive, often):
+  /// point the new name there too, rather than copying it all over. False
+  /// if it is no link, or the new folder already has something in it.
+  static Future<bool> _relinkOldFolder(Directory dir, Directory old) async {
+    try {
+      if (!await FileSystemEntity.isLink(old.path)) return false;
+      if (await dir.exists()) {
+        if (!await dir.list().isEmpty) return false;
+        await dir.delete();
+      }
+      final link = Link(old.path);
+      final to = p.normalize(p.join(old.parent.path, await link.target()));
+      await Link(dir.path).create(to);
+      await link.delete();
+      return true;
+    } on FileSystemException {
+      return false;
+    }
+  }
+
+  /// Moves [e] to [target]. Onto another drive, where it can't simply be
+  /// renamed, it is copied and then deleted.
+  /// A settings.json that won't move (held open by a virus scanner, say)
+  /// can usually still be read: copy it, so the user's settings arrive.
+  static Future<bool> _copySettings(FileSystemEntity from, String to) async {
+    if (from is! File) return false;
+    try {
+      await from.copy(to);
+    } on FileSystemException {
+      await _deleteQuietly(to);
+      return false;
+    }
+    await _deleteQuietly(from.path);
+    return true;
+  }
+
+  static Future<_Moved> _moveEntry(
+    FileSystemEntity e,
+    String target,
+    Future<void> Function(FileSystemEntity entry, String to) rename,
+  ) async {
+    try {
+      await rename(e, target);
+      return _Moved.yes;
+    } on FileSystemException catch (error) {
+      if (_noSpace(error)) return _Moved.noSpace;
+      // In use or locked: leave it. EXDEV is 18; Windows says 17.
+      final otherDrive = Platform.isWindows ? 17 : 18;
+      if (error.osError?.errorCode != otherDrive) return _Moved.no;
+    }
+    // Copied beside the target first, so a cut-off copy is never taken for
+    // the real thing.
+    final copy = '$target.moving';
+    try {
+      await (await _copyEntry(e, copy)).rename(target);
+    } on FileSystemException catch (error) {
+      await _deleteQuietly(copy);
+      return _noSpace(error) ? _Moved.noSpace : _Moved.no;
+    }
+    // Moved all the same if some of the old one can't go.
+    await _deleteQuietly(e.path);
+    return _Moved.yes;
+  }
+
+  /// ENOSPC is 28; Windows says 112, or 39.
+  static bool _noSpace(FileSystemException e) =>
+      (Platform.isWindows ? const [39, 112] : const [28]).contains(
+        e.osError?.errorCode,
+      );
+
+  /// Copies [e] to [to], links as links, and returns the copy.
+  static Future<FileSystemEntity> _copyEntry(
+    FileSystemEntity e,
+    String to,
+  ) async {
+    if (e is Link) return Link(to).create(await e.target());
+    if (e is File) return e.copy(to);
+    final dir = await Directory(to).create();
+    await for (final child in (e as Directory).list(followLinks: false)) {
+      await _copyEntry(child, p.join(to, p.basename(child.path)));
+    }
+    return dir;
+  }
+
+  static Future<void> _deleteQuietly(String path) async {
+    try {
+      switch (await FileSystemEntity.type(path, followLinks: false)) {
+        case FileSystemEntityType.directory:
+          await Directory(path).delete(recursive: true);
+        case FileSystemEntityType.link:
+          await Link(path).delete();
+        case FileSystemEntityType.notFound:
+          break;
+        default:
+          await File(path).delete();
+      }
+    } on FileSystemException {
+      // Left where it is.
     }
   }
 
@@ -649,3 +860,6 @@ class AppScope extends InheritedWidget {
   @override
   bool updateShouldNotify(AppScope oldWidget) => services != oldWidget.services;
 }
+
+/// How an entry fared in [AppServices.adoptOldFolder].
+enum _Moved { yes, no, noSpace }

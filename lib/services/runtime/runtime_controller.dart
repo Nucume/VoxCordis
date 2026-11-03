@@ -38,13 +38,25 @@ typedef _ServerConfig = ({
 /// with the chosen model, restarts it when the model changes, stops it on exit.
 /// Also runs model downloads.
 class RuntimeController extends ChangeNotifier {
-  RuntimeController(this.supportDir, {http.Client? client})
-    : _http = client ?? http.Client(),
-      installer = RuntimeInstaller(supportDir, client: client);
+  RuntimeController(
+    this.supportDir, {
+    http.Client? client,
+    @visibleForTesting Future<int?> Function()? nvidiaDriver,
+    @visibleForTesting Duration? loadTimeout,
+  }) : _http = client ?? http.Client(),
+       _loadTimeoutOverride = loadTimeout,
+       installer = RuntimeInstaller(
+         supportDir,
+         client: client,
+         nvidiaDriver: nvidiaDriver,
+       );
 
   final Directory supportDir;
   final http.Client _http;
   final RuntimeInstaller installer;
+
+  /// Used in place of the time a model is given to load, for tests.
+  final Duration? _loadTimeoutOverride;
 
   /// The graphics card, looked up once, for model recommendations.
   late final Future<GpuInfo> gpu = GpuInfo.detect();
@@ -62,6 +74,7 @@ class RuntimeController extends ChangeNotifier {
   /// connection dropped can ask what happened to it.
   LlamaServer? _lastServer;
   Future<LlmTarget>? _starting;
+  _ServerConfig? _startingConfig;
 
   /// Catalog downloads in flight: model id → progress 0..1 (or null).
   final Map<String, double?> downloads = {};
@@ -107,7 +120,20 @@ class RuntimeController extends ChangeNotifier {
     if (server != null && _serverConfig == config) {
       return Future.value(_target(server));
     }
-    return _starting ??= _start(config).whenComplete(() => _starting = null);
+    if (_starting case final starting?) {
+      if (_startingConfig == config) return starting;
+      // Another model is loading: this one is loaded once that is done, so
+      // the answer is never the other model's server.
+      return starting.then(
+        (_) => ensureReady(s),
+        onError: (Object _) => ensureReady(s),
+      );
+    }
+    _startingConfig = config;
+    return _starting = _start(config).whenComplete(() {
+      _starting = null;
+      _startingConfig = null;
+    });
   }
 
   LlmTarget _target(LlamaServer s) =>
@@ -131,19 +157,33 @@ class RuntimeController extends ChangeNotifier {
           },
         );
       }
-      _set(RuntimeState.loading);
-      await _killStale(_pidFile);
-      final server = await LlamaServer.start(
-        binary: binary,
-        modelPath: config.model,
-        contextSize: config.ctx,
-        useGpu: config.gpu,
-        chatTemplateFile: await _chatTemplateFile(config.template),
-        mmprojPath: config.mmproj,
-        timeout: _loadTimeout(config.model),
-        onSpawn: (pid) {
-          _pidFile.parent.createSync(recursive: true);
-          _pidFile.writeAsStringSync('$pid');
+      final template = await _chatTemplateFile(config.template);
+      final server = await _startOrFallBack(
+        binary,
+        (exe) async {
+          _set(RuntimeState.loading);
+          await _killStale(_pidFile);
+          return LlamaServer.start(
+            binary: exe,
+            modelPath: config.model,
+            contextSize: config.ctx,
+            useGpu: config.gpu,
+            chatTemplateFile: template,
+            mmprojPath: config.mmproj,
+            timeout: _loadTimeout(config.model),
+            onSpawn: (pid) {
+              _pidFile.parent.createSync(recursive: true);
+              _pidFile.writeAsStringSync('$pid');
+            },
+          );
+        },
+        installing: () {
+          progress = null;
+          _set(RuntimeState.installing);
+        },
+        onProgress: (got, total) {
+          progress = total == null ? null : got / total;
+          notifyListeners();
         },
       );
       _server = server;
@@ -164,6 +204,57 @@ class RuntimeController extends ChangeNotifier {
       error = '$e';
       _set(RuntimeState.error);
       rethrow;
+    }
+  }
+
+  /// Starts a server on [binary] with [start]. A CUDA build that stops while
+  /// loading (a missing library, a driver that is too old) must not leave
+  /// the companion mute, so the Vulkan build is tried, and CUDA is given up
+  /// on only once that has started the same model. A model that won't load
+  /// fails on both: then CUDA is kept and its error is the one shown. A
+  /// load that took too long is not tried again at once, but CUDA is off
+  /// for the rest of the run.
+  Future<LlamaServer> _startOrFallBack(
+    String binary,
+    Future<LlamaServer> Function(String binary) start, {
+    void Function()? installing,
+    DownloadProgress? onProgress,
+  }) async {
+    try {
+      return await start(binary);
+    } catch (e, st) {
+      if (!installer.isCuda(binary)) rethrow;
+      if (e is LlamaServerException && e.timedOut) {
+        // Not tried on Vulkan at once, so a model that is simply too big is
+        // not loaded twice. But a CUDA build that hangs must not fail every
+        // later try too, so the next one this run uses Vulkan.
+        installer.skipCudaThisRun();
+        rethrow;
+      }
+      final LlamaServer server;
+      try {
+        var other = await installer.find(cuda: false);
+        if (other == null) {
+          installing?.call();
+          other = await installer.ensureInstalled(
+            cuda: false,
+            onProgress: onProgress,
+          );
+        }
+        server = await start(other);
+      } catch (e2) {
+        installer.note?.call(
+          'The CUDA llama-server did not start ($e), and Vulkan did not '
+          'either, so CUDA is kept: $e2',
+        );
+        Error.throwWithStackTrace(e, st);
+      }
+      try {
+        await installer.giveUpOnCuda('$e');
+      } catch (_) {
+        // No marker on disk: CUDA is still off for the rest of this run.
+      }
+      return server;
     }
   }
 
@@ -293,21 +384,23 @@ class RuntimeController extends ChangeNotifier {
       await stopRecall(keepTimer: true);
       final binary =
           await installer.find() ?? await installer.ensureInstalled();
-      await _killStale(_recallPidFile);
-      final server = await LlamaServer.start(
-        binary: binary,
-        modelPath: path,
-        embedding: true,
-        // What EmbeddingGemma reads at most; texts are cut to fit.
-        contextSize: Embedder.contextSize,
-        // On the processor: a text embeds in a moment there, and the
-        // graphics card stays the chat model's.
-        useGpu: false,
-        onSpawn: (pid) {
-          _recallPidFile.parent.createSync(recursive: true);
-          _recallPidFile.writeAsStringSync('$pid');
-        },
-      );
+      final server = await _startOrFallBack(binary, (exe) async {
+        await _killStale(_recallPidFile);
+        return LlamaServer.start(
+          binary: exe,
+          modelPath: path,
+          embedding: true,
+          // What EmbeddingGemma reads at most; texts are cut to fit.
+          contextSize: Embedder.contextSize,
+          // On the processor: a text embeds in a moment there, and the
+          // graphics card stays the chat model's.
+          useGpu: false,
+          onSpawn: (pid) {
+            _recallPidFile.parent.createSync(recursive: true);
+            _recallPidFile.writeAsStringSync('$pid');
+          },
+        );
+      });
       _recall = server;
       _recallConfig = path;
       unawaited(
@@ -448,20 +541,22 @@ class RuntimeController extends ChangeNotifier {
       await stopEyes();
       final binary =
           await installer.find() ?? await installer.ensureInstalled();
-      await _killStale(_eyesPidFile);
-      final server = await LlamaServer.start(
-        binary: binary,
-        modelPath: files.model,
-        mmprojPath: files.mmproj,
-        // Room for one large picture and the description.
-        contextSize: 8192,
-        useGpu: gpu,
-        timeout: _loadTimeout(files.model),
-        onSpawn: (pid) {
-          _eyesPidFile.parent.createSync(recursive: true);
-          _eyesPidFile.writeAsStringSync('$pid');
-        },
-      );
+      final server = await _startOrFallBack(binary, (exe) async {
+        await _killStale(_eyesPidFile);
+        return LlamaServer.start(
+          binary: exe,
+          modelPath: files.model,
+          mmprojPath: files.mmproj,
+          // Room for one large picture and the description.
+          contextSize: 8192,
+          useGpu: gpu,
+          timeout: _loadTimeout(files.model),
+          onSpawn: (pid) {
+            _eyesPidFile.parent.createSync(recursive: true);
+            _eyesPidFile.writeAsStringSync('$pid');
+          },
+        );
+      });
       _eyes = server;
       _eyesConfig = config;
       unawaited(
@@ -537,7 +632,8 @@ class RuntimeController extends ChangeNotifier {
     return file.path;
   }
 
-  static Duration _loadTimeout(String modelPath) {
+  Duration _loadTimeout(String modelPath) {
+    if (_loadTimeoutOverride case final t?) return t;
     final file = File(modelPath);
     var bytes = 0;
     final split = RegExp(r'-\d{5}-of-\d{5}\.gguf$');

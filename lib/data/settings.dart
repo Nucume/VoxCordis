@@ -132,9 +132,13 @@ class DrawPanelPrefs {
     this.model,
     this.shape = 'square',
     this.perModel = const {},
+    this.lorasOpen = false,
   });
 
   final bool advanced;
+
+  /// Whether the LoRAs section shows every LoRA or only the picked ones.
+  final bool lorasOpen;
   final String? model;
   final String shape;
   final Map<String, DrawChoices> perModel;
@@ -144,8 +148,10 @@ class DrawPanelPrefs {
     String? model,
     String? shape,
     Map<String, DrawChoices>? perModel,
+    bool? lorasOpen,
   }) => DrawPanelPrefs(
     advanced: advanced ?? this.advanced,
+    lorasOpen: lorasOpen ?? this.lorasOpen,
     model: model ?? this.model,
     shape: shape ?? this.shape,
     perModel: perModel ?? this.perModel,
@@ -166,6 +172,7 @@ class DrawPanelPrefs {
     'advanced': advanced,
     'model': model,
     'shape': shape,
+    'lorasOpen': lorasOpen,
     'perModel': {for (final e in perModel.entries) e.key: e.value.toJson()},
   };
 
@@ -174,6 +181,7 @@ class DrawPanelPrefs {
     final per = json['perModel'];
     return DrawPanelPrefs(
       advanced: json['advanced'] as bool? ?? false,
+      lorasOpen: json['lorasOpen'] as bool? ?? false,
       model: json['model'] as String?,
       shape: switch (json['shape']) {
         'portrait' => 'portrait',
@@ -460,9 +468,13 @@ class AppSettings {
         clearFolder: true,
         clearPortrait: true,
         clearBackground: true,
-        traits: const [],
         otherCompanions: const [],
+        // Who the next first companion is starts afresh too, not as the
+        // deleted one's leftovers.
         companionName: const AppSettings().companionName,
+        pronouns: const AppSettings().pronouns,
+        traits: const AppSettings().traits,
+        accentColor: const AppSettings().accentColor,
       );
     }
     final next = otherCompanions.first;

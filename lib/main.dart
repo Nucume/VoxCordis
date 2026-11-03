@@ -13,6 +13,8 @@ import 'services/changelog.dart';
 import 'services/logs/app_log.dart';
 import 'services/system/background.dart';
 import 'services/system/desktop_entry.dart';
+import 'services/system/desktop_notifier.dart';
+import 'services/updater.dart';
 import 'shell/window_frame.dart';
 
 Future<void> main(List<String> args) async {
@@ -21,6 +23,17 @@ Future<void> main(List<String> args) async {
   await AvatarVideo.init();
   await _makeWindowTranslucent();
   final dir = await AppServices.supportDir();
+  // An older VoxCordis is running and has come forward instead.
+  if (dir == null) {
+    const hint =
+        'An older VoxCordis is still running. Quit it from the tray, then '
+        'start VoxCordis again.';
+    stderr.writeln(hint);
+    await const DesktopNotifier()
+        .show('VoxCordis', hint)
+        .timeout(const Duration(seconds: 3), onTimeout: () {});
+    exit(0);
+  }
   // VoxCordis' own title bar, unless the system's was chosen.
   await TitleBarChoice.load(dir);
   // Linux: the icon for Alt+Tab and the taskbar.
@@ -90,6 +103,8 @@ Future<void> _start(
   }
   runApp(AppScope(services: services, child: const CompanionApp()));
   // One quiet look for a newer release once the window is up.
+  // Installers that earlier updates left in the temporary folder.
+  Updater.deleteLeftoverInstallers().ignore();
   Future.delayed(const Duration(seconds: 3), services.updates.check);
   // Memories and chat that have no vector yet (after an update, or an
   // import) are embedded once the window is up.

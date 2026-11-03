@@ -15,16 +15,38 @@ String resetPhrase(String name) => 'Yes, I want to reset $name!';
 /// Whether [typed] confirms resetting [name], exactly.
 bool resetConfirmed(String typed, String name) => typed == resetPhrase(name);
 
+/// True (after saying so) while the companion is still replying: the rest
+/// of the reply would go to the wiped companion, or to the next one.
+bool _stillReplying(
+  BuildContext context,
+  String name,
+  bool Function()? replying,
+) {
+  if (replying == null || !replying()) return false;
+  if (context.mounted) {
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Let $name finish replying first.')));
+  }
+  return true;
+}
+
 /// Asks once, with a typed sentence, before wiping the current companion's
 /// chats, memories and reminders. They and their folder stay.
-Future<void> confirmResetCompanion(BuildContext context) async {
+Future<void> confirmResetCompanion(
+  BuildContext context, {
+  bool Function()? replying,
+}) async {
   final services = AppScope.of(context);
   final name = services.settings.value.companionName;
+  if (_stillReplying(context, name, replying)) return;
   final ok = await showDialog<bool>(
     context: context,
     builder: (_) => _ResetDialog(name: name),
   );
-  if (ok != true) return;
+  if (ok != true || !context.mounted) return;
+  // An automation may have started while the dialog was open.
+  if (_stillReplying(context, name, replying)) return;
   await services.resetCurrentCompanion();
 }
 
@@ -95,9 +117,13 @@ class _ResetDialogState extends State<_ResetDialog> {
 
 /// Asks twice before deleting the current companion: first a warning of
 /// what goes, then the human types a sentence. Deletes it when both pass.
-Future<void> confirmDeleteCompanion(BuildContext context) async {
+Future<void> confirmDeleteCompanion(
+  BuildContext context, {
+  bool Function()? replying,
+}) async {
   final services = AppScope.of(context);
   final name = services.settings.value.companionName;
+  if (_stillReplying(context, name, replying)) return;
   final first = await showDialog<bool>(
     context: context,
     builder: (_) => _Warning(name: name),
@@ -108,6 +134,7 @@ Future<void> confirmDeleteCompanion(BuildContext context) async {
     builder: (_) => _TypeToConfirm(name: name),
   );
   if (second == null || !context.mounted) return;
+  if (_stillReplying(context, name, replying)) return;
   await services.deleteCurrentCompanion(deleteFolder: second);
 }
 

@@ -26,11 +26,17 @@ class ModelPicker extends StatefulWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.onDownloaded,
     this.showModelsFolder = true,
   });
 
   final AppSettings value;
   final ValueChanged<AppSettings> onChanged;
+
+  /// For a download that finishes once this picker is gone (Settings shows
+  /// another page now): [choose] picks the model in the settings as they
+  /// are then, with the span sized for it, as Use would.
+  final void Function(AppSettings Function(AppSettings) choose)? onDownloaded;
 
   /// Setup chooses the folder on its Home step, so it hides the row here.
   final bool showModelsFolder;
@@ -137,6 +143,13 @@ class _ModelPickerState extends State<ModelPicker> {
         context,
       ).runtime.download(m, ModelCatalog.dirFor(_v));
       await _scanDownloaded();
+      // Gone (another Settings page is open now), this widget's copy of the
+      // settings is from before the download: handing it back would undo
+      // whatever was changed since. Only the model goes to the newer copy.
+      if (!mounted) {
+        widget.onDownloaded?.call((s) => _fitSpan(s.copyWith(modelPath: path)));
+        return;
+      }
       widget.onChanged(_fitSpan(_v.copyWith(modelPath: path)));
     } catch (e) {
       if (mounted) setState(() => _builtInError = '${m.name}: $e');

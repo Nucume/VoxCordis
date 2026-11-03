@@ -82,39 +82,41 @@ class SettingsTabBar extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(_pad),
         decoration: _glass(context, 999, sheen: false),
-        child: TabBar(
-          isScrollable: true,
-          tabAlignment: TabAlignment.start,
-          dividerColor: Colors.transparent,
-          indicatorSize: TabBarIndicatorSize.tab,
-          indicator: _pill(context, 999),
-          labelPadding: const EdgeInsets.symmetric(horizontal: 14),
-          labelColor: palette.text,
-          unselectedLabelColor: palette.textMuted,
-          labelStyle: const TextStyle(
-            fontSize: 14,
-            fontWeight: FontWeight.w600,
-          ),
-          unselectedLabelStyle: const TextStyle(fontSize: 14),
-          splashBorderRadius: BorderRadius.circular(999),
-          overlayColor: WidgetStateProperty.resolveWith(
-            (states) =>
-                states.contains(WidgetState.hovered) ? palette.tile : null,
-          ),
-          tabs: [
-            for (final p in pages)
-              Tab(
-                height: 34,
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(p.icon, size: 17),
-                    const SizedBox(width: 8),
-                    Text(p.label),
-                  ],
+        child: _ArrowsWhenCut(
+          child: TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.start,
+            dividerColor: Colors.transparent,
+            indicatorSize: TabBarIndicatorSize.tab,
+            indicator: _pill(context, 999),
+            labelPadding: const EdgeInsets.symmetric(horizontal: 14),
+            labelColor: palette.text,
+            unselectedLabelColor: palette.textMuted,
+            labelStyle: const TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w600,
+            ),
+            unselectedLabelStyle: const TextStyle(fontSize: 14),
+            splashBorderRadius: BorderRadius.circular(999),
+            overlayColor: WidgetStateProperty.resolveWith(
+              (states) =>
+                  states.contains(WidgetState.hovered) ? palette.tile : null,
+            ),
+            tabs: [
+              for (final p in pages)
+                Tab(
+                  height: 34,
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(p.icon, size: 17),
+                      const SizedBox(width: 8),
+                      Text(p.label),
+                    ],
+                  ),
                 ),
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -236,6 +238,193 @@ class _RailRowState extends State<_RailRow> {
           ),
         );
       },
+    );
+  }
+}
+
+/// Arrows at the ends of a scrolling tab bar that doesn't fit, each shown
+/// while there is more to see on its side. A click moves most of a width.
+class _ArrowsWhenCut extends StatefulWidget {
+  const _ArrowsWhenCut({required this.child});
+
+  final Widget child;
+
+  @override
+  State<_ArrowsWhenCut> createState() => _ArrowsWhenCutState();
+}
+
+class _ArrowsWhenCutState extends State<_ArrowsWhenCut> {
+  bool _left = false;
+  bool _right = false;
+
+  /// The tab bar's own scroll view.
+  ScrollPosition? _position;
+  bool _checking = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _check();
+  }
+
+  @override
+  void dispose() {
+    _position?.removeListener(_check);
+    super.dispose();
+  }
+
+  /// Looks again after this frame, once the bar has its size.
+  void _check() {
+    if (_checking) return;
+    _checking = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _checking = false;
+      if (!mounted) return;
+      final p = _position ?? _find();
+      if (p == null || !p.hasContentDimensions || !p.hasPixels) return;
+      final left = p.pixels > p.minScrollExtent + 1;
+      final right = p.pixels < p.maxScrollExtent - 1;
+      if (left != _left || right != _right) {
+        setState(() {
+          _left = left;
+          _right = right;
+        });
+      }
+    });
+    WidgetsBinding.instance.ensureVisualUpdate();
+  }
+
+  ScrollPosition? _find() {
+    ScrollableState? found;
+    void visit(Element e) {
+      if (found != null) return;
+      if (e is StatefulElement && e.state is ScrollableState) {
+        found = e.state as ScrollableState;
+        return;
+      }
+      e.visitChildren(visit);
+    }
+
+    context.visitChildElements(visit);
+    _position = found?.position?..addListener(_check);
+    return _position;
+  }
+
+  void _move(int direction) {
+    final p = _position;
+    if (p == null) return;
+    final to = (p.pixels + direction * p.viewportDimension * 0.7).clamp(
+      p.minScrollExtent,
+      p.maxScrollExtent,
+    );
+    p.animateTo(
+      to,
+      duration: const Duration(milliseconds: 320),
+      curve: Curves.easeOutCubic,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // A new size (the window, the page) can cut the bar or uncut it.
+    return NotificationListener<ScrollMetricsNotification>(
+      onNotification: (_) {
+        _check();
+        return false;
+      },
+      child: NotificationListener<SizeChangedLayoutNotification>(
+        onNotification: (_) {
+          _check();
+          return false;
+        },
+        child: SizeChangedLayoutNotifier(
+          child: Stack(
+            children: [
+              widget.child,
+              Positioned(
+                left: 0,
+                top: 0,
+                bottom: 0,
+                child: _Arrow(
+                  shown: _left,
+                  icon: Icons.chevron_left_rounded,
+                  tooltip: 'More settings to the left',
+                  onTap: () => _move(-1),
+                ),
+              ),
+              Positioned(
+                right: 0,
+                top: 0,
+                bottom: 0,
+                child: _Arrow(
+                  shown: _right,
+                  icon: Icons.chevron_right_rounded,
+                  tooltip: 'More settings to the right',
+                  onTap: () => _move(1),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Arrow extends StatelessWidget {
+  const _Arrow({
+    required this.shown,
+    required this.icon,
+    required this.tooltip,
+    required this.onTap,
+  });
+
+  final bool shown;
+  final IconData icon;
+  final String tooltip;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final accent = Theme.of(context).colorScheme.primary;
+    return IgnorePointer(
+      ignoring: !shown,
+      child: AnimatedOpacity(
+        opacity: shown ? 1 : 0,
+        duration: const Duration(milliseconds: 180),
+        child: AnimatedScale(
+          scale: shown ? 1 : 0.6,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOutBack,
+          child: Center(
+            child: Tooltip(
+              message: tooltip,
+              child: Material(
+                // Solid enough that the tab under it doesn't show through.
+                color: Color.alphaBlend(
+                  accent.withValues(alpha: 0.18),
+                  palette.background,
+                ),
+                shape: CircleBorder(
+                  side: BorderSide(color: accent.withValues(alpha: 0.45)),
+                ),
+                elevation: 4,
+                shadowColor: Colors.black54,
+                child: InkWell(
+                  customBorder: const CircleBorder(),
+                  onTap: onTap,
+                  child: SizedBox(
+                    width: 30,
+                    height: 30,
+                    child: Icon(icon, size: 20, color: palette.text),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
     );
   }
 }

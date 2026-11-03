@@ -174,6 +174,13 @@ void main() {
     expect(s.otherCompanions, isEmpty);
     expect(s.userName, 'Sam');
     expect(s.modelPath, '/models/a.gguf');
+    // The next first companion doesn't start with the deleted one's looks.
+    const fresh = AppSettings();
+    expect(s.pronouns, fresh.pronouns);
+    expect(s.traits, fresh.traits);
+    expect(s.accentColor, fresh.accentColor);
+    expect(s.backgroundColors, isEmpty);
+    expect(s.portraitPath, isNull);
   });
 
   test('a folder holding other files is not deleted', () {

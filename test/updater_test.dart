@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:companion/services/runtime/download.dart';
 import 'package:companion/services/updater.dart';
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -163,5 +164,130 @@ void main() {
       Updater.packageRepoPage,
       'https://nucume.github.io/VoxCordisPR/repo/',
     );
+  });
+
+  test('leftover installers in the temporary folder are deleted', () async {
+    final temp = Directory.systemTemp.createTempSync('upd');
+    addTearDown(() => temp.deleteSync(recursive: true));
+    File('${temp.path}/VoxCordis-0.3.7-setup.exe').writeAsStringSync('x');
+    File('${temp.path}/VoxCordis-0.4.0-rc.1-setup.exe').writeAsStringSync('x');
+    File('${temp.path}/other-setup.exe').writeAsStringSync('x');
+    File('${temp.path}/VoxCordis-notes.txt').writeAsStringSync('x');
+
+    await Updater.deleteLeftoverInstallers(temp: temp);
+
+    final left = [for (final e in temp.listSync()) e.uri.pathSegments.last]
+      ..sort();
+    expect(left, ['VoxCordis-notes.txt', 'other-setup.exe']);
+  });
+
+  test('a failed install keeps the database open', () async {
+    final dir = await Directory.systemTemp.createTemp('update');
+    addTearDown(() => dir.delete(recursive: true));
+    final appImage = '${dir.path}/VoxCordis.AppImage';
+    // A folder where the AppImage should be: putting the new one there
+    // fails after the download.
+    await Directory('$appImage/in-use').create(recursive: true);
+    final bytes = utf8.encode('the new version');
+    final u = Updater(
+      client: MockClient((_) async => http.Response.bytes(bytes, 200)),
+      environment: {'APPIMAGE': appImage},
+    );
+    final info = UpdateInfo(
+      version: '99.0.0',
+      notes: '',
+      pageUrl: '',
+      assetUrl: 'https://github.com/x/y/VoxCordis-x86_64.AppImage',
+      assetSize: bytes.length,
+      assetSha256: sha256.convert(bytes).toString(),
+    );
+    final steps = <String>[];
+    await u.install(
+      info,
+      beforeExit: () async => steps.add('stop the model server'),
+      atExit: () async => steps.add('close the database'),
+    );
+    expect(u.status, UpdateStatus.failed);
+    expect(u.error, startsWith('The update failed'));
+    expect(steps, ['stop the model server']);
+  });
+
+  group('a finished install', () {
+    final bytes = utf8.encode('the new version');
+    final info = UpdateInfo(
+      version: '99.0.0',
+      notes: '',
+      pageUrl: '',
+      assetUrl: 'https://github.com/x/y/VoxCordis-x86_64.AppImage',
+      assetSize: bytes.length,
+      assetSha256: sha256.convert(bytes).toString(),
+    );
+    late List<String> steps;
+    late String appImage;
+
+    setUp(() async {
+      steps = [];
+      final dir = await Directory.systemTemp.createTemp('update');
+      addTearDown(() => dir.delete(recursive: true));
+      appImage = '${dir.path}/VoxCordis.AppImage';
+      await File(appImage).writeAsString('the old version');
+    });
+
+    Updater updater({Map<String, String>? environment, Object? startFails}) =>
+        Updater(
+          client: MockClient((_) async => http.Response.bytes(bytes, 200)),
+          environment: environment ?? {'APPIMAGE': appImage},
+          start: (program, args) async {
+            if (startFails != null) throw startFails;
+            steps.add('start the new version');
+          },
+          quit: () => steps.add('quit'),
+          failedStartPause: Duration.zero,
+        );
+
+    Future<void> install(Updater u) => u.install(
+      info,
+      beforeExit: () async => steps.add('stop the model server'),
+      atExit: () async => steps.add('close the database'),
+    );
+
+    test('closes the database before the new AppImage starts', () async {
+      final u = updater();
+      await install(u);
+      expect(steps, [
+        'stop the model server',
+        'close the database',
+        'start the new version',
+        'quit',
+      ]);
+      expect(await File(appImage).readAsString(), 'the new version');
+    });
+
+    test('quits when the new AppImage will not start', () async {
+      final u = updater(startFails: 'no exec');
+      await install(u);
+      expect(steps, ['stop the model server', 'close the database', 'quit']);
+      expect(u.status, UpdateStatus.installing);
+      expect(u.error, contains('did not start'));
+      expect(u.error, contains('open it again'));
+    });
+
+    test('closes the database once the Windows installer started', () async {
+      final u = updater(environment: {});
+      addTearDown(() async {
+        final setup = File(
+          '${Directory.systemTemp.path}${Platform.pathSeparator}'
+          'VoxCordis-99.0.0-setup.exe',
+        );
+        if (await setup.exists()) await setup.delete();
+      });
+      await install(u);
+      expect(steps, [
+        'stop the model server',
+        'start the new version',
+        'close the database',
+        'quit',
+      ]);
+    });
   });
 }

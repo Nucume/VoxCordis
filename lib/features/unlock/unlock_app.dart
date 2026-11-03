@@ -52,7 +52,16 @@ class UnlockScreen extends StatefulWidget {
 class _UnlockScreenState extends State<UnlockScreen> {
   final _field = TextEditingController();
   bool _hidden = true;
+
+  /// Something the human asked for is running: shown with a spinner.
   bool _busy = false;
+
+  /// Unlocked, and the app is starting: nothing else may run.
+  bool _done = false;
+
+  /// The quiet look for the stored key, while it runs. It never gets in
+  /// the way of typing the key.
+  Future<bool>? _looking;
   String? _problem;
   Timer? _again;
   int _tries = 0;
@@ -65,9 +74,15 @@ class _UnlockScreenState extends State<UnlockScreen> {
   @override
   void initState() {
     super.initState();
+    _keepLooking();
+  }
+
+  void _keepLooking() {
+    _again?.cancel();
+    if (_tries >= retries) return;
     _again = Timer.periodic(retryEvery, (t) {
       if (++_tries >= retries) t.cancel();
-      _tryStored(quiet: true);
+      _lookQuietly();
     });
   }
 
@@ -78,41 +93,67 @@ class _UnlockScreenState extends State<UnlockScreen> {
     super.dispose();
   }
 
+  /// Starts the app, once.
+  void _opened() {
+    if (_done) return;
+    _done = true;
+    _again?.cancel();
+    widget.onUnlocked();
+  }
+
+  /// Looks for the stored key by itself (the keyring may have unlocked),
+  /// leaving the field and the buttons as they are.
+  Future<void> _lookQuietly() async {
+    if (_busy || _done || _looking != null) return;
+    final look = _looking = widget.dbKey.unlock();
+    final bool ok;
+    try {
+      ok = await look;
+    } finally {
+      _looking = null;
+    }
+    if (ok && mounted) _opened();
+  }
+
+  /// Waits for a quiet look that is still running. True when it found
+  /// the key.
+  Future<bool> _lookFinished() async {
+    try {
+      await _looking;
+    } on Object {
+      // It failed: the key wasn't found.
+    }
+    return _done;
+  }
+
   /// Looks for the stored key again (the keyring may have unlocked).
-  Future<void> _tryStored({bool quiet = false}) async {
-    if (_busy) return;
+  Future<void> _tryStored() async {
+    if (_busy || _done) return;
     setState(() {
       _busy = true;
-      if (!quiet) _problem = null;
+      _problem = null;
     });
+    if (await _lookFinished()) return;
     final ok = await widget.dbKey.unlock();
     if (!mounted) return;
-    if (ok) {
-      _again?.cancel();
-      return widget.onUnlocked();
-    }
+    if (ok) return _opened();
     setState(() {
       _busy = false;
-      if (!quiet) {
-        _problem =
-            'The key still isn\'t there. Is your keyring (GNOME Keyring, '
-            'KWallet) unlocked?';
-      }
+      _problem =
+          'The key still isn\'t there. Is your keyring (GNOME Keyring, '
+          'KWallet) unlocked?';
     });
   }
 
   Future<void> _unlock() async {
-    if (_busy) return;
+    if (_busy || _done) return;
     setState(() {
       _busy = true;
       _problem = null;
     });
     final ok = await widget.dbKey.tryPassword(_field.text.trim());
     if (!mounted) return;
-    if (ok) {
-      _again?.cancel();
-      return widget.onUnlocked();
-    }
+    if (ok) return _opened();
     setState(() {
       _busy = false;
       _problem = "That isn't the key. Check for typos, or paste it again.";
@@ -120,6 +161,9 @@ class _UnlockScreenState extends State<UnlockScreen> {
   }
 
   Future<void> _startOver() async {
+    if (_busy || _done) return;
+    // No looking for the key by itself while the human decides.
+    _again?.cancel();
     final sure = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -146,10 +190,25 @@ class _UnlockScreenState extends State<UnlockScreen> {
         ],
       ),
     );
-    if (sure != true || !mounted) return;
+    if (!mounted || _busy || _done) return;
+    if (sure != true) return _keepLooking();
     setState(() => _busy = true);
-    await widget.dbKey.setAside();
-    widget.onUnlocked();
+    // A look that was running may have found the key after all.
+    if (await _lookFinished() || !mounted) return;
+    try {
+      await widget.dbKey.setAside();
+    } on Object {
+      // A file in use (an antivirus or indexer on Windows) can't be moved.
+      if (!mounted) return;
+      setState(() {
+        _busy = false;
+        _problem =
+            "The chats couldn't be moved aside. Close any other program "
+            'using them and try again.';
+      });
+      return _keepLooking();
+    }
+    _opened();
   }
 
   @override

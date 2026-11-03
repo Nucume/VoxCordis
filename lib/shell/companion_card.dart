@@ -23,10 +23,18 @@ const _belowPortrait = 470.0;
 const _minPortrait = 120.0;
 
 class CompanionCard extends StatelessWidget {
-  const CompanionCard({super.key, required this.chat, required this.onOpenDay});
+  const CompanionCard({
+    super.key,
+    required this.chat,
+    required this.onOpenDay,
+    this.mayLeave,
+  });
 
   final ChatController chat;
   final ValueChanged<DateTime> onOpenDay;
+
+  /// See [CompanionSwitcher.mayLeave].
+  final Future<bool> Function()? mayLeave;
 
   @override
   Widget build(BuildContext context) {
@@ -68,6 +76,7 @@ class CompanionCard extends StatelessWidget {
         // the companion menu.
         CompanionSwitcher(
           chat: chat,
+          mayLeave: mayLeave,
           builder: (context, open) => Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Column(

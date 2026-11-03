@@ -42,15 +42,6 @@ The AppImage and the Windows installer update themselves in one click (the
 checksum GitHub lists and against the VoxCordis release signature before it
 is installed.
 
-### Code signing
-
-VoxCordis is currently being submitted to the
-[SignPath Foundation](https://signpath.org) for free code signing of its
-Windows releases (code signing by [SignPath.io](https://signpath.io),
-certificate by SignPath Foundation). It isn't signed yet, but once approved,
-Windows releases will be. Until then the installer is unsigned, so SmartScreen
-may warn the first time.
-
 ## What it does
 
 | | |
@@ -66,6 +57,7 @@ may warn the first time.
 | **Skills** | Teach the companion particular things, like proofreading or a morning briefing, or call one up with `/name`. Claude skills (SKILL.md, .zip, .skill) import as they are. |
 | **Your computer (opt-in)** | Off by default. When on, the companion can run commands and open apps, folders, files and web pages, and asks you every time unless you allowed that exact request. |
 | **Drawing** | Drawn on your computer with stable-diffusion.cpp (SDXL, anime and photo models, or your own .safetensors with LoRAs), or through an InvokeAI you run. The companion picks the model and LoRAs itself, and you can draw by hand in the Images tab. |
+| **Video (extreme early access)** | Press Animate on a picture to turn it into a short clip, made on your computer with Wan 2.2, LTX 2.5 or MiniMax H3 (the last two with sound). Very new and barely tested: it needs a strong graphics card and a lot of memory, and may crash or run out of memory. |
 | **Seeing** | Models that can see look at pictures themselves; for others, a small "Eyes" model describes them on your computer. |
 | **Poke** | After a few hours of silence the companion may write, tidy its notes or wander the web. Never during quiet hours. |
 | **Export and import** | Export a companion to a password-locked ZIP and bring it back here or on another computer. Exports from other companion apps import too. |

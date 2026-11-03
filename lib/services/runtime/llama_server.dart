@@ -138,6 +138,7 @@ class LlamaServer {
           throw LlamaServerException(
             'The model took too long to load.',
             server.recentLog,
+            timedOut: true,
           );
         }
         try {
@@ -225,9 +226,12 @@ String serverExitHint(int code, String log) {
 }
 
 class LlamaServerException implements Exception {
-  LlamaServerException(this.message, this.log);
+  LlamaServerException(this.message, this.log, {this.timedOut = false});
   final String message;
   final String log;
+
+  /// It was still loading when its time ran out, rather than stopping.
+  final bool timedOut;
 
   @override
   String toString() {

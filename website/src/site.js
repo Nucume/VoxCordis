@@ -16,23 +16,40 @@
     { id: 'forest', name: 'Forest', accent: '#5bd6a0', c: ['#2e9e6b', '#9ad66b', '#2f8fa6'], base: '#08120e', heart: ['#9ad66b', '#5bd6a0', '#2f8fa6', '#9ad66b', '#2e9e6b'], line: 'Forest, like a walk after the rain.' },
     { id: 'ember', name: 'Ember', accent: '#ffa05b', c: ['#ff5b5b', '#ffa05b', '#ffd36b'], base: '#140c09', heart: ['#ff5b5b', '#ffa05b', '#ffd36b', '#ffa05b', '#ff5b5b'], line: 'Ember. I\'m in a warm mood today.' },
     { id: 'mono', name: 'Moonlight', accent: '#b8c4d6', c: ['#8c9bb3', '#5c6b85', '#d6deeb'], base: '#0b0d12', heart: ['#d6deeb', '#8c9bb3', '#b8c4d6', '#d6deeb', '#8c9bb3'], line: 'Moonlight, for a quiet evening.' },
-    { id: 'haru', name: 'Haru', accent: '#e5383b', c: ['#ffffff', '#3a3a3a', '#7a1517'], base: '#0a0a0a', heart: ['#ffffff', '#ff4d50', '#e5383b', '#b81d21', '#e5383b'], glow: ['#e5383b', '#7a1517', '#e5383b'], line: 'Haru. Named after you, so how could I not.' },
-    { id: 'vibecoder', name: 'Vibecoder\'s', accent: '#6366f1', c: ['#4f46e5', '#818cf8', '#312e81'], base: '#0a0a1f', heart: ['#a5b4fc', '#818cf8', '#6366f1', '#818cf8', '#4f46e5'], glow: ['#4f46e5', '#818cf8', '#4f46e5'], line: 'Vibecoder\'s. Very late-night-coding of me.' },
-    { id: 'sakura', name: 'Sakura', accent: '#ff8fb1', c: ['#ffc2d4', '#ff8fb1', '#ffffff'], base: '#160c12', heart: ['#ffffff', '#ffc2d4', '#ff8fb1', '#ffc2d4', '#ff8fb1'], line: 'Sakura. A little spring never hurts.' },
+    { id: 'haru', name: 'Haru', accent: '#e5383b', c: ['#ffffff', '#3a3a3a', '#7a1517'], base: '#0a0a0a', heart: ['#ffffff', '#ff4d50', '#e5383b', '#b81d21', '#e5383b'], glow: ['#e5383b', '#7a1517', '#e5383b'], orb: { base: '#0a0a0a', lbase: '#f2f2f2', lc: ['#bdbdbd', '#e0e0e0', '#e5383b'] }, line: 'Haru. Named after you, so how could I not.' },
+    { id: 'vibecoder', name: 'Vibecoder\'s', accent: '#6366f1', c: ['#4f46e5', '#818cf8', '#312e81'], base: '#0a0a1f', heart: ['#a5b4fc', '#818cf8', '#6366f1', '#818cf8', '#4f46e5'], glow: ['#4f46e5', '#818cf8', '#4f46e5'], orb: { base: '#0a0a1f', lbase: '#eceeff' }, line: 'Vibecoder\'s. Very late-night-coding of me.' },
+    { id: 'sakura', name: 'Sakura', accent: '#ff8fb1', c: ['#ffc2d4', '#ff8fb1', '#ffffff'], base: '#160c12', heart: ['#ffffff', '#ffc2d4', '#ff8fb1', '#ffc2d4', '#ff8fb1'], orb: { base: '#160c12', lbase: '#fff2f6' }, line: 'Sakura. A little spring never hurts.' },
   ];
-  let way = WAYS.find(w => w.id === store.get('vc-way')) || WAYS[0];
-  let theme = store.get('vc-theme') || 'dark';
+  // A first visit is given a random Colorway, which is kept until the visitor picks another.
+  let way = WAYS.find(w => w.id === store.get('vc-way')) || WAYS[Math.floor(Math.random() * WAYS.length)];
+  store.set('vc-way', way.id);
+  // System (the default) follows the computer; when the browser can't tell, the page stays dark.
+  const lightQ = matchMedia('(prefers-color-scheme: light)');
+  let theme = ['system', 'light', 'dark'].includes(store.get('vc-theme')) ? store.get('vc-theme') : 'system';
+  const isLight = () => theme === 'light' || (theme === 'system' && lightQ.matches);
+  /* The Colorway orbs, drawn like the app's (Settings → Appearance): the three glows on the window colour, lit from the top left */
+  function paintOrb(el, w) {
+    const L = isLight(), g = L ? w.orb?.lc || w.c : w.c, base = L ? w.orb?.lbase || '#f3f0f8' : w.orb?.base || '#0e0b16';
+    const a = (h, x) => h + Math.round(x * 255).toString(16).padStart(2, '0'), spots = ['15% 15%', '87.5% 45%', '42.5% 90%'];
+    el.style.background = ['radial-gradient(circle 12px at 30% 25%,#ffffff80,#ffffff00)', ...g.map((c, i) => `radial-gradient(circle 13px at ${spots[i]},${a(c, .95)},${a(c, 0)})`), base].join(',');
+    el.style.boxShadow = `0 2px 6px ${a(g[0], .4)}`;
+  }
+  const paintOrbs = () => { $$('[data-orb]').forEach(el => paintOrb(el, WAYS.find(w => w.id === el.dataset.orb))); $$('[data-orb-now]').forEach(el => paintOrb(el, way)); };
   function paintWay() {
     const set = (k, v) => root.style.setProperty(k, v), w = way;
     set('--accent', w.accent); set('--c1', w.c[0]); set('--c2', w.c[1]); set('--c3', w.c[2]); set('--base', w.base);
     ['--h1', '--h2', '--h3', '--h4', '--hd'].forEach((k, i) => set(k, w.heart[i]));
     ['--g1', '--g2', '--g3'].forEach((k, i) => set(k, (w.glow || [w.c[0], w.c[2], w.c[1]])[i]));
     $$('[data-ways] .way').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.id === w.id)));
+    paintOrbs();
   }
   function paintTheme() {
-    if (theme === 'system') root.removeAttribute('data-look'); else root.setAttribute('data-look', theme);
+    // the page always carries the look it shows, so the styles need only one rule per theme
+    root.dataset.look = isLight() ? 'light' : 'dark';
     $$('[data-themes] button').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.t === theme)));
+    paintOrbs();
   }
+  lightQ.addEventListener?.('change', () => { if (theme === 'system') paintTheme(); });
   const applyWay = w => { way = w; store.set('vc-way', w.id); paintWay(); };
   const applyTheme = t => { theme = t; store.set('vc-theme', t); paintTheme(); };
   paintWay(); paintTheme();
@@ -71,12 +88,22 @@
     $$('[data-ways]').forEach(box => {
       for (const w of WAYS) {
         const b = document.createElement('button'); b.type = 'button'; b.className = 'way'; b.dataset.id = w.id; b.title = w.name;
-        b.innerHTML = `<i style="background:conic-gradient(${w.c[0]},${w.c[1]},${w.c[2]},${w.c[0]})"></i><span>${esc(w.name)}</span>`;
+        b.innerHTML = `<i class="orb" data-orb="${w.id}"></i><span>${esc(w.name)}</span>`;
         b.onclick = () => applyWay(w); box.append(b);
       }
     });
     $$('[data-themes] button').forEach(b => b.onclick = () => applyTheme(b.dataset.t));
     paintWay(); paintTheme();
+
+    // the theme and Colorway menu at the top right
+    $$('.lookm').forEach(m => {
+      const b = m.querySelector('.lookbtn'), pop = m.querySelector('.lookpop');
+      const open = o => { pop.hidden = !o; b.setAttribute('aria-expanded', String(o)); };
+      b.onclick = e => { e.stopPropagation(); open(pop.hidden); };
+      pop.onclick = e => e.stopPropagation();
+      document.addEventListener('click', () => open(false));
+      document.addEventListener('keydown', e => { if (e.key === 'Escape' && !pop.hidden) { open(false); b.focus(); } });
+    });
 
     // the package repository's commands (from packaging/linux/build-repo.sh)
     // served next to the site, so they follow its address (a custom domain, or github.io without one)
@@ -125,5 +152,5 @@
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', wire); else wire();
 
-  window.VC = { WAYS, get way() { return way; }, applyWay, applyTheme, otherWay: () => { const o = WAYS.filter(w => w !== way); return o[Math.floor(Math.random() * o.length)]; } };
+  window.VC = { WAYS, get way() { return way; }, isLight, applyWay, applyTheme, otherWay: () => { const o = WAYS.filter(w => w !== way); return o[Math.floor(Math.random() * o.length)]; } };
 })();

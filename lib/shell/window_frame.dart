@@ -74,7 +74,9 @@ class TitleBarChoice with WindowListener {
       system.value = true;
       return;
     }
-    if (!system.value) await _apply();
+    // Linux too with the system's bar: on the first start after the data
+    // folder moved, the runner did not see the flag yet and hid it.
+    if (!system.value || Platform.isLinux) await _apply();
   }
 
   static Future<void> set({required bool systemBar}) async {

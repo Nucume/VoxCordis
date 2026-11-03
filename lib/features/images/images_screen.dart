@@ -16,7 +16,6 @@ import '../../services/images/image_catalog.dart';
 import '../../services/images/image_engine.dart';
 import '../../services/images/sd_runtime.dart';
 import '../../services/import/soulkyn_media.dart';
-import '../../services/updater.dart' show videoGenEnabled;
 import '../../services/system/file_actions.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass_popover.dart';
@@ -27,6 +26,7 @@ import 'resizable_field.dart';
 
 /// Every picture in `<companion folder>/images/`, and a panel to draw one by
 /// hand. Models, LoRAs and the switch live in Settings → Images.
+
 class ImagesScreen extends StatefulWidget {
   const ImagesScreen({super.key, this.onSettings});
 
@@ -47,6 +47,7 @@ class _ImagesScreenState extends State<ImagesScreen> {
   final _height = TextEditingController();
   bool _drawOpen = false;
   bool _advanced = false;
+  bool _lorasOpen = false;
   String _shape = 'square';
   String? _model;
 
@@ -168,6 +169,7 @@ class _ImagesScreenState extends State<ImagesScreen> {
     _loaded = true;
     final saved = s.draw;
     _advanced = saved.advanced;
+    _lorasOpen = saved.lorasOpen;
     _shape = saved.shape;
     _model =
         (ready.where((m) => m.id == saved.model).firstOrNull ??
@@ -227,14 +229,24 @@ class _ImagesScreenState extends State<ImagesScreen> {
   }
 
   /// Keeps the Advanced switch, the shape or the model.
-  void _remember({bool? advanced, String? shape, String? model}) {
+  void _remember({
+    bool? advanced,
+    String? shape,
+    String? model,
+    bool? lorasOpen,
+  }) {
     final store = _store;
     if (store == null) return;
     final draw = store.value.draw;
     unawaited(
       store.update(
         store.value.copyWith(
-          draw: draw.copyWith(advanced: advanced, shape: shape, model: model),
+          draw: draw.copyWith(
+            advanced: advanced,
+            shape: shape,
+            model: model,
+            lorasOpen: lorasOpen,
+          ),
         ),
       ),
     );
@@ -507,9 +519,7 @@ class _ImagesScreenState extends State<ImagesScreen> {
                             onTap: () => showPicture(
                               context,
                               files[i],
-                              onAnimate: videoGenEnabled
-                                  ? (f) => _animate(f)
-                                  : null,
+                              onAnimate: _animate,
                               onDeleted: _reloadImages,
                             ),
                             child: Hero(
@@ -646,10 +656,13 @@ class _ImagesScreenState extends State<ImagesScreen> {
               ],
             ),
             if (loras.isNotEmpty) ...[
-              const SizedBox(height: 10),
-              Text('LoRAs', style: muted),
-              const SizedBox(height: 6),
-              LoraGrid(
+              const SizedBox(height: 8),
+              LoraSection(
+                open: _lorasOpen,
+                onToggle: () {
+                  setState(() => _lorasOpen = !_lorasOpen);
+                  _remember(lorasOpen: _lorasOpen);
+                },
                 loras: loras,
                 picked: _loras,
                 onChanged: (name, weight) {

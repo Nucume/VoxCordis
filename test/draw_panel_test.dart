@@ -178,6 +178,10 @@ void main() {
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pump();
     expect(tester.widget<TextField>(field('Height')).controller!.text, '256');
+    // The LoRAs start folded away, and stay open once opened.
+    expect(find.text('grain'), findsNothing);
+    await tester.tap(find.text('LoRAs'));
+    await tester.pumpAndSettle();
     await tester.tap(find.text('grain'));
     await tester.pump(const Duration(seconds: 1));
 
@@ -208,5 +212,6 @@ void main() {
     expect(tester.widget<TextField>(field('Height')).controller!.text, '256');
     expect(find.text('0.8'), findsOneWidget);
     expect(services.settings.value.draw.advanced, isTrue);
+    expect(services.settings.value.draw.lorasOpen, isTrue);
   });
 }

@@ -23,9 +23,14 @@ class CompanionSwitcher extends StatefulWidget {
     super.key,
     required this.chat,
     required this.builder,
+    this.mayLeave,
   });
 
   final ChatController chat;
+
+  /// Asked before the window is rebuilt around another companion: Settings
+  /// offers to save what was changed there. False keeps the current one.
+  final Future<bool> Function()? mayLeave;
 
   /// The portrait and name; [open] turns the little chevron.
   final Widget Function(BuildContext context, bool open) builder;
@@ -93,19 +98,25 @@ class _CompanionSwitcherState extends State<CompanionSwitcher>
     if (_waitForReply()) return;
     final services = AppScope.of(context);
     await _close();
+    if (!await (widget.mayLeave?.call() ?? Future.value(true))) return;
+    // A reminder may have started a reply while Settings asked.
+    if (!mounted || _waitForReply()) return;
     await services.switchCompanion(services.settings.value.switchedTo(c));
   }
 
   Future<void> _add() async {
     if (_waitForReply()) return;
     final services = AppScope.of(context);
-    final s = services.settings.value;
     await _close();
+    if (!await (widget.mayLeave?.call() ?? Future.value(true))) return;
+    final s = services.settings.value;
     if (!s.toldAboutMoreCompanions) {
       if (!mounted) return;
       final go = await showOneCompanionNotice(context, s.companionName);
       if (go != true) return;
     }
+    // A reminder may have started a reply while a dialog was open.
+    if (!mounted || _waitForReply()) return;
     services.addingCompanion.value = true;
     if (!s.toldAboutMoreCompanions) {
       await services.settings.update(

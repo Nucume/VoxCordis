@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -12,16 +13,41 @@ import 'package:companion/services/runtime/runtime_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
-/// A fake server: a request about a rewrite gets [lesson], any other one
-/// a long-winded reply.
-Future<(HttpServer, List<Map>)> _mockLlm(String lesson) async {
+/// A lesson request the fake server never answers: [asked] completes
+/// when it comes in, [closed] when the app gives up on it.
+class _Hang {
+  final asked = Completer<void>();
+  final closed = Completer<void>();
+  final sockets = <Socket>[];
+}
+
+/// A fake server: a request about a rewrite gets [lesson] (or, with
+/// [hang], no answer at all), any other one a long-winded reply.
+Future<(HttpServer, List<Map>)> _mockLlm(String lesson, {_Hang? hang}) async {
   final requests = <Map>[];
   final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
   server.listen((req) async {
     final body = jsonDecode(await utf8.decodeStream(req)) as Map;
     requests.add(body);
     final system = ((body['messages'] as List).first as Map)['content'];
-    final text = '$system'.contains('rewrote one of')
+    final isLesson = '$system'.contains('rewrote one of');
+    if (hang != null && isLesson) {
+      req.response.headers.contentType = ContentType('text', 'event-stream');
+      final socket = await req.response.detachSocket();
+      hang.sockets.add(socket);
+      socket.listen(
+        (_) {},
+        onDone: () {
+          if (!hang.closed.isCompleted) hang.closed.complete();
+        },
+        onError: (_) {
+          if (!hang.closed.isCompleted) hang.closed.complete();
+        },
+      );
+      if (!hang.asked.isCompleted) hang.asked.complete();
+      return;
+    }
+    final text = isLesson
         ? lesson
         : 'Well, there are many teas, and honestly it depends on a great '
               'many things, but I would say green tea is lovely.';
@@ -41,8 +67,8 @@ Future<(HttpServer, List<Map>)> _mockLlm(String lesson) async {
   return (server, requests);
 }
 
-Future<(AppServices, List<Map>)> _services(String lesson) async {
-  final (server, requests) = await _mockLlm(lesson);
+Future<(AppServices, List<Map>)> _services(String lesson, {_Hang? hang}) async {
+  final (server, requests) = await _mockLlm(lesson, hang: hang);
   final tmp = await Directory.systemTemp.createTemp('edit_lesson');
   final db = await openAppDatabase(inMemoryDatabasePath);
   final services = AppServices(
@@ -62,6 +88,9 @@ Future<(AppServices, List<Map>)> _services(String lesson) async {
     runtime: RuntimeController(tmp),
   );
   addTearDown(() async {
+    for (final s in hang?.sockets ?? const <Socket>[]) {
+      s.destroy();
+    }
     await server.close(force: true);
     await db.close();
     await tmp.delete(recursive: true);
@@ -181,4 +210,43 @@ void main() {
     chat.skipLesson();
     expect(chat.lessonOffer, isNull);
   });
+
+  test('closing the chat stops a lesson still being worked out', () async {
+    final hang = _Hang();
+    final (services, _) = await _services('NONE', hang: hang);
+    final chat = ChatController(services);
+    await chat.send('Which tea?');
+    await chat.editReply(chat.messages.last, 'Genmaicha.');
+    await hang.asked.future.timeout(const Duration(seconds: 5));
+    expect(chat.lessonOffer?.thinking, isTrue);
+    expect(services.runtime.busy, isTrue);
+
+    // Switching companion throws this chat away.
+    chat.dispose();
+    await hang.closed.future.timeout(const Duration(seconds: 5));
+    for (var i = 0; i < 200 && services.runtime.busy; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+    }
+    expect(services.runtime.busy, isFalse);
+  });
+
+  test(
+    'a reply that starts drops a lesson being worked out, and says so',
+    () async {
+      final hang = _Hang();
+      final (services, _) = await _services('NONE', hang: hang);
+      final chat = ChatController(services);
+      await chat.send('Which tea?');
+      await chat.editReply(chat.messages.last, 'Genmaicha.');
+      await hang.asked.future.timeout(const Duration(seconds: 5));
+
+      await chat.send('Thanks');
+      expect(chat.lessonOffer, isNull);
+      expect(
+        chat.toolNote,
+        'Dropped the lesson from that edit: a reply started',
+      );
+      await hang.closed.future.timeout(const Duration(seconds: 5));
+    },
+  );
 }

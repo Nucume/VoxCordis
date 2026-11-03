@@ -74,6 +74,9 @@ void main() {
     await tester.pumpAndSettle();
     expect(services.settings.value.settingsTabs, SettingsTabs.side);
     expect(find.byType(TabBar), findsNothing);
+    // Save must not undo it: the page's copy is merged with the live look.
+    final page = tester.state<SettingsScreenState>(find.byType(SettingsScreen));
+    expect(page.changed, isFalse);
     // Still on Appearance.
     expect(find.text('Settings tabs'), findsOneWidget);
 

@@ -377,7 +377,7 @@ class ChatController extends ChangeNotifier {
       client.close();
       if (identical(_lessonHttp, client)) _lessonHttp = null;
       _services.runtime.release(_services.settings.value);
-      notifyListeners();
+      if (!_disposed) notifyListeners();
     }
   }
 
@@ -386,6 +386,17 @@ class ChatController extends ChangeNotifier {
     _lessonHttp = null;
     c?.close();
     lessonOffer = null;
+  }
+
+  bool _disposed = false;
+
+  /// A lesson still being worked out stops with the chat, so it doesn't
+  /// keep the model busy for a chat nobody sees any more.
+  @override
+  void dispose() {
+    _disposed = true;
+    _cancelLesson();
+    super.dispose();
   }
 
   /// Saves the offered lesson, as [rule] when the human reworded it, to
@@ -975,9 +986,12 @@ class ChatController extends ChangeNotifier {
     _unattended = scheduled?.kind == ScheduleKind.task || poke != null;
     // A summary being written would keep this reply waiting.
     _services.storyKeeper.cancel();
-    if (lessonOffer?.thinking ?? false) _cancelLesson();
+    final droppedLesson = lessonOffer?.thinking ?? false;
+    if (droppedLesson) _cancelLesson();
     error = null;
-    toolNote = null;
+    toolNote = droppedLesson
+        ? 'Dropped the lesson from that edit: a reply started'
+        : null;
     stopped = false;
     _stopRequested = false;
     busy = true;

@@ -31,6 +31,9 @@ class RuntimeInstaller {
   final http.Client _http;
   final Future<int?> Function() _nvidiaDriver;
 
+  /// Told why the CUDA build was not used, so Settings → Logs can say.
+  void Function(String message)? note;
+
   /// Oldest NVIDIA driver (major version) that runs CUDA 12.x builds. With an
   /// older one the CUDA backend would fail to load and llama.cpp would quietly
   /// fall back to the CPU, which is far slower than Vulkan.
@@ -63,8 +66,13 @@ class RuntimeInstaller {
     return null;
   }
 
+  /// Set when the CUDA build would not start, or hung, this run. It stays
+  /// off until the app is started again, even when the marker below runs
+  /// out.
+  bool _cudaFailed = false;
+
   Future<bool> _wantCuda() async {
-    if (Platform.isMacOS) return false;
+    if (Platform.isMacOS || _cudaFailed) return false;
     // Tried again a day later, so a release that gains a CUDA build, or a
     // network that was down, gets another go.
     final marker = File(_noCudaMarker);
@@ -91,12 +99,20 @@ class RuntimeInstaller {
 
   Future<String?> _installLinuxCuda({DownloadProgress? onProgress}) async {
     try {
-      if (!updateRepo.contains('/')) return null;
+      if (!updateRepo.contains('/')) {
+        note?.call('CUDA build skipped: no release repository is set.');
+        return null;
+      }
       final res = await _http.get(
         Uri.parse('https://api.github.com/repos/$updateRepo/releases/latest'),
         headers: {'Accept': 'application/vnd.github+json'},
       );
-      if (res.statusCode != 200) return null;
+      if (res.statusCode != 200) {
+        note?.call(
+          'CUDA build skipped: GitHub answered HTTP ${res.statusCode} for the latest release of $updateRepo.',
+        );
+        return null;
+      }
       final assets = (jsonDecode(res.body) as Map)['assets'] as List;
       Map? file;
       Map? sig;
@@ -105,13 +121,21 @@ class RuntimeInstaller {
         if (a['name'] == '$linuxCudaAsset.sig') sig = a;
       }
       final sha = sha256Digest(file?['digest']);
-      if (file == null || sig == null || sha == null) return null;
+      if (file == null || sig == null || sha == null) {
+        note?.call(
+          'CUDA build skipped: the latest release of $updateRepo has no signed $linuxCudaAsset yet.',
+        );
+        return null;
+      }
 
       final sigRes = await _http.get(
         Uri.parse(sig['browser_download_url'] as String),
       );
       if (sigRes.statusCode != 200 ||
           !await ReleaseSignature.verify(sha, sigRes.bodyBytes)) {
+        note?.call(
+          'CUDA build skipped: its signature did not check out (HTTP ${sigRes.statusCode}).',
+        );
         return null;
       }
       final tmp = Directory(p.join(supportDir.path, 'runtime', '.download'));
@@ -134,12 +158,43 @@ class RuntimeInstaller {
       }
       await staging.rename(cudaInstallDir.path);
       final exe = await _findIn(cudaInstallDir);
-      if (exe != null) PosixNative.makeExecutable(exe);
+      if (exe == null) {
+        note?.call('CUDA build skipped: llama-server was not in the download.');
+      } else {
+        PosixNative.makeExecutable(exe);
+        note?.call('Using the CUDA build of llama-server.');
+      }
       return exe;
-    } on Object {
+    } on Object catch (e) {
       // Offline, no such file yet, bad signature: Vulkan it is.
+      note?.call('CUDA build skipped: $e');
       return null;
     }
+  }
+
+  /// Whether [binary] is the CUDA build.
+  bool isCuda(String binary) => p.isWithin(cudaInstallDir.path, binary);
+
+  /// The CUDA build would not start but the other one did: use that from
+  /// now on (for the rest of this run, and for a day after, then CUDA is
+  /// tried again, as a newer release may have fixed it).
+  Future<void> giveUpOnCuda(String why) async {
+    _cudaFailed = true;
+    note?.call('The CUDA llama-server did not start, so Vulkan is used: $why');
+    final marker = File(_noCudaMarker);
+    await marker.create(recursive: true);
+    await marker.setLastModified(DateTime.now());
+  }
+
+  /// The CUDA build took too long to load a model: use the other one for
+  /// the rest of this run only. No marker is written, as the model may just
+  /// be too big, so CUDA gets another go at the next start.
+  void skipCudaThisRun() {
+    _cudaFailed = true;
+    note?.call(
+      'The CUDA llama-server took too long to load the model, so Vulkan is '
+      'used for the rest of this run.',
+    );
   }
 
   Directory get cudaInstallDir =>
@@ -151,29 +206,71 @@ class RuntimeInstaller {
   Directory get installDir =>
       Directory(p.join(supportDir.path, 'runtime', pinnedTag));
 
-  /// Path of a usable binary, or null if it still needs installing.
-  Future<String?> find() async {
+  /// Path of a usable binary, or null if it still needs installing. Without
+  /// [cuda] it is never the CUDA build.
+  Future<String?> find({bool cuda = true}) async {
     final bundled = File(
       p.join(p.dirname(Platform.resolvedExecutable), 'runtime', exeName),
     );
     if (await bundled.exists()) return bundled.path;
     // An NVIDIA card gets the CUDA build, which is quicker than Vulkan; a
     // Vulkan install from before then counts as missing so it is upgraded.
-    if (await _wantCuda()) return _findIn(cudaInstallDir);
+    if (cuda && await _wantCuda()) return _findIn(cudaInstallDir);
     return _findIn(installDir);
   }
 
+  Future<String>? _installing;
+  bool? _installingCuda;
+
+  /// Everyone waiting on [_installing] who wants to see its progress.
+  final _listeners = <DownloadProgress>[];
+
   /// Downloads and unpacks the runtime if needed; returns the binary path.
-  Future<String> ensureInstalled({DownloadProgress? onProgress}) async {
-    final existing = await find();
+  /// Without [cuda] it is never the CUDA build.
+  Future<String> ensureInstalled({
+    DownloadProgress? onProgress,
+    bool cuda = true,
+  }) async {
+    final existing = await find(cuda: cuda);
     if (existing != null) return existing;
 
-    final wantCuda = await _wantCuda();
+    final wantCuda = cuda && await _wantCuda();
+    // One install at a time, as they share the download folder: a second
+    // caller for the same build waits for the first one's and sees its
+    // progress too.
+    if (_installing case final running?) {
+      if (_installingCuda == wantCuda) {
+        if (onProgress != null) _listeners.add(onProgress);
+        return running;
+      }
+      try {
+        await running;
+      } catch (_) {
+        // Its caller says what went wrong.
+      }
+      return ensureInstalled(onProgress: onProgress, cuda: cuda);
+    }
+    _installingCuda = wantCuda;
+    if (onProgress != null) _listeners.add(onProgress);
+    return _installing =
+        _install(wantCuda, (received, total) {
+          for (final listener in List.of(_listeners)) {
+            listener(received, total);
+          }
+        }).whenComplete(() {
+          _installing = null;
+          _installingCuda = null;
+          _listeners.clear();
+        });
+  }
+
+  Future<String> _install(bool wantCuda, DownloadProgress? onProgress) async {
     if (wantCuda && Platform.isLinux) {
       final exe = await _installLinuxCuda(onProgress: onProgress);
       if (exe != null) return exe;
       await File(_noCudaMarker).create(recursive: true);
       await File(_noCudaMarker).setLastModified(DateTime.now());
+      note?.call('Using the Vulkan build of llama-server instead.');
       final vulkan = await _findIn(installDir);
       if (vulkan != null) return vulkan;
     }

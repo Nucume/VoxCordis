@@ -25,6 +25,16 @@ import 'chat_controller.dart';
 import 'chat_text.dart';
 import 'edit_lesson.dart';
 
+/// Enter comes in as a key press, but the letters typed just before it
+/// can still be on their way from the system's input method (on Linux
+/// they arrive later, on another channel). A short wait before [action]
+/// reads the text keeps the last letter in it.
+void _afterTyping(State state, VoidCallback action) {
+  Future.delayed(const Duration(milliseconds: 60), () {
+    if (state.mounted) action();
+  });
+}
+
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, required this.chat});
 
@@ -210,15 +220,7 @@ class _ChatScreenState extends State<ChatScreen> {
     });
   }
 
-  /// Enter comes in as a key press, but the letters typed just before it
-  /// can still be on their way from the system's input method (on Linux
-  /// they arrive later, on another channel). A short wait keeps the last
-  /// letter in this message instead of starting the next one with it.
-  void _sendFromKeyboard() {
-    Future.delayed(const Duration(milliseconds: 60), () {
-      if (mounted) _send();
-    });
-  }
+  void _sendFromKeyboard() => _afterTyping(this, _send);
 
   Future<void> _send() async {
     final text = _input.text;
@@ -1026,8 +1028,11 @@ class _BubbleState extends State<_Bubble> {
   @override
   void didUpdateWidget(_Bubble old) {
     super.didUpdateWidget(old);
-    // A reply starting elsewhere closes the editor; nothing is saved.
-    if (widget.onEdit == null && _edit != null && !_saving) _closeEditor();
+    // A reply starting elsewhere only holds off saving (onEdit is null
+    // until it's done): what the human typed stays in the editor.
+    if (widget.message.id != old.message.id && _edit != null && !_saving) {
+      _closeEditor();
+    }
   }
 
   @override
@@ -1172,7 +1177,9 @@ class _BubbleState extends State<_Bubble> {
                       _ReplyEditor(
                         controller: edit,
                         saving: _saving,
+                        canSave: widget.onEdit != null,
                         onSave: _save,
+                        onKeyboardSave: () => _afterTyping(this, _save),
                         onCancel: _closeEditor,
                       )
                     else ...[
@@ -1850,18 +1857,30 @@ class _ReplyEditor extends StatelessWidget {
   const _ReplyEditor({
     required this.controller,
     required this.saving,
+    required this.canSave,
     required this.onSave,
+    required this.onKeyboardSave,
     required this.onCancel,
   });
 
   final TextEditingController controller;
   final bool saving;
+
+  /// False while a reply is being written: the edit waits for it.
+  final bool canSave;
   final VoidCallback onSave;
+
+  /// Ctrl+Enter: [onSave] once the last typed letter is in.
+  final VoidCallback onKeyboardSave;
   final VoidCallback onCancel;
 
   @override
   Widget build(BuildContext context) {
     final muted = TextStyle(fontSize: 11, color: context.palette.textMuted);
+    void keyboardSave() {
+      if (canSave && !saving) onKeyboardSave();
+    }
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       mainAxisSize: MainAxisSize.min,
@@ -1869,8 +1888,9 @@ class _ReplyEditor extends StatelessWidget {
         CallbackShortcuts(
           bindings: {
             const SingleActivator(LogicalKeyboardKey.enter, control: true):
-                onSave,
-            const SingleActivator(LogicalKeyboardKey.enter, meta: true): onSave,
+                keyboardSave,
+            const SingleActivator(LogicalKeyboardKey.enter, meta: true):
+                keyboardSave,
             const SingleActivator(LogicalKeyboardKey.escape): onCancel,
           },
           child: TextField(
@@ -1897,7 +1917,9 @@ class _ReplyEditor extends StatelessWidget {
           children: [
             Expanded(
               child: Text(
-                'Ctrl+Enter saves · Esc cancels',
+                canSave
+                    ? 'Ctrl+Enter saves · Esc cancels'
+                    : 'You can save once the reply is written · Esc cancels',
                 style: muted,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -1908,7 +1930,7 @@ class _ReplyEditor extends StatelessWidget {
             ),
             const SizedBox(width: 4),
             FilledButton(
-              onPressed: saving ? null : onSave,
+              onPressed: saving || !canSave ? null : onSave,
               child: const Text('Save'),
             ),
           ],
@@ -2069,8 +2091,8 @@ class _LessonCardState extends State<_LessonCard> {
                       const SizedBox(height: 8),
                       CallbackShortcuts(
                         bindings: {
-                          const SingleActivator(LogicalKeyboardKey.enter):
-                              _keep,
+                          const SingleActivator(LogicalKeyboardKey.enter): () =>
+                              _afterTyping(this, _keep),
                         },
                         child: TextField(
                           controller: _rule,

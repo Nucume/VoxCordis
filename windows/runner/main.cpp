@@ -12,14 +12,24 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   // forward (out of the tray or the taskbar too) and quits.
   HANDLE single_instance =
       ::CreateMutexW(nullptr, TRUE, L"Local\\com.nucume.voxcordis.single");
-  if (single_instance != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS) {
+  bool running =
+      single_instance != nullptr && ::GetLastError() == ERROR_ALREADY_EXISTS;
+  // 0.3.7 and older (companion.exe) held another name; still running after
+  // an update, it comes forward the same way.
+  HANDLE older =
+      ::OpenMutexW(SYNCHRONIZE, FALSE, L"Local\\com.nucume.companion.single");
+  if (older != nullptr) {
+    ::CloseHandle(older);
+    running = true;
+  }
+  if (running) {
     HWND existing = ::FindWindowW(L"FLUTTER_RUNNER_WIN32_WINDOW", L"VoxCordis");
     if (existing != nullptr) {
       if (!::IsWindowVisible(existing)) ::ShowWindow(existing, SW_SHOW);
       if (::IsIconic(existing)) ::ShowWindow(existing, SW_RESTORE);
       ::SetForegroundWindow(existing);
     }
-    ::CloseHandle(single_instance);
+    if (single_instance != nullptr) ::CloseHandle(single_instance);
     return EXIT_SUCCESS;
   }
 

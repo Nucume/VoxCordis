@@ -11,7 +11,7 @@ class InterfaceScale extends StatelessWidget {
   const InterfaceScale({super.key, required this.scale, required this.child});
 
   /// The size the layout needs at 100%.
-  static const designSize = Size(1140, 720);
+  static const designSize = Size(820, 720);
 
   final double scale;
   final Widget child;

@@ -9,7 +9,6 @@ import '../../app_scope.dart';
 import '../../data/settings.dart';
 import '../../services/images/image_catalog.dart';
 import '../../services/invoke_client.dart';
-import '../../services/updater.dart' show videoGenEnabled;
 import '../../services/images/sd_runtime.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/download_bar.dart';
@@ -461,7 +460,7 @@ class _ImageSettingsState extends State<ImageSettings> {
                   ),
                 ],
               ),
-              if (videoGenEnabled) ...[
+              ...[
                 const SizedBox(height: 22),
                 Text('Video models', style: sectionStyle),
                 const SizedBox(height: 4),

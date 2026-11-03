@@ -564,7 +564,10 @@ class ImageCatalog {
       flowShift: null,
       frameStep: 17,
       frameBase: 5,
-      extraArgs: ['--rng', 'cpu'],
+      // mmap reads the weights from disk as needed instead of copying
+      // them all into the computer's memory; the tiles keep the video
+      // decoder small.
+      extraArgs: ['--rng', 'cpu', '--mmap', '--vae-tiling'],
       minMemoryGb: 16,
       // Not measured yet; a guess.
       baseGb: 13,
@@ -591,6 +594,76 @@ class ImageCatalog {
           sha256:
               '11e6efe70a57ce7f4838c47bdbd1a1c4b8ce10e2b7747f1b065990b70f4b05fc',
           sizeGb: 18.22,
+        ),
+        ImageFile(
+          role: ImageFileRole.vae,
+          repo: _h3Comfy,
+          revision: _h3ComfyRev,
+          path: 'vae/minimax_h3_video_vae_fp16.safetensors',
+          sha256:
+              '7c1f131492e7eddacaac9069a61b81bdd39de5cc96561e677c5eab1cdce5e522',
+          sizeGb: 5.21,
+        ),
+        ImageFile(
+          role: ImageFileRole.audioVae,
+          repo: _h3Comfy,
+          revision: _h3ComfyRev,
+          path: 'vae/minimax_h3_audio_vae_fp32.safetensors',
+          sha256:
+              '8e505d95dd1561d47abd43d4238fd40d9bb1ae9e147ed0a4cba778d76ae4db48',
+          sizeGb: 0.61,
+        ),
+      ],
+    ),
+    VideoModel(
+      id: 'minimax-h3-lighter',
+      name: 'MiniMax H3, lighter',
+      blurb:
+          'The same, with the text encoder squeezed harder (a bit rougher '
+          'understanding of your prompt) so it needs about 5 GB less memory '
+          'and download (about 30 GB). Try this one if the other runs out '
+          'of memory.',
+      // Width and height must be multiples of 32; 512x768 is about the
+      // 864x480 of its docs in pixels.
+      baseSize: 640,
+      steps: 20,
+      cfg: 1,
+      sampler: 'euler',
+      // Its flow shift (12) is built in. It always runs at 24 fps and wants
+      // 17k + 5 frames (56 for 2 s).
+      flowShift: null,
+      frameStep: 17,
+      frameBase: 5,
+      // mmap reads the weights from disk as needed instead of copying
+      // them all into the computer's memory; the tiles keep the video
+      // decoder small.
+      extraArgs: ['--rng', 'cpu', '--mmap', '--vae-tiling'],
+      minMemoryGb: 16,
+      // Not measured yet; a guess.
+      baseGb: 13,
+      gbPerSecond: 0.4,
+      detailedPrompt: true,
+      promptChars: 2000,
+      promptMax: 4000,
+      license: 'MiniMax H3 Community License',
+      files: [
+        ImageFile(
+          role: ImageFileRole.diffusion,
+          repo: _h3Gguf,
+          revision: _h3GgufRev,
+          path: 'minimax_h3_fl2va_pruned-Q4_K_M.gguf',
+          sha256:
+              'dd948e08ad0ba3c71bd42f368e283dd82e790f5122a63b276e22a3e0283d0c10',
+          sizeGb: 11.42,
+        ),
+        ImageFile(
+          role: ImageFileRole.llm,
+          repo: _h3Gguf,
+          revision: _h3GgufRev,
+          path: 'qwen3vl_32b_minimax_h3-Q2_K_M.gguf',
+          sha256:
+              'a8ccadccd57ef34c838ffb8a7da8368bb554721b2760274a1d3b0df63960b997',
+          sizeGb: 13.1,
         ),
         ImageFile(
           role: ImageFileRole.vae,
