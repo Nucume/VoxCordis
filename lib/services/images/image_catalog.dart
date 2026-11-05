@@ -1,5 +1,7 @@
 import 'dart:io';
+import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../../data/settings.dart';
@@ -72,6 +74,19 @@ class ImageFile {
       Uri.parse('https://huggingface.co/$repo/resolve/$revision/$path');
 }
 
+/// What one of the human's own files is, to stable-diffusion.cpp.
+enum OwnKind {
+  /// A whole checkpoint (or one it can't read, run as before): `-m`.
+  checkpoint,
+
+  /// The diffusion part of an Anima finetune, run with Anima's VAE and
+  /// text encoder.
+  anima,
+
+  /// The diffusion part of another model, which can't run alone.
+  part,
+}
+
 /// How a model likes to be asked.
 enum Prompting {
   /// Danbooru-style tags: lowercase, comma-separated, quality tags first.
@@ -104,6 +119,7 @@ class ImageModel {
     this.minMemoryGb = 8,
     this.license,
     this.own = false,
+    this.cantRun,
   });
 
   /// A catalog id, or for the human's own file its file name.
@@ -141,6 +157,10 @@ class ImageModel {
 
   /// A file the human added themselves rather than one from the catalog.
   final bool own;
+
+  /// Why the human's own file can't be drawn with, when it can't; it is
+  /// still shown in Settings → Images so it can be deleted.
+  final String? cantRun;
 
   /// The whole download, shared parts included.
   double get sizeGb => files.fold(0.0, (sum, f) => sum + f.sizeGb);
@@ -952,7 +972,7 @@ class ImageCatalog {
   static List<ImageModel> available(Directory dir) => [
     for (final m in models)
       if (installed(dir, m)) m,
-    ...own(dir),
+    ...own(dir).where((m) => m.cantRun == null),
   ];
 
   /// Files in [dir] that aren't part of a catalog model: whole checkpoints
@@ -977,16 +997,66 @@ class ImageCatalog {
     return found;
   }
 
-  /// One of the human's own checkpoints. Its kind isn't written anywhere
-  /// stable-diffusion.cpp needs, but its settings are guessed from its
-  /// size: under 3 GB is an SD 1.5 model, drawn at 512 pixels.
+  /// One of the human's own files. An Anima finetune is only the diffusion
+  /// part, so it runs with the VAE and text encoder that come with Anima
+  /// Turbo or Aesthetic; any other file that is only a part can't run on
+  /// its own. Whole checkpoints get their settings guessed from their size:
+  /// under 3 GB is an SD 1.5 model, drawn at 512 pixels.
   static ImageModel ownModel(File file) {
     final name = p.basename(file.path);
-    final small = file.lengthSync() < 3e9;
+    final size = file.lengthSync();
+    final own = ImageFile(
+      role: ImageFileRole.checkpoint,
+      repo: '',
+      revision: '',
+      path: name,
+      sha256: '',
+      sizeGb: size / 1e9,
+    );
+    final kind = kindOf(file);
+    if (kind == OwnKind.anima) {
+      final base = byId('anima')!;
+      return ImageModel(
+        id: name,
+        name: p.basenameWithoutExtension(name),
+        blurb:
+            'Your own Anima finetune. It draws with the VAE and text encoder '
+            'that come with Anima Turbo or Anima Aesthetic, so download one '
+            'of those too.',
+        style: 'anime',
+        prompting: base.prompting,
+        steps: base.steps,
+        cfg: base.cfg,
+        sampler: base.sampler,
+        prefix: base.prefix,
+        negative: base.negative,
+        minMemoryGb: base.minMemoryGb,
+        own: true,
+        files: [
+          ImageFile(
+            role: ImageFileRole.diffusion,
+            repo: '',
+            revision: '',
+            path: name,
+            sha256: '',
+            sizeGb: size / 1e9,
+          ),
+          _animaVae,
+          _animaLlm,
+        ],
+      );
+    }
+    final small = size < 3e9;
     return ImageModel(
       id: name,
       name: p.basenameWithoutExtension(name),
-      blurb: 'Your own model file.',
+      blurb: kind == OwnKind.part
+          ? 'Can\'t draw with this file: it is only the diffusion part of a '
+                'model (like Flux, Qwen Image or Z-Image), without the VAE and '
+                'text encoder it needs. Your own files can be whole SD 1.5 or '
+                'SDXL checkpoints (Pony and Illustrious too) or Anima '
+                'finetunes.'
+          : 'Your own model file.',
       style: 'your own model',
       prompting: Prompting.both,
       steps: small ? 25 : 28,
@@ -995,17 +1065,85 @@ class ImageCatalog {
       baseSize: small ? 512 : 1024,
       negative: 'worst quality, low quality, blurry, watermark',
       own: true,
-      files: [
-        ImageFile(
-          role: ImageFileRole.checkpoint,
-          repo: '',
-          revision: '',
-          path: name,
-          sha256: '',
-          sizeGb: file.lengthSync() / 1e9,
-        ),
-      ],
+      cantRun: kind == OwnKind.part
+          ? '$name is only the diffusion part of a model, without the VAE '
+                'and text encoder it needs.'
+          : null,
+      files: [own],
     );
+  }
+
+  static final _kinds = <String, (int, DateTime, OwnKind)>{};
+
+  /// What [file] holds, from the tensor names in its header (safetensors)
+  /// or near its start (GGUF). Remembered while the file is unchanged, as
+  /// Settings asks on every rebuild.
+  static OwnKind kindOf(File file) {
+    try {
+      final stat = file.statSync();
+      final known = _kinds[file.path];
+      if (known != null && known.$1 == stat.size && known.$2 == stat.modified) {
+        return known.$3;
+      }
+      final kind = _readKind(file);
+      _kinds[file.path] = (stat.size, stat.modified, kind);
+      return kind;
+    } on FileSystemException {
+      return OwnKind.checkpoint;
+    }
+  }
+
+  static OwnKind _readKind(File file) {
+    final ext = p.extension(file.path).toLowerCase();
+    if (ext != '.safetensors' && ext != '.gguf') return OwnKind.checkpoint;
+    final raf = file.openSync();
+    String names;
+    try {
+      final length = raf.lengthSync();
+      if (ext == '.safetensors') {
+        if (length < 8) return OwnKind.checkpoint;
+        final head = raf.readSync(8);
+        var n = 0;
+        for (var i = 7; i >= 0; i--) {
+          n = n * 256 + head[i];
+        }
+        if (n <= 0 || n > 100000000 || n > length - 8) {
+          return OwnKind.checkpoint;
+        }
+        names = String.fromCharCodes(raf.readSync(n));
+      } else {
+        // The tensor names come before the weights; 32 MB covers them for
+        // picture models (no big tokenizer inside).
+        names = String.fromCharCodes(raf.readSync(min(length, 32 << 20)));
+      }
+    } finally {
+      raf.closeSync();
+    }
+    return kindFromNames(names);
+  }
+
+  /// [names] holds a file's tensor names somewhere in it.
+  @visibleForTesting
+  static OwnKind kindFromNames(String names) {
+    // stable-diffusion.cpp's own test for Anima.
+    if (names.contains('llm_adapter.blocks.0.cross_attn.q_proj.weight')) {
+      return OwnKind.anima;
+    }
+    // A VAE inside, or an SD/SDXL UNet (which sd-cli can pair with its own
+    // VAE): a whole checkpoint, as before.
+    if (names.contains('first_stage_model.') ||
+        names.contains('input_blocks.') ||
+        names.contains('down_blocks.') ||
+        names.contains('cond_stage_model.') ||
+        names.contains('conditioner.embedders.')) {
+      return OwnKind.checkpoint;
+    }
+    if (names.contains('diffusion_model.') ||
+        names.contains('double_blocks.') ||
+        names.contains('transformer_blocks.')) {
+      return OwnKind.part;
+    }
+    return OwnKind.checkpoint;
   }
 
   /// The LoRAs in [dir], by name (the file name without its extension),

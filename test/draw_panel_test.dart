@@ -27,9 +27,18 @@ void main() {
             seed: 7,
             negative: 'blurry',
             loras: {'film-grain': 0.6},
+            sampler: 'er_sde',
+            scheduler: 'beta',
           ),
         )
         .withChoices('sdxl', const DrawChoices(steps: 12));
+    final sized = prefs.withSize(width: 832, height: 1216, ratio: '9:16');
+    final sizedBack = DrawPanelPrefs.fromJson(sized.toJson());
+    expect(sizedBack.width, 832);
+    expect(sizedBack.height, 1216);
+    expect(sizedBack.ratio, '9:16');
+    expect(sizedBack.copyWith(advanced: false).ratio, '9:16');
+    expect(sizedBack.withSize().width, isNull);
     final back = AppSettings.fromJson(
       AppSettings(draw: prefs).toJson().map((k, v) => MapEntry(k, v)),
     ).draw;
@@ -38,6 +47,8 @@ void main() {
     expect(back.model, 'anima');
     expect(back.perModel['anima'], prefs.perModel['anima']);
     expect(back.perModel['anima']?.loras, {'film-grain': 0.6});
+    expect(back.perModel['anima']?.sampler, 'er_sde');
+    expect(back.perModel['anima']?.scheduler, 'beta');
     expect(back.perModel['sdxl']?.steps, 12);
     expect(back.perModel['sdxl']?.width, isNull);
     // Back to nothing set drops the entry.
@@ -185,12 +196,14 @@ void main() {
     await tester.tap(find.text('grain'));
     await tester.pump(const Duration(seconds: 1));
 
-    // Another model starts clean...
+    // Another model starts clean, but keeps the size...
     await tester.tap(find.text('alpha'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('beta').last);
     await tester.pumpAndSettle();
     expect(tester.widget<TextField>(field('Steps')).controller!.text, '');
+    expect(tester.widget<TextField>(field('Width')).controller!.text, '1024');
+    expect(tester.widget<TextField>(field('Height')).controller!.text, '256');
     await tester.enterText(field('Steps'), '5');
     await tester.pump(const Duration(seconds: 1));
 
@@ -213,5 +226,97 @@ void main() {
     expect(find.text('0.8'), findsOneWidget);
     expect(services.settings.value.draw.advanced, isTrue);
     expect(services.settings.value.draw.lorasOpen, isTrue);
+
+    // A shape button puts the typed size aside for the shape's own.
+    await tester.tap(find.byIcon(Icons.crop_portrait_rounded));
+    await tester.pump();
+    expect(tester.widget<TextField>(field('Width')).controller!.text, '');
+    expect(tester.widget<TextField>(field('Height')).controller!.text, '');
+    expect(services.settings.value.draw.shape, 'portrait');
+
+    // The sampler and scheduler start as the model's own, and a pick is
+    // kept with the model's numbers.
+    await tester.tap(find.text('Model\'s own (Euler a)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DPM++ 2M').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Model\'s own (Normal)'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Karras').last);
+    await tester.pumpAndSettle();
+    final alpha = services.settings.value.draw.perModel['alpha.safetensors']!;
+    expect(alpha.sampler, 'dpm++2m');
+    expect(alpha.scheduler, 'karras');
+    expect(alpha.width, isNull);
+    await tester.tap(find.text('Reset'));
+    await tester.pump();
+    expect(find.text('Model\'s own (Euler a)'), findsOneWidget);
+    expect(
+      services.settings.value.draw.perModel['alpha.safetensors']?.sampler,
+      isNull,
+    );
+
+    // The fourth shape button takes a ratio of one's own, in any spelling,
+    // and a typed height then sets the width.
+    TextField ratioField() => tester.widget<TextField>(
+      find.descendant(
+        of: find.byKey(const ValueKey('ratio-button')),
+        matching: find.byType(TextField),
+      ),
+    );
+    await tester.tap(find.byKey(const ValueKey('ratio-button')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const ValueKey('ratio-button')),
+        matching: find.byType(TextField),
+      ),
+      '9 16',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(find.text('9:16'), findsOneWidget);
+    expect(services.settings.value.draw.ratio, '9:16');
+    await tester.enterText(field('Height'), '1216');
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pump();
+    // 1216 x 9 / 16 = 684, settled on 704.
+    expect(tester.widget<TextField>(field('Width')).controller!.text, '704');
+    // Swapping turns it into a landscape: 16:9.
+    await tester.tap(find.byIcon(Icons.swap_horiz_rounded));
+    await tester.pump();
+    expect(find.text('16:9'), findsOneWidget);
+    expect(tester.widget<TextField>(field('Width')).controller!.text, '1216');
+    // Something that isn't a ratio is dropped.
+    await tester.tap(find.byKey(const ValueKey('ratio-button')));
+    await tester.pumpAndSettle();
+    expect(ratioField().controller!.text, '16:9');
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const ValueKey('ratio-button')),
+        matching: find.byType(TextField),
+      ),
+      '16:',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(services.settings.value.draw.ratio, isNull);
+    // A shape puts the ratio aside.
+    await tester.tap(find.byKey(const ValueKey('ratio-button')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byKey(const ValueKey('ratio-button')),
+        matching: find.byType(TextField),
+      ),
+      '4/3',
+    );
+    await tester.testTextInput.receiveAction(TextInputAction.done);
+    await tester.pumpAndSettle();
+    expect(services.settings.value.draw.ratio, '4:3');
+    await tester.tap(find.byIcon(Icons.crop_square_rounded));
+    await tester.pumpAndSettle();
+    expect(services.settings.value.draw.ratio, isNull);
+    expect(find.text('4:3'), findsNothing);
   });
 }

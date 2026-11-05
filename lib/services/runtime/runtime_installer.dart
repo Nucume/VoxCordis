@@ -5,9 +5,8 @@ import 'package:archive/archive_io.dart';
 import 'package:http/http.dart' as http;
 import 'package:path/path.dart' as p;
 
-import '../release_signature.dart';
-import '../updater.dart' show updateRepo;
 import 'download.dart';
+import 'signed_release_asset.dart';
 import '../system/posix_native.dart';
 
 /// Gets a `llama-server` binary onto the machine.
@@ -98,78 +97,23 @@ class RuntimeInstaller {
       'llama-server-cuda-$pinnedTag-linux-x64.tar.gz';
 
   Future<String?> _installLinuxCuda({DownloadProgress? onProgress}) async {
-    try {
-      if (!updateRepo.contains('/')) {
-        note?.call('CUDA build skipped: no release repository is set.');
-        return null;
-      }
-      final res = await _http.get(
-        Uri.parse('https://api.github.com/repos/$updateRepo/releases/latest'),
-        headers: {'Accept': 'application/vnd.github+json'},
-      );
-      if (res.statusCode != 200) {
-        note?.call(
-          'CUDA build skipped: GitHub answered HTTP ${res.statusCode} for the latest release of $updateRepo.',
-        );
-        return null;
-      }
-      final assets = (jsonDecode(res.body) as Map)['assets'] as List;
-      Map? file;
-      Map? sig;
-      for (final a in assets.cast<Map>()) {
-        if (a['name'] == linuxCudaAsset) file = a;
-        if (a['name'] == '$linuxCudaAsset.sig') sig = a;
-      }
-      final sha = sha256Digest(file?['digest']);
-      if (file == null || sig == null || sha == null) {
-        note?.call(
-          'CUDA build skipped: the latest release of $updateRepo has no signed $linuxCudaAsset yet.',
-        );
-        return null;
-      }
-
-      final sigRes = await _http.get(
-        Uri.parse(sig['browser_download_url'] as String),
-      );
-      if (sigRes.statusCode != 200 ||
-          !await ReleaseSignature.verify(sha, sigRes.bodyBytes)) {
-        note?.call(
-          'CUDA build skipped: its signature did not check out (HTTP ${sigRes.statusCode}).',
-        );
-        return null;
-      }
-      final tmp = Directory(p.join(supportDir.path, 'runtime', '.download'));
-      await tmp.create(recursive: true);
-      final archive = File(p.join(tmp.path, linuxCudaAsset));
-      await downloadFile(
-        _http,
-        Uri.parse(file['browser_download_url'] as String),
-        archive,
-        onProgress: onProgress,
-      );
-      await verifySha256(archive, sha);
-      final staging = Directory('${cudaInstallDir.path}.partial');
-      if (await staging.exists()) await staging.delete(recursive: true);
-      await staging.create(recursive: true);
-      await extractFileToDisk(archive.path, staging.path);
-      await archive.delete();
-      if (await cudaInstallDir.exists()) {
-        await cudaInstallDir.delete(recursive: true);
-      }
-      await staging.rename(cudaInstallDir.path);
-      final exe = await _findIn(cudaInstallDir);
-      if (exe == null) {
-        note?.call('CUDA build skipped: llama-server was not in the download.');
-      } else {
-        PosixNative.makeExecutable(exe);
-        note?.call('Using the CUDA build of llama-server.');
-      }
-      return exe;
-    } on Object catch (e) {
-      // Offline, no such file yet, bad signature: Vulkan it is.
-      note?.call('CUDA build skipped: $e');
-      return null;
+    final ok = await installSignedReleaseAsset(
+      _http,
+      asset: linuxCudaAsset,
+      into: cudaInstallDir,
+      downloads: Directory(p.join(supportDir.path, 'runtime', '.download')),
+      onProgress: onProgress,
+      note: note,
+    );
+    if (!ok) return null;
+    final exe = await _findIn(cudaInstallDir);
+    if (exe == null) {
+      note?.call('CUDA build skipped: llama-server was not in the download.');
+    } else {
+      PosixNative.makeExecutable(exe);
+      note?.call('Using the CUDA build of llama-server.');
     }
+    return exe;
   }
 
   /// Whether [binary] is the CUDA build.

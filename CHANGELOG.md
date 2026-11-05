@@ -13,6 +13,19 @@ the ids); it is left out of the release page.
 ## Unreleased
 
 ### New
+- **Sampler and Scheduler in Draw → Advanced.** Pick any of the drawing engine's samplers (Euler a, DPM++ 2M, ER-SDE and more) and schedulers (Karras, Beta, Simple and more), or leave them on the model's own. They are kept per model with its other numbers, and Reset puts them back.
+- **Your own ratio.** A fourth button next to Square, Portrait and Landscape opens a small field for a ratio of your own, written any way you like: "9:16", "16 9", "4/3" or "4x3". Without a typed size the picture keeps about the model's usual number of pixels in that ratio. In the advanced options, typing the height sets the width from the ratio (or the other way round), and the swap button turns 9:16 into 16:9.
+- **The size stays when you switch models.** Width, Height and the ratio in Draw → Advanced no longer change with the model.
+- **Drawing uses CUDA on NVIDIA cards.** On Windows and Linux with an NVIDIA card (and a recent enough driver), drawing and animating now run on CUDA instead of Vulkan, which is usually faster. The CUDA engine is a one-time extra download. If it can't be downloaded or won't start, drawing quietly falls back to Vulkan and tries CUDA again a day later; Settings → Logs says why.
+- **Square, Portrait and Landscape in Advanced too.** The shape buttons now also show with the advanced options: one click sets the size (832 x 1216, 1216 x 832 or 1024 x 1024 on SDXL-sized models), putting a typed size aside. Hover a button to see its size.
+
+### Fixed
+- **Your own Anima finetunes draw.** A finetune of Anima dropped into the picture models folder (like SunstoneGemAnima) failed with "new_sd_ctx_t failed", because it was run as a whole checkpoint without Anima's VAE and text encoder. It now borrows those from Anima Turbo or Anima Aesthetic (download one of them too). Other files that are only part of a model (Flux, Qwen Image, Z-Image) are shown in Settings → Images with a note saying they can't run, instead of failing when picked.
+- **Drawing says why it couldn't start.** When the drawing engine couldn't load a picture model it only said "new_sd_ctx_t failed". It now says what went wrong in plain words (the graphics card ran out of memory, a file is missing or damaged, your own file isn't a model it can run, or the graphics driver didn't start) and what to try. A missing model part is now caught before drawing starts.
+
+## 0.4.0
+
+### New
 - **Video generation (extreme early access).** Open any picture in Images and press **Animate** to turn it into a short clip, made on your computer. This is very new and barely tested: expect crashes, running out of memory, odd or broken-looking clips, and slow runs of many minutes. It has only been tried on one graphics card so far, so the length ruler (green, amber, red) is a rough guess. Models are in Settings → Images → Video models: Wan 2.2 (5B and the bigger 14B; silent clips), LTX 2.5 and MiniMax H3 (both make sound too, and both are huge downloads of 30 to 43 GB that want a lot of computer memory). "Write it for me" turns a few words into a prompt that suits the model. Clips show in the gallery with a play symbol. If something goes wrong, Settings → Logs has what the engine printed; please report it.
 - **Room for small windows.** The window can now be as narrow as 820 pixels (it was 1140). Below 1140, the companion card folds away into a menu button left of Chat, and that button brings the card back over the page. Make the window wider again and the card unfolds into its place.
 - **LoRAs fold away.** In Images → Draw → Advanced, the LoRAs sit under a header you can open and close. Closed, only the ones you picked stay, with their strength sliders, and the header says how many are on. It remembers whether you left it open.
@@ -40,7 +53,6 @@ the ids); it is left out of the release page.
 - **A companion can't take another's folder in Settings.** Two companions sharing a folder could make one of them vanish from the list.
 - **After deleting your only companion, the next one starts fresh.** It no longer inherits the old one's colour and pronouns.
 - **A CUDA runtime that won't start is replaced by Vulkan.** If the NVIDIA (CUDA) llama-server can't start, for example because a library is missing, VoxCordis tries the Vulkan one by itself and says why in Settings → Logs, instead of showing a runtime error. It only switches when Vulkan really does start the model: a model file that won't load anywhere, or no internet to fetch Vulkan, no longer turns CUDA off for a day. Pictures (Eyes) and memory search (Recall) switch the same way, and once CUDA has failed it stays off until the app restarts.
-
 
 ## 0.3.8
 

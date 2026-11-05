@@ -14,6 +14,8 @@ import 'package:companion/services/images/sd_runtime.dart';
 import 'package:companion/services/invoke_client.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:http/http.dart' as http;
+import 'package:http/testing.dart';
 import 'package:image/image.dart' as img;
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -62,9 +64,134 @@ void main() {
       'macos-arm64',
     );
     expect(SdInstaller.buildFor(os: 'macos', arm: false, gpu: true), isNull);
-    for (final b in SdInstaller.builds.values) {
+    for (final b in SdInstaller.builds.values.expand((files) => files)) {
       expect(b.sha256, matches(RegExp(r'^[0-9a-f]{64}$')));
     }
+    expect(SdInstaller.cudaBuildFor(os: 'linux', arm: false), 'linux-cuda');
+    expect(SdInstaller.cudaBuildFor(os: 'windows', arm: false), 'windows-cuda');
+    expect(SdInstaller.builds['windows-cuda'], hasLength(2));
+    expect(SdInstaller.cudaBuildFor(os: 'macos', arm: true), isNull);
+  });
+
+  group('CUDA drawing', () {
+    File marker() =>
+        File(p.join(tmp.path, 'draw', '${SdInstaller.pinnedTag}.no-cuda'));
+
+    test('an NVIDIA card gets the CUDA sd-cli, else Vulkan', () async {
+      final cuda = SdInstaller(tmp, nvidiaDriver: () async => 550);
+      final plain = SdInstaller(tmp, nvidiaDriver: () async => null);
+      final vulkan = await _fakeSdCli(
+        cuda.installDir('linux-vulkan')..createSync(recursive: true),
+      );
+      // Nothing CUDA yet: it counts as missing, so it gets installed.
+      expect(await cuda.find(gpu: true), isNull);
+      expect(await plain.find(gpu: true), vulkan);
+      final cudaExe = await _fakeSdCli(
+        cuda.installDir('linux-cuda')..createSync(recursive: true),
+      );
+      expect(await cuda.find(gpu: true), cudaExe);
+      expect(cuda.isCuda(cudaExe), isTrue);
+      expect(cuda.isCuda(vulkan), isFalse);
+      // The graphics card off: never CUDA.
+      expect(await cuda.find(gpu: false), isNull);
+      // Too old a driver for CUDA 12.
+      expect(
+        await SdInstaller(tmp, nvidiaDriver: () async => 470).find(gpu: true),
+        vulkan,
+      );
+    }, skip: !Platform.isLinux);
+
+    test(
+      'no signed CUDA build: Vulkan, and not asked again for a day',
+      () async {
+        final logs = <String>[];
+        final installer = SdInstaller(
+          tmp,
+          client: MockClient((_) async => http.Response('', 503)),
+          nvidiaDriver: () async => 550,
+        )..note = logs.add;
+        final vulkan = await _fakeSdCli(
+          installer.installDir('linux-vulkan')..createSync(recursive: true),
+        );
+        expect(await installer.ensureInstalled(gpu: true), vulkan);
+        expect(marker().existsSync(), isTrue);
+        expect(logs, contains(contains('HTTP 503')));
+        expect(logs, contains(contains('Vulkan build of sd-cli')));
+        expect(await installer.find(gpu: true), vulkan);
+      },
+      skip: !Platform.isLinux,
+    );
+
+    test('a CUDA sd-cli that will not start draws with Vulkan', () async {
+      final installer = SdInstaller(tmp, nvidiaDriver: () async => 550);
+      final cudaDir = installer.installDir('linux-cuda')
+        ..createSync(recursive: true);
+      File(p.join(cudaDir.path, 'sd-cli')).writeAsStringSync(
+        '#!/bin/sh\n'
+        'echo "ggml_cuda_init: failed to initialize CUDA: no CUDA-capable '
+        'device is detected" >&2\n'
+        'echo "[INFO ] main.cpp:885  - new_sd_ctx_t failed"\n'
+        'exit 1\n',
+      );
+      await Process.run('chmod', ['+x', p.join(cudaDir.path, 'sd-cli')]);
+      final vulkanDir = installer.installDir('linux-vulkan')
+        ..createSync(recursive: true);
+      await _fakeSdCli(vulkanDir);
+
+      final settings = AppSettings(
+        companionName: 'Mira',
+        companionFolder: p.join(tmp.path, 'Mira'),
+        modelsFolder: tmp.path,
+        llmMode: LlmMode.external,
+        imageEngine: ImageEngineChoice.builtIn,
+      );
+      final dir = ImageCatalog.dirFor(settings)..createSync(recursive: true);
+      File(p.join(dir.path, 'mine.safetensors')).writeAsStringSync('x');
+      final engine = ImageEngine(
+        supportDir: tmp,
+        runtime: RuntimeController(tmp),
+        settings: () => settings,
+        installer: installer,
+      );
+      final job = engine.draw(
+        DrawJob(
+          DrawRequest(
+            model: ImageCatalog.available(dir).single,
+            prompt: 'a cat',
+          ),
+          folder: settings.companionFolder!,
+          forChat: false,
+        ),
+      );
+      final picture = await job.done;
+      expect(picture.existsSync(), isTrue);
+      expect(marker().existsSync(), isTrue);
+      expect(await installer.find(gpu: true), p.join(vulkanDir.path, 'sd-cli'));
+    }, skip: !Platform.isLinux);
+
+    test('only a CUDA that cannot run at all counts, not a full card', () {
+      expect(
+        SdRun.cudaWontStart(
+          'ggml_cuda_init: failed to initialize CUDA: no CUDA-capable device',
+        ),
+        isTrue,
+      );
+      expect(
+        SdRun.cudaWontStart(
+          './sd-cli: error while loading shared libraries: libcudart.so.12: '
+          'cannot open shared object file',
+        ),
+        isTrue,
+      );
+      expect(
+        SdRun.cudaWontStart(
+          'ggml_cuda_init: found 1 CUDA devices\n'
+          '[ERROR] lora.cpp:12 - required lora not found',
+        ),
+        isFalse,
+      );
+      expect(SdRun.cudaWontStart('CUDA error: out of memory'), isFalse);
+    });
   });
 
   test('every catalog file is pinned', () {
@@ -132,8 +259,103 @@ void main() {
     expect(realvis[realvis.indexOf('-W') + 1], '1216');
     expect(realvis, isNot(contains('--lora-model-dir')));
 
+    // The advanced sampler and scheduler win over the card; unknown names
+    // (from another version's settings) are left to the card.
+    List<String> withPicks(String? sampler, String? scheduler) => SdRun.args(
+      DrawRequest(
+        model: ImageCatalog.byId('sdxl')!,
+        prompt: 'a lighthouse',
+        sampler: sampler,
+        scheduler: scheduler,
+      ),
+      modelsDir: Directory('/m'),
+      lorasDir: Directory('/l'),
+      out: File('/o/x.png'),
+      seed: 1,
+    );
+    final picked = withPicks('dpm++2m', 'karras');
+    expect(picked[picked.indexOf('--sampling-method') + 1], 'dpm++2m');
+    expect(picked[picked.indexOf('--scheduler') + 1], 'karras');
+    final odd = withPicks('warp_drive', 'nope');
+    expect(odd[odd.indexOf('--sampling-method') + 1], 'euler_a');
+    expect(odd, isNot(contains('--scheduler')));
+
     expect(SdRun.progressIn('\r|==>  | 5/20 - 1.23s/it'), (step: 5, steps: 20));
     expect(SdRun.progressIn('loading model'), isNull);
+  });
+
+  test('says why sd-cli couldn\'t load the model', () {
+    final sdxl = ImageCatalog.byId('sdxl')!;
+    final own = ImageCatalog.ownModel(
+      File(p.join(tmp.path, 'flux.safetensors'))..writeAsStringSync('x'),
+    );
+    const failed = '[INFO ] main.cpp:885  - new_sd_ctx_t failed';
+    String why(List<String> lines, [ImageModel? m]) =>
+        SdRun.failureMessage(lines, m ?? sdxl);
+
+    expect(
+      why([
+        'ggml_vulkan: Device memory allocation of size 2147483648 failed.',
+        '[ERROR] stable-diffusion.cpp:600 - unet alloc params backend buffer failed',
+        failed,
+      ]),
+      contains('ran out of memory'),
+    );
+    final unknown = why([
+      "[ERROR] stable-diffusion.cpp:300 - get sd version from file failed: '/m/flux.safetensors'",
+      failed,
+    ], own);
+    expect(unknown, contains('doesn\'t recognise flux'));
+    expect(unknown, contains('whole checkpoint'));
+    expect(
+      why([
+        "[ERROR] model.cpp:1000 - init model loader from file failed: '/m/sdxl_vae.safetensors'",
+        failed,
+      ]),
+      contains('couldn\'t open sdxl_vae.safetensors'),
+    );
+    expect(
+      why([
+        "[ERROR] model.cpp:1700 - tensor 'x' has wrong shape in model file",
+        failed,
+      ]),
+      contains('doesn\'t look like'),
+    );
+    expect(
+      why(['[ERROR] lora.cpp:12 - something new broke', failed]),
+      'The picture couldn\'t be drawn (something new broke).',
+    );
+    expect(why([failed]), contains('didn\'t say why'));
+    expect(why([failed]), isNot(contains('new_sd_ctx_t')));
+    expect(
+      SdRun.failureMessage([failed], sdxl, clip: true),
+      startsWith('The clip couldn\'t be made'),
+    );
+  });
+
+  test('a missing model part is named before sd-cli runs', () async {
+    final exe = await _fakeSdCli(tmp);
+    final dir = Directory(p.join(tmp.path, 'models'))..createSync();
+    final sdxl = ImageCatalog.byId('sdxl')!;
+    File(p.join(dir.path, sdxl.files.first.fileName)).writeAsStringSync('x');
+    await expectLater(
+      SdRun.run(
+        exe,
+        DrawRequest(model: sdxl, prompt: 'a cat'),
+        modelsDir: dir,
+        lorasDir: dir,
+        out: File(p.join(tmp.path, 'out', 'x.png')),
+        seed: 1,
+      ),
+      throwsA(
+        isA<SdException>().having(
+          (e) => e.message,
+          'message',
+          contains('missing sdxl_vae.safetensors'),
+        ),
+      ),
+    );
+    expect(File(p.join(tmp.path, 'args.txt')).existsSync(), isFalse);
   });
 
   test('builds sd-cli arguments for a clip from the Wan card', () {
@@ -300,6 +522,93 @@ void main() {
       File(p.join(dir.path, f.fileName)).writeAsBytesSync([0]);
     }
     expect(ImageCatalog.ownVideo(dir), hasLength(1));
+  });
+
+  test('own Anima finetunes draw with Anima\'s VAE and text encoder', () async {
+    final s = AppSettings(modelsFolder: tmp.path);
+    final dir = ImageCatalog.dirFor(s)..createSync(recursive: true);
+    // A safetensors file: an 8-byte little-endian header length, then the
+    // JSON header naming the tensors.
+    void safetensors(String name, List<String> tensors) {
+      final header = utf8.encode(
+        jsonEncode({
+          for (final t in tensors)
+            t: {
+              'dtype': 'F16',
+              'shape': [1],
+              'data_offsets': [0, 2],
+            },
+        }),
+      );
+      final n = header.length;
+      File(p.join(dir.path, name)).writeAsBytesSync([
+        for (var i = 0; i < 8; i++) (n >> (8 * i)) & 0xff,
+        ...header,
+        0,
+        0,
+      ]);
+    }
+
+    safetensors('SunstoneGemAnima.safetensors', [
+      'model.diffusion_model.blocks.0.self_attn.q_proj.weight',
+      'model.diffusion_model.llm_adapter.blocks.0.cross_attn.q_proj.weight',
+    ]);
+    safetensors('flux-dev.safetensors', [
+      'model.diffusion_model.double_blocks.0.img_attn.qkv.weight',
+    ]);
+    safetensors('ponyMix.safetensors', [
+      'model.diffusion_model.input_blocks.0.0.weight',
+      'first_stage_model.decoder.conv_in.weight',
+    ]);
+
+    final own = {for (final m in ImageCatalog.own(dir)) m.id: m};
+    final anima = own['SunstoneGemAnima.safetensors']!;
+    expect(anima.files.map((f) => f.role.name), ['diffusion', 'vae', 'llm']);
+    expect(anima.cantRun, isNull);
+    expect(anima.sampler, ImageCatalog.byId('anima')!.sampler);
+    final args = SdRun.args(
+      DrawRequest(model: anima, prompt: '1girl'),
+      modelsDir: dir,
+      lorasDir: dir,
+      out: File('/o/x.png'),
+      seed: 1,
+    );
+    expect(args, isNot(contains('-m')));
+    expect(
+      args[args.indexOf('--diffusion-model') + 1],
+      p.join(dir.path, 'SunstoneGemAnima.safetensors'),
+    );
+    expect(
+      args[args.indexOf('--vae') + 1],
+      p.join(dir.path, 'qwen_image_vae.safetensors'),
+    );
+
+    expect(own['flux-dev.safetensors']!.cantRun, contains('only the'));
+    expect(own['ponyMix.safetensors']!.files.single.role.name, 'checkpoint');
+    expect(ImageCatalog.available(dir).map((m) => m.id), [
+      'ponyMix.safetensors',
+      'SunstoneGemAnima.safetensors',
+    ]);
+
+    // Without Anima's parts it says where to get them, before sd-cli runs.
+    final exe = await _fakeSdCli(tmp);
+    await expectLater(
+      SdRun.run(
+        exe,
+        DrawRequest(model: anima, prompt: '1girl'),
+        modelsDir: dir,
+        lorasDir: dir,
+        out: File(p.join(tmp.path, 'out', 'x.png')),
+        seed: 1,
+      ),
+      throwsA(
+        isA<SdException>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('Anima Turbo or Anima Aesthetic'), contains('needs')),
+        ),
+      ),
+    );
   });
 
   test('finds the human\'s own models and LoRAs', () async {

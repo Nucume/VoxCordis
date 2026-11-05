@@ -48,6 +48,8 @@ class DrawChoices {
     this.seed,
     this.negative = '',
     this.loras = const {},
+    this.sampler,
+    this.scheduler,
   });
 
   final int? width;
@@ -56,6 +58,10 @@ class DrawChoices {
   final double? cfg;
   final int? seed;
   final String negative;
+
+  /// sd-cli's sampling method and scheduler, or null for the model's own.
+  final String? sampler;
+  final String? scheduler;
 
   /// The LoRAs picked for this model, by name, with their strength.
   final Map<String, double> loras;
@@ -67,7 +73,9 @@ class DrawChoices {
       cfg == null &&
       seed == null &&
       negative.isEmpty &&
-      loras.isEmpty;
+      loras.isEmpty &&
+      sampler == null &&
+      scheduler == null;
 
   Map<String, Object?> toJson() => {
     if (width != null) 'width': width,
@@ -77,6 +85,8 @@ class DrawChoices {
     if (seed != null) 'seed': seed,
     if (negative.isNotEmpty) 'negative': negative,
     if (loras.isNotEmpty) 'loras': loras,
+    if (sampler != null) 'sampler': sampler,
+    if (scheduler != null) 'scheduler': scheduler,
   };
 
   factory DrawChoices.fromJson(Map<String, Object?> json) {
@@ -88,6 +98,8 @@ class DrawChoices {
       cfg: (json['cfg'] as num?)?.toDouble(),
       seed: json['seed'] as int?,
       negative: json['negative'] as String? ?? '',
+      sampler: json['sampler'] as String?,
+      scheduler: json['scheduler'] as String?,
       loras: {
         if (loras is Map)
           for (final e in loras.entries)
@@ -106,6 +118,8 @@ class DrawChoices {
       other.cfg == cfg &&
       other.seed == seed &&
       other.negative == negative &&
+      other.sampler == sampler &&
+      other.scheduler == scheduler &&
       mapEquals(other.loras, loras);
 
   @override
@@ -116,6 +130,8 @@ class DrawChoices {
     cfg,
     seed,
     negative,
+    sampler,
+    scheduler,
     Object.hashAllUnordered(
       loras.entries.map((e) => Object.hash(e.key, e.value)),
     ),
@@ -133,9 +149,19 @@ class DrawPanelPrefs {
     this.shape = 'square',
     this.perModel = const {},
     this.lorasOpen = false,
+    this.width,
+    this.height,
+    this.ratio,
   });
 
   final bool advanced;
+
+  /// The size typed in the advanced options, kept whichever model is
+  /// picked, and the width:height ratio ("9:16") that ties them; null for
+  /// the shape's own size and no ratio.
+  final int? width;
+  final int? height;
+  final String? ratio;
 
   /// Whether the LoRAs section shows every LoRA or only the picked ones.
   final bool lorasOpen;
@@ -155,7 +181,23 @@ class DrawPanelPrefs {
     model: model ?? this.model,
     shape: shape ?? this.shape,
     perModel: perModel ?? this.perModel,
+    width: width,
+    height: height,
+    ratio: ratio,
   );
+
+  /// These prefs with the typed size and ratio set to these (null clears).
+  DrawPanelPrefs withSize({int? width, int? height, String? ratio}) =>
+      DrawPanelPrefs(
+        advanced: advanced,
+        lorasOpen: lorasOpen,
+        model: model,
+        shape: shape,
+        perModel: perModel,
+        width: width,
+        height: height,
+        ratio: ratio,
+      );
 
   /// These prefs with [choices] kept for [model]; empty choices are dropped.
   DrawPanelPrefs withChoices(String model, DrawChoices choices) {
@@ -173,6 +215,9 @@ class DrawPanelPrefs {
     'model': model,
     'shape': shape,
     'lorasOpen': lorasOpen,
+    if (width != null) 'width': width,
+    if (height != null) 'height': height,
+    if (ratio != null) 'ratio': ratio,
     'perModel': {for (final e in perModel.entries) e.key: e.value.toJson()},
   };
 
@@ -183,6 +228,9 @@ class DrawPanelPrefs {
       advanced: json['advanced'] as bool? ?? false,
       lorasOpen: json['lorasOpen'] as bool? ?? false,
       model: json['model'] as String?,
+      width: json['width'] as int?,
+      height: json['height'] as int?,
+      ratio: json['ratio'] as String?,
       shape: switch (json['shape']) {
         'portrait' => 'portrait',
         'landscape' => 'landscape',

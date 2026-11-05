@@ -48,7 +48,10 @@ class ImageEngine extends ChangeNotifier {
     SdInstaller? installer,
     this.findExe,
   }) : _http = client ?? http.Client(),
-       installer = installer ?? SdInstaller(supportDir, client: client);
+       installer = installer ?? SdInstaller(supportDir, client: client) {
+    // Which sd-cli draws, and why not CUDA, goes to Settings → Logs.
+    this.installer.note ??= (m) => log?.add(LogKind.drawing, m);
+  }
 
   final Directory supportDir;
   final RuntimeController runtime;
@@ -306,7 +309,8 @@ class ImageEngine extends ChangeNotifier {
           await _drawInInvoke(s, job.request, seed, _cancel!.future),
         );
       }
-      final made = await SdRun.run(
+      var sampling = false;
+      Future<File> runWith(String exe) => SdRun.run(
         exe,
         job.request,
         modelsDir: job.request is AnimateRequest
@@ -320,10 +324,26 @@ class ImageEngine extends ChangeNotifier {
           if (_output.length < 300) _output.add(line);
         },
         onProgress: (f) {
+          sampling = true;
           progress = f;
           notifyListeners();
         },
       );
+      File made;
+      try {
+        made = await runWith(exe);
+      } on SdException catch (e) {
+        // CUDA that won't start (an old driver, a card it doesn't know)
+        // falls back to Vulkan, once, and stays off for a day.
+        if (!installer.isCuda(exe) ||
+            sampling ||
+            !SdRun.cudaWontStart(e.output)) {
+          rethrow;
+        }
+        await installer.giveUpOnCuda(e.message);
+        _output.add('--- trying again with Vulkan ---');
+        made = await runWith(await _ensureEngine(s));
+      }
       if (r is AnimateRequest) await keepThumbnail(r.image, made);
       return made;
     } finally {
