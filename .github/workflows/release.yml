@@ -165,6 +165,60 @@ jobs:
           name: llama-cuda
           path: llama-cuda/*.tar.gz
 
+  # stable-diffusion.cpp publishes no CUDA build for Linux either, so its
+  # sd-cli is built here the same way as llama-server above: CUDA 12.4,
+  # static, with the CUDA runtime libraries shipped next to it. The app's
+  # drawing finds it by this file name, checks its signature and uses it on
+  # NVIDIA cards instead of Vulkan. Built once per sd.cpp tag, then cached.
+  sd-cuda:
+    needs: [version]
+    if: inputs.platforms != 'windows'
+    runs-on: ubuntu-22.04
+    container: nvidia/cuda:12.4.1-devel-ubuntu22.04
+    timeout-minutes: 120
+    env:
+      SD_TAG: master-920-2f88688 # keep equal to SdInstaller.pinnedTag
+    steps:
+      - id: cache
+        uses: actions/cache@v4
+        with:
+          path: sd-cuda
+          key: sd-cli-cuda-${{ env.SD_TAG }}-v1
+      - name: Build tools
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: apt-get update && apt-get install -y --no-install-recommends git cmake ninja-build g++ ca-certificates patchelf
+      - name: Build sd-cli
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          git clone --depth 1 --branch "$SD_TAG" --recurse-submodules --shallow-submodules \
+            https://github.com/leejet/stable-diffusion.cpp src
+          # Same CPU and card targets as llama-server above.
+          cmake -S src -B build -G Ninja -DCMAKE_BUILD_TYPE=Release \
+            -DSD_CUDA=ON -DSD_BUILD_SHARED_LIBS=OFF -DSD_BUILD_SHARED_GGML_LIB=OFF \
+            -DSD_SERVER_BUILD_FRONTEND=OFF -DGGML_STATIC=ON -DGGML_CUDA_NCCL=OFF \
+            -DCMAKE_CUDA_ARCHITECTURES="61-real;70-real;75-real;80-real;86-real;89" \
+            -DGGML_NATIVE=OFF -DGGML_AVX2=ON -DGGML_FMA=ON -DGGML_F16C=ON -DGGML_BMI2=ON
+          cmake --build build --target sd-cli -j"$(nproc)"
+          ldd build/bin/sd-cli
+          mkdir -p sd-cuda/pack
+          cp build/bin/sd-cli sd-cuda/pack/
+          for lib in $(ldd build/bin/sd-cli | awk '/lib(cudart|cublas|cublasLt)[^ ]* => \// {print $3}'); do
+            cp -L "$lib" sd-cuda/pack/
+          done
+          patchelf --set-rpath '$ORIGIN' sd-cuda/pack/sd-cli
+          # libgomp (OpenMP) is allowed: desktop Linux ships it with gcc.
+          extra=$(LD_LIBRARY_PATH= ldd sd-cuda/pack/sd-cli | awk '{print $1}' | grep -Ev '^(linux-vdso|/lib64/ld-linux|libc\.so|libm\.so|libdl\.so|librt\.so|libpthread\.so|libcuda\.so|libgcc_s|libstdc\+\+|libgomp|libcudart|libcublas|libcublasLt)' || true)
+          if [ -n "$extra" ]; then echo "::error::sd-cli needs extra libraries: $extra"; exit 1; fi
+          ls -la sd-cuda/pack
+          cp src/LICENSE sd-cuda/pack/LICENSE-stable-diffusion.cpp
+          tar -C sd-cuda/pack -czf "sd-cuda/sd-cli-cuda-$SD_TAG-linux-x64.tar.gz" .
+          rm -rf sd-cuda/pack
+          ls -la sd-cuda
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sd-cuda
+          path: sd-cuda/*.tar.gz
+
   windows:
     needs: [version]
     if: inputs.platforms != 'linux'
@@ -207,7 +261,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [linux, windows, llama-cuda]
+    needs: [linux, windows, llama-cuda, sd-cuda]
     runs-on: ubuntu-latest
     # Holds RELEASE_SIGNING_KEY; the environment limits it to v* tags and
     # asks the maintainer to approve each use.
@@ -220,7 +274,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: dist
-          pattern: '{appimage,windows,packages,llama-cuda}'
+          pattern: '{appimage,windows,packages,llama-cuda,sd-cuda}'
           merge-multiple: true
       # The .rpm files carry a GPG signature of their own (dnf checks it);
       # the apt side signs its index instead. Done before the checksums below
