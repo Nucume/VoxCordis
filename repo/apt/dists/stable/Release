@@ -1,0 +1,23 @@
+Architectures: amd64
+Codename: stable
+Components: main
+Date: Thu, 05 Nov 2026 21:02:58 +0000
+Label: VoxCordis
+Origin: VoxCordis
+Suite: stable
+MD5Sum:
+ e76f153e26107cff66cb9bf1cde96576             3195 main/binary-amd64/Packages
+ 530ccf108d51d3a079179fce675c82d4             1115 main/binary-amd64/Packages.gz
+ 9c1ba24914376d2387cd18ce6bdbe6b3             1160 main/binary-amd64/Packages.xz
+SHA1:
+ 9dfd1e87307f411fad544d6a2af5bc8599ae3d04             3195 main/binary-amd64/Packages
+ 654de28672962fee6b4f73b3b9bbca46a6c90c8b             1115 main/binary-amd64/Packages.gz
+ 66f4c603e8ac415bf7a58e93de69cd472e41d4dd             1160 main/binary-amd64/Packages.xz
+SHA256:
+ 178d3f5d1ae0017c08c65763b5e291d89dad4cf1198be65eb278165b679dc48f             3195 main/binary-amd64/Packages
+ 01f0a2e0563c6b96d6701b76174e611fe442fc94bab6791f4da2cb6a0eaf29b6             1115 main/binary-amd64/Packages.gz
+ d98adad4466206edd020aeecf8c3b78bf32b4fbc42b57c4e69b6ab237d30cc33             1160 main/binary-amd64/Packages.xz
+SHA512:
+ 1eed501d70b1981c873d4e2a02a2bd67b6dfa889b0509a1c30fd085a518ede742df3c8fb28775e8261e2a819fe3b83f169bc5fa142640d75537ebb3199c5eb9d             3195 main/binary-amd64/Packages
+ 9cd2165991712198c662f367aa56b47433ae11fdb55b0c051cab7768431ade2353af66f85b6a3b07f835ad63191c6eb155454ad22ee22884e60742a2a886b1dd             1115 main/binary-amd64/Packages.gz
+ 5b34090a367e9660c993549a650b12e45d94f75ced4620ea94193edfe48f891e31d757d169c528cdcb1808cfa1c0395bea02d008b07a2856ea602c4ce44f2c31             1160 main/binary-amd64/Packages.xz
