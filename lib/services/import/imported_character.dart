@@ -23,6 +23,7 @@ class ImportedCharacter {
     this.userName,
     this.notes = const [],
     this.nemini,
+    this.cardType,
   }) : looks = looks ?? {for (final k in DeskFiles.looksKeys) k: ''};
 
   /// Whether the companion is asked to rewrite the imported prose in its
@@ -65,6 +66,10 @@ class ImportedCharacter {
 
   /// What was left out or changed, shown in the review step.
   final List<String> notes;
+
+  /// Soulkyn's card type when it isn't a single Kyn: `rpg`, `world`,
+  /// `multiple` or `dll`. Voces Mundi makes an RPG or world card a world.
+  final String? cardType;
 
   /// Memories, chat and files still inside a Nemini ZIP.
   final NeminiExtras? nemini;

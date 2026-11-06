@@ -22,6 +22,7 @@ import 'data/schedule/schedule_repository.dart';
 import 'data/schedule/schedule_tools.dart';
 import 'data/settings.dart';
 import 'data/story_repository.dart';
+import 'data/voces/story_log.dart';
 import 'data/skills/skill_tools.dart';
 import 'features/chat/prompt_history.dart';
 import 'services/changelog.dart';
@@ -351,8 +352,104 @@ class AppServices {
     }
   }
 
+  /// One answer from the chat model to [system] and [user], without the
+  /// companion's prompt or tools; null when it can't be reached.
+  Future<String?> askModel(
+    String system,
+    String user, {
+    int maxTokens = 1500,
+  }) async {
+    final s = settings.value;
+    final http = Client();
+    runtime.hold();
+    try {
+      final target = await runtime.ensureReady(s);
+      final client = LlmClient(
+        baseUrl: target.baseUrl,
+        model: target.model,
+        apiKey: target.apiKey,
+        sampling: samplingFor(s),
+        stop: stopFor(s),
+        maxTokens: maxTokens,
+        stallWait: const Duration(minutes: 2),
+        client: http,
+      );
+      final reply = StringBuffer();
+      await for (final e in client.chat([
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': user},
+      ])) {
+        if (e is TextDelta) reply.write(e.text);
+      }
+      return reply.toString();
+    } finally {
+      http.close();
+      runtime.release(settings.value);
+    }
+  }
+
+  /// The chat model's reply to [system] and [user], piece by piece, for a
+  /// Voces Mundi story. [stop] adds lines that end the reply. Cancelling
+  /// the subscription stops the model.
+  Stream<String> streamModel(
+    String system,
+    String user, {
+    List<String> stop = const [],
+    int maxTokens = 1200,
+  }) async* {
+    final s = settings.value;
+    final http = Client();
+    runtime.hold();
+    try {
+      final target = await runtime.ensureReady(s);
+      final client = LlmClient(
+        baseUrl: target.baseUrl,
+        model: target.model,
+        apiKey: target.apiKey,
+        sampling: samplingFor(s),
+        stop: [...stopFor(s), ...stop],
+        maxTokens: maxTokens,
+        stallWait: const Duration(minutes: 2),
+        client: http,
+      );
+      await for (final e in client.chat([
+        {'role': 'system', 'content': system},
+        {'role': 'user', 'content': user},
+      ])) {
+        if (e is TextDelta) yield e.text;
+      }
+    } finally {
+      http.close();
+      runtime.release(settings.value);
+    }
+  }
+
+  /// Where story [id]'s turns are kept: encrypted like the chats, outside
+  /// the library folder.
+  String storyDbPath(String id) =>
+      p.join(runtime.supportDir.path, 'stories', '$id.db');
+
+  /// Opens story [id]'s turns.
+  Future<StoryLog> openStoryLog(String id) async {
+    final path = storyDbPath(id);
+    await Directory(p.dirname(path)).create(recursive: true);
+    return StoryLog.open(path, key: dbKey.value);
+  }
+
+  /// Deletes story [id]'s turns.
+  Future<void> deleteStoryLog(String id) async {
+    for (final end in const ['', '-journal', '-wal', '-shm']) {
+      final f = File('${storyDbPath(id)}$end');
+      if (await f.exists()) await f.delete();
+    }
+  }
+
   /// Set while the human is setting up another companion from the menu.
   final addingCompanion = ValueNotifier(false);
+
+  /// Set while Voces Mundi, the roleplay mode, fills the window instead of
+  /// the companion.
+  final vocesOpen = ValueNotifier(false);
 
   /// File tools for the companion folder. Saving personality.md updates the
   /// name, traits and pronouns shown on the companion card, and set_avatar

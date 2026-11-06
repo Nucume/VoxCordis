@@ -179,15 +179,17 @@ class CharacterCard {
         .where((t) => !traits.contains(t.toLowerCase()))
         .toList();
     // The editor's card type: a single Kyn, or one built for roleplay.
+    final cardType = _str(sk['card_type']).trim().toLowerCase();
     final type = const {
       'multiple': 'several characters',
       'rpg': 'an RPG',
       'dll': 'a behaviour mod',
       'world': 'a world or setting',
-    }[_str(sk['card_type']).trim().toLowerCase()];
+    }[cardType];
 
     return ImportedCharacter(
       source: 'Soulkyn',
+      cardType: type == null ? null : cardType,
       notes: [
         if (type != null)
           'On Soulkyn this card is $type, made for roleplay. It comes over as '

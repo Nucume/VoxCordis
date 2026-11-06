@@ -9,9 +9,10 @@ import '../release_signature.dart';
 import '../updater.dart' show updateRepo;
 import 'download.dart';
 
-/// Gets a build the app's own release workflow makes and attaches to the
-/// latest release (the CUDA llama-server and sd-cli for Linux, which their
-/// projects don't publish). It is unpacked into [into] only when the
+/// Gets a build the app's own release workflow makes and attaches to its
+/// releases (the CUDA llama-server and sd-cli for Linux, which their
+/// projects don't publish), from the newest release that has it: the
+/// latest one, or an older one or a pre-release when the latest lacks it. It is unpacked into [into] only when the
 /// release key signed it, like an update; otherwise [note] is told why and
 /// false comes back, so the caller uses another build.
 Future<bool> installSignedReleaseAsset(
@@ -29,29 +30,25 @@ Future<bool> installSignedReleaseAsset(
       return false;
     }
     final res = await client.get(
-      Uri.parse('https://api.github.com/repos/$updateRepo/releases/latest'),
+      Uri.parse(
+        'https://api.github.com/repos/$updateRepo/releases?per_page=10',
+      ),
       headers: {'Accept': 'application/vnd.github+json'},
     );
     if (res.statusCode != 200) {
       note?.call(
-        '$what skipped: GitHub answered HTTP ${res.statusCode} for the latest release of $updateRepo.',
+        '$what skipped: GitHub answered HTTP ${res.statusCode} for the releases of $updateRepo.',
       );
       return false;
     }
-    final assets = (jsonDecode(res.body) as Map)['assets'] as List;
-    Map? file;
-    Map? sig;
-    for (final a in assets.cast<Map>()) {
-      if (a['name'] == asset) file = a;
-      if (a['name'] == '$asset.sig') sig = a;
-    }
-    final sha = sha256Digest(file?['digest']);
-    if (file == null || sig == null || sha == null) {
+    final found = newestSignedAsset(jsonDecode(res.body), asset);
+    if (found == null) {
       note?.call(
-        '$what skipped: the latest release of $updateRepo has no signed $asset yet.',
+        '$what skipped: no recent release of $updateRepo has a signed $asset yet.',
       );
       return false;
     }
+    final (:file, :sig, :sha) = found;
 
     final sigRes = await client.get(
       Uri.parse(sig['browser_download_url'] as String),
@@ -85,4 +82,27 @@ Future<bool> installSignedReleaseAsset(
     note?.call('$what skipped: $e');
     return false;
   }
+}
+
+/// The newest release in [releases] (GitHub's list, newest first) that
+/// carries [asset] with its `.sig` and a SHA-256 digest; drafts are skipped.
+({Map file, Map sig, String sha})? newestSignedAsset(
+  Object? releases,
+  String asset,
+) {
+  if (releases is! List) return null;
+  for (final r in releases.whereType<Map>()) {
+    if (r['draft'] == true || r['assets'] is! List) continue;
+    Map? file;
+    Map? sig;
+    for (final a in (r['assets'] as List).whereType<Map>()) {
+      if (a['name'] == asset) file = a;
+      if (a['name'] == '$asset.sig') sig = a;
+    }
+    final sha = sha256Digest(file?['digest']);
+    if (file != null && sig != null && sha != null) {
+      return (file: file, sig: sig, sha: sha);
+    }
+  }
+  return null;
 }

@@ -12,6 +12,11 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+### Fixed
+- **CUDA drawing on Linux, for real this time.** 0.4.1 brought CUDA drawing, but the Linux CUDA engine it downloads wasn't part of that release yet, so Linux kept drawing with Vulkan. It is now. With an NVIDIA card, drawing and animating switch to CUDA within a day of updating, or straight away if you delete `master-920-2f88688.no-cuda` in the app's `draw` folder and restart. Settings → Logs says "Drawing with the CUDA build of sd-cli." when it's in use.
+
+## 0.4.1
+
 ### New
 - **Sampler and Scheduler in Draw → Advanced.** Pick any of the drawing engine's samplers (Euler a, DPM++ 2M, ER-SDE and more) and schedulers (Karras, Beta, Simple and more), or leave them on the model's own. They are kept per model with its other numbers, and Reset puts them back.
 - **Your own ratio.** A fourth button next to Square, Portrait and Landscape opens a small field for a ratio of your own, written any way you like: "9:16", "16 9", "4/3" or "4x3". Without a typed size the picture keeps about the model's usual number of pixels in that ratio. In the advanced options, typing the height sets the width from the ratio (or the other way round), and the swap button turns 9:16 into 16:9.

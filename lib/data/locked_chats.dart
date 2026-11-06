@@ -33,6 +33,17 @@ class LockedChats {
         key.supportDir.path,
         p.relative(from.path, from: folder.path),
       );
+      // A story of Voces Mundi isn't a chat: it goes back as it was,
+      // unless a story took its place.
+      if (p.split(p.relative(from.path, from: folder.path)).first ==
+          'stories') {
+        if (!await File(target).exists()) {
+          DatabaseKey.rekeyFile(from, oldKey, key.value);
+          await Directory(p.dirname(target)).create(recursive: true);
+          await from.rename(target);
+        }
+        continue;
+      }
       // Rolls back a write left half done, and brings the tables up to
       // this version, so both sides have the same columns.
       final old = await openAppDatabase(from.path, key: oldKey);

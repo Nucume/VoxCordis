@@ -84,6 +84,7 @@ class SoulkynLink {
       soulkynPage: url,
       avatars: avatars,
       notes: card.notes,
+      cardType: card.cardType,
     );
   }
 
@@ -240,6 +241,7 @@ class SoulkynLink {
     });
     return ImportedCharacter(
       source: card.source,
+      cardType: card.cardType,
       name: card.name,
       pronouns: card.pronouns,
       traits: card.traits,

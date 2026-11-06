@@ -299,6 +299,8 @@ class AppSettings {
     this.blockedSites = const [],
     this.keepRunning = false,
     this.keepLogs = true,
+    this.vocesMundi = false,
+    this.vocesMature = false,
     this.logsOff = const [],
     this.startMode = StartMode.off,
     this.automationRunsPerDay = 24,
@@ -451,6 +453,15 @@ class AppSettings {
   /// Settings → Logs, kept in the companion's database.
   final bool keepLogs;
 
+  /// Voces Mundi, the roleplay mode, shows as a row in the companion
+  /// menu. Off by default, so people who only want a companion never see
+  /// it.
+  final bool vocesMundi;
+
+  /// 18+ worlds, their extra tags and the narrator's adult rules show in
+  /// Voces Mundi. Off by default; turned on after an age check.
+  final bool vocesMature;
+
   /// The kinds of log line not written (LogKind names), while [keepLogs]
   /// is on.
   final List<String> logsOff;
@@ -598,6 +609,8 @@ class AppSettings {
       blockedSites: blockedSites,
       keepRunning: keepRunning,
       keepLogs: keepLogs,
+      vocesMundi: vocesMundi,
+      vocesMature: vocesMature,
       logsOff: logsOff,
       startMode: startMode,
       automationRunsPerDay: automationRunsPerDay,
@@ -666,6 +679,8 @@ class AppSettings {
     List<String>? blockedSites,
     bool? keepRunning,
     bool? keepLogs,
+    bool? vocesMundi,
+    bool? vocesMature,
     List<String>? logsOff,
     StartMode? startMode,
     int? automationRunsPerDay,
@@ -742,6 +757,8 @@ class AppSettings {
       blockedSites: blockedSites ?? this.blockedSites,
       keepRunning: keepRunning ?? this.keepRunning,
       keepLogs: keepLogs ?? this.keepLogs,
+      vocesMundi: vocesMundi ?? this.vocesMundi,
+      vocesMature: vocesMature ?? this.vocesMature,
       logsOff: logsOff ?? this.logsOff,
       startMode: startMode ?? this.startMode,
       automationRunsPerDay: automationRunsPerDay ?? this.automationRunsPerDay,
@@ -802,6 +819,8 @@ class AppSettings {
     'blockedSites': blockedSites,
     'keepRunning': keepRunning,
     'keepLogs': keepLogs,
+    'vocesMundi': vocesMundi,
+    'vocesMature': vocesMature,
     'logsOff': logsOff,
     'startMode': startMode.name,
     'automationRunsPerDay': automationRunsPerDay,
@@ -892,6 +911,8 @@ class AppSettings {
           const [],
       keepRunning: json['keepRunning'] as bool? ?? false,
       keepLogs: json['keepLogs'] as bool? ?? true,
+      vocesMundi: json['vocesMundi'] as bool? ?? false,
+      vocesMature: json['vocesMature'] as bool? ?? false,
       logsOff:
           (json['logsOff'] as List?)?.whereType<String>().toList() ?? const [],
       // Before the choice there was a switch, which always started hidden.

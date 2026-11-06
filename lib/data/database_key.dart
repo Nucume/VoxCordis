@@ -68,15 +68,19 @@ class DatabaseKey {
   /// `PRAGMA key` and `rekey` take the key as an SQL string.
   static String quote(String key) => "'${key.replaceAll("'", "''")}'";
 
-  /// Every companion database there is: `companion.db` and
-  /// `companions/*.db`.
+  /// Every database there is: `companion.db`, `companions/*.db` and the
+  /// stories of Voces Mundi, `stories/*.db`.
   List<File> databases() {
     final files = <File>[File(p.join(supportDir.path, 'companion.db'))];
-    final more = Directory(p.join(supportDir.path, 'companions'));
-    if (more.existsSync()) {
-      files.addAll(
-        more.listSync().whereType<File>().where((f) => f.path.endsWith('.db')),
-      );
+    for (final folder in ['companions', 'stories']) {
+      final more = Directory(p.join(supportDir.path, folder));
+      if (more.existsSync()) {
+        files.addAll(
+          more.listSync().whereType<File>().where(
+            (f) => f.path.endsWith('.db'),
+          ),
+        );
+      }
     }
     return [
       for (final f in files)
@@ -367,6 +371,9 @@ class DatabaseKey {
       }
     }
   }
+
+  /// Re-encrypts the closed database [f] from key [from] to [to].
+  static void rekeyFile(File f, String from, String to) => _rekey(f, from, to);
 
   static void _rekey(File f, String from, String to) {
     final db = raw.sqlite3.open(f.path);

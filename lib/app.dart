@@ -4,6 +4,7 @@ import 'app_scope.dart';
 import 'data/looks.dart';
 import 'data/settings.dart';
 import 'features/setup/setup_wizard.dart';
+import 'features/voces/voces_home.dart';
 import 'shell/home_shell.dart';
 import 'shell/interface_scale.dart';
 import 'shell/window_frame.dart';
@@ -63,6 +64,7 @@ class _CompanionAppState extends State<CompanionApp>
       listenable: Listenable.merge([
         settings,
         services.addingCompanion,
+        services.vocesOpen,
         services.backgroundRevision,
         services.resets,
       ]),
@@ -120,6 +122,8 @@ class _CompanionAppState extends State<CompanionApp>
             duration: const Duration(milliseconds: 500),
             child: setup
                 ? SetupWizard(key: ValueKey(adding), addingAnother: adding)
+                : services.vocesOpen.value && settings.value.vocesMundi
+                ? const VocesHome(key: ValueKey('voces'))
                 : HomeShell(
                     key: ValueKey(
                       'companion:${settings.value.companionId}:'

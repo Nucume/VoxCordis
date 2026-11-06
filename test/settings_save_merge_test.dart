@@ -60,6 +60,8 @@ const _everything = AppSettings(
   blockedSites: ['a.com'],
   keepRunning: true,
   keepLogs: false,
+  vocesMundi: true,
+  vocesMature: true,
   logsOff: ['web'],
   startMode: StartMode.onScreen,
   automationRunsPerDay: 5,

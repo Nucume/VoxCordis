@@ -134,6 +134,16 @@ class _CompanionSwitcherState extends State<CompanionSwitcher>
     await showExportDialog(context);
   }
 
+  /// Voces Mundi, the roleplay mode, in place of the companion.
+  Future<void> _voces() async {
+    if (_waitForReply()) return;
+    final services = AppScope.of(context);
+    await _close();
+    if (!await (widget.mayLeave?.call() ?? Future.value(true))) return;
+    if (!mounted || _waitForReply()) return;
+    services.vocesOpen.value = true;
+  }
+
   /// Every companion as cards, when the menu has no room for them all.
   Future<void> _more() async {
     await _close();
@@ -192,6 +202,7 @@ class _CompanionSwitcherState extends State<CompanionSwitcher>
                         onAdd: _add,
                         onExport: _export,
                         onMore: _more,
+                        onVoces: s.vocesMundi ? _voces : null,
                       ),
                     ),
                   ),
@@ -229,6 +240,7 @@ class _Popover extends StatelessWidget {
     required this.onAdd,
     required this.onExport,
     required this.onMore,
+    this.onVoces,
   });
 
   final Animation<double> animation;
@@ -242,14 +254,18 @@ class _Popover extends StatelessWidget {
   final VoidCallback onExport;
   final VoidCallback onMore;
 
+  /// Opens Voces Mundi; null while it is switched off in Settings.
+  final VoidCallback? onVoces;
+
   /// Heights of the parts, for working out how many rows fit.
   static const rowHeight = 60.0;
   static const fixedHeight = 184.0; // header, divider, two action rows
 
   /// How many companions to list when [count] exist, the rest behind
   /// "More…". The current companion is always listed.
-  static int fitting(int count, double maxHeight) {
-    final rows = ((maxHeight - fixedHeight) / rowHeight).floor();
+  static int fitting(int count, double maxHeight, {bool voces = false}) {
+    final fixed = fixedHeight + (voces ? rowHeight : 0);
+    final rows = ((maxHeight - fixed) / rowHeight).floor();
     if (count <= rows) return count;
     return (rows - 1).clamp(1, count); // one row goes to "More…"
   }
@@ -258,7 +274,7 @@ class _Popover extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.palette;
     final all = settings.companions;
-    final shown = fitting(all.length, maxHeight);
+    final shown = fitting(all.length, maxHeight, voces: onVoces != null);
     final companions = all.take(shown).toList();
     final hidden = all.length - shown;
     final rows = companions.length + (hidden > 0 ? 2 : 1);
@@ -334,6 +350,8 @@ class _Popover extends StatelessWidget {
                 child: Divider(height: 1, color: palette.glassBorder),
               ),
             ),
+            if (onVoces case final open?)
+              staggered(rows, _VocesRow(onTap: open)),
             staggered(
               rows,
               _ActionRow(
@@ -487,6 +505,88 @@ class _CompanionRow extends StatelessWidget {
                     )
                   : const SizedBox(key: ValueKey('none'), width: 16),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Voces Mundi, the roleplay mode: a warm tile and two lines, so it reads
+/// as a place of its own rather than one more companion.
+class _VocesRow extends StatelessWidget {
+  const _VocesRow({required this.onTap});
+
+  final VoidCallback onTap;
+
+  static const colors = [Color(0xFFFF9A5A), Color(0xFF7A2F5C)];
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    return _HoverRow(
+      onTap: onTap,
+      builder: (context, hover) => AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.all(8),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(14),
+          gradient: LinearGradient(
+            colors: [
+              for (final c in colors) c.withValues(alpha: hover ? 0.22 : 0.12),
+            ],
+          ),
+          border: Border.all(
+            color: colors.first.withValues(alpha: hover ? 0.55 : 0.28),
+          ),
+        ),
+        child: Row(
+          children: [
+            AnimatedRotation(
+              turns: hover ? 0.08 : 0,
+              duration: const Duration(milliseconds: 320),
+              curve: Curves.easeOutBack,
+              child: Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  gradient: const LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: colors,
+                  ),
+                ),
+                child: const Icon(
+                  Icons.public_rounded,
+                  color: Colors.white,
+                  size: 22,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Voces Mundi',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w700,
+                      color: palette.text,
+                    ),
+                  ),
+                  Text(
+                    'RPG mode · Worlds, stories, lorebooks',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 12, color: palette.textMuted),
+                  ),
+                ],
+              ),
+            ),
+            Icon(Icons.chevron_right_rounded, color: palette.textMuted),
           ],
         ),
       ),
@@ -875,6 +975,22 @@ class _MoreRow extends StatelessWidget {
 }
 
 /// What the gallery hands back.
+/// Every companion as cards, for Voces Mundi's "Back to Vox Cordis": the
+/// one picked, `(add: true)` for "Create a new one", or null when closed.
+Future<({CompanionProfile? companion, bool add})?> pickCompanion(
+  BuildContext context,
+) async {
+  final picked = await _showCompanionGallery(
+    context,
+    AppScope.of(context).settings.value,
+  );
+  return switch (picked) {
+    null => null,
+    _AddPick() => (companion: null, add: true),
+    _CompanionPick(:final companion) => (companion: companion, add: false),
+  };
+}
+
 sealed class _GalleryPick {
   const _GalleryPick();
 }

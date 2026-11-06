@@ -610,6 +610,46 @@ class SettingsScreenState extends State<SettingsScreen> {
           await launchUrl(Uri.file(file.path));
         },
       ),
+      const _Section('Voces Mundi'),
+      SwitchListTile(
+        contentPadding: EdgeInsets.zero,
+        value: _draft.vocesMundi,
+        onChanged: (on) =>
+            setState(() => _draft = _draft.copyWith(vocesMundi: on)),
+        title: const Text('Show Voces Mundi (RPG mode)'),
+        subtitle: Text(
+          'Worlds, stories and lorebooks, played with a cast of characters '
+          'and a narrator. It opens from a row in the companion menu, and '
+          '$name\'s chat and memories stay separate from it.',
+          style: TextStyle(fontSize: 12, color: context.palette.textMuted),
+        ),
+      ),
+      if (_draft.vocesMundi)
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _draft.vocesMature,
+          onChanged: (on) {
+            setState(() => _draft = _draft.copyWith(vocesMature: on));
+            if (on) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text(
+                    'Mature content is on once you save: 18+ worlds and '
+                    'their tags show, and their stories may go explicit.',
+                  ),
+                ),
+              );
+            }
+          },
+          title: const Text('Mature content (18+)'),
+          subtitle: Text(
+            'Shows 18+ worlds and their extra tags (gore, war, erotic…). '
+            'In those, the narrator may show violence, sex and heavy themes '
+            'in full, and follows where you take the story. Other worlds '
+            'stay as they are, though love that grows there may show.',
+            style: TextStyle(fontSize: 12, color: context.palette.textMuted),
+          ),
+        ),
       const _Section('Danger zone'),
       Padding(
         padding: const EdgeInsets.only(top: 8),
