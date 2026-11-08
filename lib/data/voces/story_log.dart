@@ -22,9 +22,16 @@ enum TurnKind {
   ask,
 
   /// Someone comes or goes; shown as a divider.
-  scene;
+  scene,
+
+  /// A picture of the scene, drawn on request: its file in the story's
+  /// folder. Not part of what the story's writers read.
+  picture;
 
   bool get byHuman => this == say || this == act || this == ask;
+
+  /// Beside the story rather than in it: a divider or a picture.
+  bool get aside => this == scene || this == picture;
 
   static TurnKind byName(String? n) =>
       values.where((k) => k.name == n).firstOrNull ?? narrator;

@@ -171,12 +171,11 @@ void main() {
       },
     );
 
-    test('models that see are never the recommendation', () {
-      for (final gb in [8.0, 9.0, 12.0, 24.0]) {
-        expect(
-          ModelCatalog.recommendFor(GpuInfo(memoryGb: gb))!.canSee,
-          isFalse,
-        );
+    test('vision-first models are never the recommendation', () {
+      for (final gb in [8.0, 9.0, 10.0, 12.0, 24.0]) {
+        final m = ModelCatalog.recommendFor(GpuInfo(memoryGb: gb))!;
+        expect(m.recommendable, isTrue);
+        expect(m.id, isNot(startsWith('qwen3-vl')));
       }
     });
 

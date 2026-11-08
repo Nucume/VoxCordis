@@ -371,6 +371,33 @@ class VocesLibrary {
     );
   }
 
+  /// A copy of [story] as a new story called [title]: its world, cast,
+  /// lorebooks and pictures as they are now. The turns are copied by the
+  /// caller (they live in the story's own encrypted log).
+  Future<StorySave> branchStory(
+    StorySave story, {
+    required String title,
+    DateTime? now,
+  }) async {
+    final at = now ?? DateTime.now();
+    final id = await _freeId(_stories, title);
+    await _copyDir(storyFolder(story.id), storyFolder(id));
+    return saveStory(
+      StorySave(
+        id: id,
+        title: title,
+        worldId: story.worldId,
+        worldName: story.worldName,
+        playerId: story.playerId,
+        playerName: story.playerName,
+        difficulty: story.difficulty,
+        opening: story.opening,
+        created: at,
+        lastPlayed: at,
+      ).copyWith(place: story.place),
+    );
+  }
+
   /// Saves [c] into [story]'s own cast (someone met while playing, or a
   /// sheet changed there); a new one gets a free id in that cast.
   Future<VocesCharacter> saveStoryCharacter(
@@ -398,6 +425,86 @@ class VocesLibrary {
       characterFolder(id),
     );
     return saveCharacter(c.copyWith(id: id, name: named));
+  }
+
+  /// What changed in [story]'s world since the story took its copy: the
+  /// world itself, its lorebooks (new, changed, or no longer in it) and its
+  /// cast (new or changed; the player stays as they are). Null when the
+  /// world is gone.
+  Future<WorldUpdate?> worldUpdate(StorySave story) async {
+    final world = (await worlds())
+        .where((w) => w.id == story.worldId)
+        .firstOrNull;
+    if (world == null) return null;
+    final have = await storyWorld(story);
+    String same(Map<String, Object?> json) => jsonEncode(json);
+    final books = {for (final b in await lorebooks()) b.id: b};
+    final mine = {for (final b in have.lorebooks) b.id: b};
+    final cast = {for (final c in await characters()) c.id: c};
+    return WorldUpdate(
+      world: same(world.toJson()) == same(have.world.toJson()) ? null : world,
+      lorebooks: [
+        for (final id in world.lorebookIds)
+          if (books[id] case final b?)
+            if (mine[id] == null)
+              (book: b, change: WorldChange.added)
+            else if (same(b.toJson()) != same(mine[id]!.toJson()))
+              (book: b, change: WorldChange.changed),
+        for (final b in have.lorebooks)
+          if (!world.lorebookIds.contains(b.id))
+            (book: b, change: WorldChange.removed),
+      ],
+      cast: [
+        for (final id in world.castIds)
+          if (id != story.playerId)
+            if (cast[id] case final c?)
+              if (have.cast[id] == null)
+                (character: c, change: WorldChange.added)
+              else if (same(c.toJson()) != same(have.cast[id]!.toJson()))
+                (character: c, change: WorldChange.changed),
+      ],
+    );
+  }
+
+  /// Takes the parts of [update] picked into [story]'s own copy: the world
+  /// when [world], and the lorebooks and characters whose ids are given.
+  /// The story so far stays as it is.
+  Future<StorySave> applyWorldUpdate(
+    StorySave story,
+    WorldUpdate update, {
+    bool world = false,
+    Set<String> lorebooks = const {},
+    Set<String> cast = const {},
+  }) async {
+    final folder = storyFolder(story.id);
+    var saved = story;
+    final w = update.world;
+    if (world && w != null) {
+      await _writeJson(File(p.join(folder, 'world.json')), w.toJson());
+      final picture = worldPicture(w);
+      if (picture != null && await picture.exists()) {
+        await picture.copy(p.join(folder, w.picture));
+      }
+      if (w.name != story.worldName) {
+        saved = await saveStory(story.copyWith(worldName: w.name));
+      }
+    }
+    for (final (:book, :change) in update.lorebooks) {
+      if (!lorebooks.contains(book.id)) continue;
+      final f = File(p.join(folder, 'lorebooks', '${book.id}.json'));
+      if (change == WorldChange.removed) {
+        if (await f.exists()) await f.delete();
+      } else {
+        await _writeJson(f, book.toJson());
+      }
+    }
+    for (final (:character, change: _) in update.cast) {
+      if (!cast.contains(character.id)) continue;
+      final to = p.join(folder, 'cast', character.id);
+      await _deleteDir(to);
+      await _copyDir(characterFolder(character.id), to);
+    }
+    return saved;
   }
 
   /// What [story] began with: its own copy of the world, the cast (the
@@ -536,4 +643,25 @@ class StoryWorld {
   File? portraitOf(VocesCharacter c) => c.portrait == null
       ? null
       : File(p.join(folder, 'cast', c.id, c.portrait));
+}
+
+/// How a part of a world differs from a story's copy of it.
+enum WorldChange { added, changed, removed }
+
+/// What changed in a world since a story took its copy; see
+/// [VocesLibrary.worldUpdate].
+class WorldUpdate {
+  const WorldUpdate({
+    this.world,
+    this.lorebooks = const [],
+    this.cast = const [],
+  });
+
+  /// The world as it is now, when its setting, rules or anything else of
+  /// its own changed.
+  final VocesWorld? world;
+  final List<({Lorebook book, WorldChange change})> lorebooks;
+  final List<({VocesCharacter character, WorldChange change})> cast;
+
+  bool get isEmpty => world == null && lorebooks.isEmpty && cast.isEmpty;
 }

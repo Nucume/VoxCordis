@@ -179,7 +179,10 @@ String aboutDrawing(
     'You can draw pictures with draw_picture: when your human asks for '
     'one, when they would enjoy one, or to show yourself (your looks are in '
     'personality.md). Pick the model and LoRAs that suit, and write the '
-    'prompt the way that model likes. Quality tags are added for you.\n'
+    'prompt the way that model likes. Quality tags are added for you. '
+    'Only a draw_picture call makes a picture: describing a photo or '
+    'drawing in your reply, or saying it appears, draws nothing. So when '
+    'you show them a picture, call draw_picture in that same reply.\n'
     'Your picture models:\n',
   );
   for (final m in ready) {

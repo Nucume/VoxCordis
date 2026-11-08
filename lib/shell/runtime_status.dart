@@ -118,7 +118,7 @@ class RuntimeStatus extends StatelessWidget {
           message: [
             if (dot) label,
             ?detail,
-            'Right-click to move this light.',
+            'Right-click to unload the model or move this light.',
           ].join('\n'),
           child: GestureDetector(
             onSecondaryTapUp: (d) => _pickPlace(context, d.globalPosition),
@@ -135,17 +135,35 @@ class RuntimeStatus extends StatelessWidget {
     );
   }
 
+  /// The light's menu: unload the model (when one is loaded here), and
+  /// where the light sits.
   static Future<void> _pickPlace(BuildContext context, Offset at) async {
-    final store = AppScope.of(context).settings;
+    final services = AppScope.of(context);
+    final store = services.settings;
+    final runtime = services.runtime;
     final overlay =
         Overlay.of(context).context.findRenderObject()! as RenderBox;
-    final picked = await showMenu<StatusLight>(
+    final loaded = runtime.state == RuntimeState.ready;
+    final picked = await showMenu<Object>(
       context: context,
       position: RelativeRect.fromRect(
         at & const Size(1, 1),
         Offset.zero & overlay.size,
       ),
       items: [
+        if (loaded) ...[
+          PopupMenuItem(
+            value: unloadChoice,
+            enabled: !runtime.busy,
+            child: const ListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              leading: Icon(Icons.eject_rounded, size: 20),
+              title: Text('Unload model now'),
+            ),
+          ),
+          const PopupMenuDivider(),
+        ],
         for (final p in StatusLight.values)
           CheckedPopupMenuItem(
             value: p,
@@ -154,10 +172,16 @@ class RuntimeStatus extends StatelessWidget {
           ),
       ],
     );
-    if (picked != null) {
+    if (picked == unloadChoice) {
+      // A reply may have started while the menu was open.
+      if (!runtime.busy) await runtime.freeGpu();
+    } else if (picked is StatusLight) {
       await store.update(store.value.copyWith(statusLight: picked));
     }
   }
+
+  /// The menu's "Unload model now".
+  static const unloadChoice = 'unload';
 
   static String placeLabel(StatusLight p) => switch (p) {
     StatusLight.portrait => 'On the portrait',

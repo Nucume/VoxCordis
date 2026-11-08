@@ -7,7 +7,10 @@ import 'package:path/path.dart' as p;
 import 'package:companion/data/voces/story_log.dart';
 import 'package:companion/data/voces/voces_library.dart';
 import 'package:companion/data/voces/voces_models.dart';
+import 'package:companion/services/voces/scene_tags.dart';
 import 'package:companion/services/voces/story_engine.dart';
+import 'package:companion/services/voces/story_export.dart';
+import 'package:companion/services/voces/story_notes.dart';
 
 StoryTurn turn(
   int id,
@@ -124,6 +127,27 @@ void main() {
       engine.whoAnswers(turn(3, TurnKind.ask, 'Tomas trips.'), before, two),
       isNull,
     );
+    // One turn says and does: words in quotes, actions in asterisks. Only
+    // an action goes to the narrator, as Do did.
+    expect(
+      engine.whoAnswers(
+        turn(3, TurnKind.say, '*I open the door.*'),
+        before,
+        two,
+      ),
+      isNull,
+    );
+    expect(
+      engine.whoAnswers(
+        turn(3, TurnKind.say, '*I lean in.* "Who sent you?"'),
+        before,
+        two,
+      ),
+      'mira',
+    );
+    expect(StoryEngine.onlyAction('*sits* *waits*'), isTrue);
+    expect(StoryEngine.onlyAction('Hello there.'), isFalse);
+    expect(StoryEngine.onlyAction('*sits* and smiles'), isFalse);
   });
 
   test('continue: a quiet character after the narrator, else the narrator', () {
@@ -328,6 +352,237 @@ void main() {
         turn(3, TurnKind.narrator, 'b'),
       ]),
       'a\nb',
+    );
+  });
+
+  test('a picture turn stays out of what the writers read', () {
+    final turns = [
+      turn(1, TurnKind.narrator, 'Rain.'),
+      turn(2, TurnKind.picture, 'pictures/scene-1.png'),
+      turn(3, TurnKind.say, 'Hello.'),
+    ];
+    expect(engine.transcript(turns), 'Narrator: Rain.\n\nHaru: Hello.');
+    expect(TurnKind.picture.aside, isTrue);
+    expect(engine.whoContinues([turns[0], turns[1]], two), isNotNull);
+  });
+
+  test('Draw the scene: the moment, then tags with their own looks', () {
+    final turns = [
+      for (var i = 1; i <= 9; i++) turn(i, TurnKind.narrator, 'Line $i.'),
+      turn(10, TurnKind.picture, 'pictures/x.png'),
+      turn(11, TurnKind.character, 'Down!', by: 'mira', name: 'Mira Vane'),
+      turn(12, TurnKind.say, 'Later.'),
+    ];
+    final brief = SceneTags.brief(engine, turns, turns[10], place: 'The docks');
+    expect(brief, contains('- Haru, played by the human'));
+    expect(brief, contains('Place: The docks'));
+    expect(brief, contains('Mira Vane: Down!'));
+    // Six turns up to the one picked, the picture left out.
+    expect(brief, isNot(contains('Line 4.')));
+    expect(brief, contains('Line 5.'));
+    expect(brief, isNot(contains('Later.')));
+    expect(brief, isNot(contains('x.png')));
+
+    final cast = [
+      mira.copyWith(looksTags: ['red hair', 'eyepatch']),
+      tomas.copyWith(looksTags: ['bald']),
+      haru.copyWith(looksTags: ['grey coat']),
+    ];
+    final prompt = SceneTags.prompt(
+      '<think>hm</think>**Visible:** Mira, Haru\n'
+      'Tags: 1girl, 1boy, ducking, Rain, night, harbor\n',
+      cast,
+    );
+    expect(
+      prompt,
+      '1girl, 1boy, ducking, rain, night, harbor, red hair, eyepatch, '
+      'grey coat',
+    );
+    expect(SceneTags.prompt('Visible: none\nTags:', cast), '');
+    expect(SceneTags.instructions(adult: false), contains('safe for work'));
+    expect(SceneTags.instructions(adult: true), contains('sex'));
+  });
+
+  test('a story left for a while opens with a recap', () {
+    StoryTurn at(int id, DateTime ts) =>
+        StoryTurn(id: id, kind: TurnKind.narrator, text: 'Line $id.', ts: ts);
+    final then = DateTime(2026, 11, 8, 12);
+    final six = [for (var i = 1; i <= 6; i++) at(i, then)];
+    // The first open after starting VoxCordis recaps, even soon after.
+    expect(
+      StoryEngine.wantsRecap(six, then.add(const Duration(minutes: 5))),
+      isTrue,
+    );
+    // After that, only once the story and the last recap are an hour old.
+    final shown = then.add(const Duration(minutes: 5));
+    expect(
+      StoryEngine.wantsRecap(
+        six,
+        then.add(const Duration(minutes: 30)),
+        lastRecap: shown,
+      ),
+      isFalse,
+    );
+    expect(
+      StoryEngine.wantsRecap(
+        six,
+        then.add(const Duration(hours: 2)),
+        lastRecap: shown,
+      ),
+      isTrue,
+    );
+    expect(
+      StoryEngine.wantsRecap(
+        six.take(5).toList(),
+        then.add(const Duration(days: 2)),
+      ),
+      isFalse,
+    );
+    final ask = engine.recap(six);
+    expect(ask.system, contains('Previously on'));
+    expect(ask.system, contains('Haru'));
+    expect(ask.user, contains('Line 6.'));
+  });
+
+  test(
+    'a story exports as a page with its pictures inside, or Markdown',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('export');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      File(p.join(dir.path, 'pictures', 'a.png'))
+        ..createSync(recursive: true)
+        ..writeAsBytesSync([1, 2, 3]);
+      final turns = [
+        turn(1, TurnKind.narrator, 'Place: Docks\nRain <falls>.'),
+        turn(2, TurnKind.say, '*waves* "Hi **there**"'),
+        turn(3, TurnKind.picture, 'pictures/a.png'),
+        turn(4, TurnKind.character, 'Hm.', by: 'mira', name: 'Mira Vane'),
+        turn(5, TurnKind.scene, 'Tomas arrives'),
+      ];
+      final html = await StoryExport.html(
+        title: 'Debt & Rain',
+        worldName: 'Ember',
+        player: 'Haru',
+        turns: turns,
+        folder: dir.path,
+      );
+      expect(html, contains('<title>Debt &amp; Rain</title>'));
+      expect(html, contains('Rain &lt;falls&gt;.'));
+      expect(html, isNot(contains('Place: Docks')));
+      expect(html, contains('<em>waves</em>'));
+      expect(html, contains('<strong>there</strong>'));
+      expect(html, contains('data:image/png;base64,AQID'));
+      expect(html, contains('<div class="who">Mira Vane</div>'));
+      expect(html, contains('Tomas arrives'));
+      final md = StoryExport.markdown(
+        title: 'Debt',
+        worldName: 'Ember',
+        player: 'Haru',
+        turns: turns,
+        pictures: 'Debt%20pictures',
+      );
+      expect(md, startsWith('# Debt'));
+      expect(md, contains('**Haru:**'));
+      expect(md, contains('![](Debt%20pictures/a.png)'));
+    },
+  );
+
+  test('story notes parse, edit as text and round-trip', () {
+    final n = StoryNotes.parse(
+      '<think>hm</think>\n**Items:**\n- a brass key\n- 3 coins\n'
+      'Quests:\n- Find who sent the letter\n'
+      'Feelings:\n- Mira Vane: wary, but warming\n- none\n',
+    )!;
+    expect(n.items, ['a brass key', '3 coins']);
+    expect(n.quests, ['Find who sent the letter']);
+    expect(n.feelings, {'Mira Vane': 'wary, but warming'});
+    expect(StoryNotes.parse('Nothing to report.'), isNull);
+    expect(StoryNotes.parse('Items: rope, lantern')!.items, [
+      'rope',
+      'lantern',
+    ]);
+
+    final back = StoryNotes.fromText(
+      items: n.itemsText,
+      quests: n.questsText,
+      feelings: '${n.feelingsText}\nbroken line',
+    );
+    expect(back.items, n.items);
+    expect(back.feelings, n.feelings);
+    expect(StoryNotes.fromJson(n.toJson()).quests, n.quests);
+    expect(n.forPrompt('Haru'), contains('Haru carries: a brass key, 3 coins'));
+    expect(n.forPrompt('Haru'), contains('Mira Vane towards Haru: wary'));
+    expect(
+      StoryNotes.brief(const StoryNotes(), 'Haru', 'Haru: Hi.'),
+      contains('Items:\n- none'),
+    );
+  });
+
+  test('fortune rolls on its own only for risky turns in hard stories', () {
+    final act = turn(3, TurnKind.act, 'I climb the wall.');
+    final say = turn(3, TurnKind.say, 'Hello.');
+    final sneak = turn(3, TurnKind.say, '*I pocket the key.*');
+    expect(Fortune.rollsOnItsOwn(act, Difficulty.punishing), isTrue);
+    expect(Fortune.rollsOnItsOwn(sneak, Difficulty.grimdark), isTrue);
+    expect(Fortune.rollsOnItsOwn(say, Difficulty.grimdark), isFalse);
+    for (final d in Difficulty.values) {
+      if (d == Difficulty.punishing || d == Difficulty.grimdark) continue;
+      expect(Fortune.rollsOnItsOwn(act, d), isFalse);
+    }
+    for (var i = 0; i < 200; i++) {
+      expect(Fortune.roll(Random(i)), inInclusiveRange(1, 20));
+    }
+    expect(Fortune.outcome(1), contains('badly'));
+    expect(Fortune.outcome(20), contains('better'));
+  });
+
+  test('notes and a roll reach the prompt, and state keeps them', () {
+    const notes = StoryNotes(items: ['a brass key']);
+    final state = const StoryState(
+      present: ['mira'],
+    ).copyWith(notes: notes, notesAt: 4, rolls: {3: 2});
+    final back = StoryState.fromJson(state.toJson());
+    expect(back.notes.items, ['a brass key']);
+    expect(back.notesAt, 4);
+    expect(back.rolls, {3: 2});
+
+    final turns = [
+      turn(1, TurnKind.narrator, 'Rain.'),
+      turn(3, TurnKind.act, 'I climb the wall.'),
+    ];
+    final p = engine.prompt(null, turns, back);
+    expect(p.system, contains('# Story notes'));
+    expect(p.system, contains('Haru carries: a brass key'));
+    expect(p.user, contains('Fortune for what Haru just tried: 2 out of 20'));
+    // Once someone has answered, the roll is spent.
+    final later = engine.prompt(null, [
+      ...turns,
+      turn(4, TurnKind.narrator, 'You slip.'),
+    ], back);
+    expect(later.user, isNot(contains('Fortune')));
+  });
+
+  test('scene tags read lists under the label, and bare tag lines', () {
+    final p = SceneTags.prompt(
+      'Visible:\nMira Vane\n\nTags:\n- 1girl\n- solo\n- rain\n- harbor\n',
+      world.cast.values,
+    );
+    expect(p, startsWith('1girl, solo, rain, harbor'));
+    // No labels: only the lines that read as tag lists count.
+    expect(
+      SceneTags.prompt(
+        'Mira looks out over the rainy harbour, thinking.\n'
+        '1girl, solo, standing, rain, night',
+        world.cast.values,
+      ),
+      '1girl, solo, standing, rain, night',
+    );
+    expect(
+      SceneTags.prompt(
+        'Mira sighs and turns away from the window.',
+        world.cast.values,
+      ),
+      '',
     );
   });
 }

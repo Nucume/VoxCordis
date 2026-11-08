@@ -235,12 +235,20 @@ class LlamaServerException implements Exception {
 
   @override
   String toString() {
-    final hint = log
-        .split('\n')
-        .lastWhere(
-          (l) => l.toLowerCase().contains('error') || l.contains('failed'),
-          orElse: () => '',
-        );
+    final hint = reason;
     return hint.isEmpty ? message : '$message ($hint)';
+  }
+
+  /// The line of [log] that says why: the first error, since the last one
+  /// is usually only "exiting due to model loading error".
+  String get reason {
+    final errors = log
+        .split('\n')
+        .where((l) => l.toLowerCase().contains('error') || l.contains('failed'))
+        .toList();
+    return errors.firstWhere(
+      (l) => !l.contains('exiting due to'),
+      orElse: () => errors.lastOrNull ?? '',
+    );
   }
 }

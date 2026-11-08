@@ -624,6 +624,20 @@ class SettingsScreenState extends State<SettingsScreen> {
           style: TextStyle(fontSize: 12, color: context.palette.textMuted),
         ),
       ),
+      if (_draft.vocesMundi && _draft.freeGpuWhenIdle)
+        SwitchListTile(
+          contentPadding: EdgeInsets.zero,
+          value: _draft.vocesKeepLoaded,
+          onChanged: (on) =>
+              setState(() => _draft = _draft.copyWith(vocesKeepLoaded: on)),
+          title: const Text('Keep the model loaded in Voces Mundi'),
+          subtitle: Text(
+            'Freeing the graphics card waits while Voces Mundi is open, '
+            'since reading and writing a turn there takes a while. Drawing '
+            'still makes room when it needs to.',
+            style: TextStyle(fontSize: 12, color: context.palette.textMuted),
+          ),
+        ),
       if (_draft.vocesMundi)
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
@@ -783,6 +797,48 @@ class _Background extends StatelessWidget {
               ],
             ),
           ),
+        Padding(
+          padding: const EdgeInsets.symmetric(vertical: 6),
+          child: Row(
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'When VoxCordis opens',
+                      style: TextStyle(color: context.palette.text),
+                    ),
+                    Text(switch (value.openOnStart) {
+                      OpenOnStart.lastPlace =>
+                        value.vocesMundi
+                            ? 'Back where you left off: $name, or Voces '
+                                  'Mundi if you closed the app there.'
+                            : 'Back where you left off, with $name.',
+                      OpenOnStart.companion => 'Always with $name.',
+                      OpenOnStart.picker =>
+                        value.vocesMundi
+                            ? 'Asks who you\'d like to see, with Voces '
+                                  'Mundi as one of the cards.'
+                            : 'Asks which companion you\'d like to see.',
+                    }, style: muted),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 12),
+              GlassSelect<OpenOnStart>(
+                minWidth: _Poke.pickerWidth,
+                value: value.openOnStart,
+                options: const [
+                  GlassOption(OpenOnStart.lastPlace, 'Where I left off'),
+                  GlassOption(OpenOnStart.companion, 'My companion'),
+                  GlassOption(OpenOnStart.picker, 'The picker'),
+                ],
+                onChanged: (m) => onChanged(value.copyWith(openOnStart: m)),
+              ),
+            ],
+          ),
+        ),
         const SizedBox(height: 6),
         Row(
           children: [

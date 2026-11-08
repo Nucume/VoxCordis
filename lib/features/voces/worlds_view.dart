@@ -905,6 +905,7 @@ class _WorldEditorState extends State<_WorldEditor> {
         WorldDescriber.instructions(adult: _adult),
         WorldDescriber.brief(idea, adult: _adult),
         maxTokens: 1800,
+        what: 'Describe the world',
       );
       final got = reply == null
           ? null
@@ -952,6 +953,8 @@ class _WorldEditorState extends State<_WorldEditor> {
           setting: _setting.text,
         ),
         maxTokens: 600,
+        what: 'Suggest world tags',
+        exact: true,
       );
       final got = reply == null
           ? const <String>[]
@@ -1012,6 +1015,7 @@ class _WorldEditorState extends State<_WorldEditor> {
           ],
           idea: i == null ? '' : _openings[i].$1.text,
         ),
+        what: 'Write an opening',
       );
       final o = reply == null ? null : OpeningWriter.parse(reply);
       if (!mounted) return;
@@ -1115,6 +1119,12 @@ class _WorldEditorState extends State<_WorldEditor> {
                         'e.g. a drowned city where the bells still ring '
                         'at low tide',
                     onDescribe: _describe,
+                    // The same as the world's own 18+ switch.
+                    adult: _adult,
+                    onAdult: (on) => setState(() {
+                      _adult = on;
+                      if (!on) _tags.removeWhere(WorldTags.mature.contains);
+                    }),
                   ),
                   const SizedBox(height: 16),
                 ],

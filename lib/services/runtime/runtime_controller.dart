@@ -287,8 +287,13 @@ class RuntimeController extends ChangeNotifier {
   int _holds = 0;
 
   /// How long without typing before [AppSettings.freeGpuWhenIdle] unloads
-  /// the models.
-  static const idleUnload = Duration(seconds: 60);
+  /// the models: [AppSettings.idleMinutes].
+  static Duration idleUnload(AppSettings s) =>
+      Duration(minutes: s.idleMinutes.clamp(1, 120));
+
+  /// Set while the models should stay loaded however long it's quiet
+  /// (Voces Mundi is open, with [AppSettings.vocesKeepLoaded]).
+  bool keepLoaded = false;
 
   /// The human is active (typing, or a reply just ended). With
   /// [AppSettings.freeGpuWhenIdle] on, the built-in model loads if it was
@@ -300,8 +305,8 @@ class RuntimeController extends ChangeNotifier {
     if (warm && _server == null && s.modelPath != null && _drawing == null) {
       ensureReady(s).ignore();
     }
-    if (_holds > 0) return;
-    _idleTimer = Timer(idleUnload, () {
+    if (_holds > 0 || keepLoaded) return;
+    _idleTimer = Timer(idleUnload(s), () {
       _idleTimer = null;
       if (_holds > 0) return;
       unawaited(

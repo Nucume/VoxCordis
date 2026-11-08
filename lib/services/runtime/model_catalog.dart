@@ -23,6 +23,8 @@ class CatalogModel {
     this.mmproj,
     this.uncensored = false,
     this.huge = false,
+    this.archived = false,
+    this.recommendable = true,
     this.chatTemplate,
     this.sampling = const {},
   });
@@ -63,6 +65,15 @@ class CatalogModel {
   /// Far beyond a normal PC: the app warns before downloading and never
   /// recommends it.
   final bool huge;
+
+  /// Replaced by a newer model. Still recognised and usable, but listed
+  /// under "Older models" in the picker and never recommended.
+  final bool archived;
+
+  /// Can be the model the picker recommends for the card. Off for the
+  /// models that see, which are a choice rather than the default, apart
+  /// from those that are good all-rounders as well.
+  final bool recommendable;
 
   /// Name of a template in `assets/chat_templates/` that replaces the one in
   /// the GGUF. Many finetunes ship a plain template without tool calling (or
@@ -135,6 +146,8 @@ class ModelCatalog {
       id: 'mistral-nemo-12b',
       name: 'Mistral Nemo 12B',
       blurb: 'Warmer, more creative voice. Popular for companions.',
+      // Gemma 4 12B took its place.
+      archived: true,
       sizeGb: 7.5,
       minMemoryGb: 10,
       repo: 'bartowski/Mistral-Nemo-Instruct-2407-GGUF',
@@ -185,6 +198,50 @@ class ModelCatalog {
       // MinP=0.
       sampling: {'temperature': 0.6, 'top_p': 0.95, 'top_k': 20, 'min_p': 0},
     ),
+    // Google's own Q4 build, trained for that quant (QAT). Its file
+    // brings a template with tool calls.
+    CatalogModel(
+      id: 'gemma-4-12b',
+      name: 'Gemma 4 12B',
+      blurb:
+          'Modern all-rounder from Google that can see the pictures you '
+          'share. Natural voice, good with memory tools.',
+      sizeGb: 7.2,
+      minMemoryGb: 10,
+      repo: 'google/gemma-4-12B-it-qat-q4_0-gguf',
+      revision: '29d097773436b69ff9feafd636ab4cf873786537',
+      sha256: {
+        'gemma-4-12b-it-qat-q4_0.gguf':
+            '93567e57a8fe10b23569b9d9ec38cd005deedf71e29477c421a4b83f418a538b',
+        'mmproj-gemma-4-12b-it-qat-q4_0.gguf':
+            'cb018338a7538a9814d994bfe54644c71eb7ed54e31eae2f721e45fd3c260da7',
+      },
+      file: 'gemma-4-12b-it-qat-q4_0.gguf',
+      mmproj: 'mmproj-gemma-4-12b-it-qat-q4_0.gguf',
+      // Google's card: temperature 1.0, top_p 0.95, top_k 64.
+      sampling: {'temperature': 1.0, 'top_p': 0.95, 'top_k': 64},
+    ),
+    // For 24 GB cards. Dense 27B; its file brings a template with tool
+    // calls.
+    CatalogModel(
+      id: 'qwen3.8-27b',
+      name: 'Qwen3.8 27B',
+      blurb:
+          'The smartest all-rounder here, for 24 GB cards. Thinks before '
+          'answering and is the most reliable with memory tools.',
+      sizeGb: 16.5,
+      minMemoryGb: 19,
+      repo: 'unsloth/Qwen3.8-27B-GGUF',
+      revision: '4ca720788d1e01f1bff70c033e0d0028fd02e502',
+      sha256: {
+        'Qwen3.8-27B-UD-Q4_K_M.gguf':
+            '322e194ff79741c7baa497c240f677f54b201b0efab44ca8e50f122b39123482',
+      },
+      file: 'Qwen3.8-27B-UD-Q4_K_M.gguf',
+      // Qwen's card, thinking mode: temperature 1.0, top_p 0.95, top_k 20,
+      // min_p 0, presence_penalty 0.
+      sampling: {'temperature': 1.0, 'top_p': 0.95, 'top_k': 20, 'min_p': 0},
+    ),
     // Sees the pictures shared in the chat itself, through its vision file.
     CatalogModel(
       id: 'qwen3-vl-8b',
@@ -203,6 +260,7 @@ class ModelCatalog {
             'c6ba85508d82f42590e6eb77d5340369ab6fecf107a7561d809523d8aa5f3bfd',
       },
       file: 'Qwen3VL-8B-Instruct-Q4_K_M.gguf',
+      recommendable: false,
       mmproj: 'mmproj-Qwen3VL-8B-Instruct-Q8_0.gguf',
       // Qwen's card for the VL instruct models: temperature 0.7, top_p 0.8,
       // top_k 20, presence_penalty 1.5.
@@ -215,6 +273,73 @@ class ModelCatalog {
     ),
     // Uncensored picks, tested on llama.cpp b11400. Their GGUFs ship plain
     // templates without tool calling, so each brings its own.
+    CatalogModel(
+      id: 'rocinante-x-12b',
+      name: 'Rocinante X 12B',
+      blurb:
+          'The successor to Rocinante 12B: better prose, livelier dialogue '
+          'and steadier roleplay. Strong at romance and NSFW.',
+      sizeGb: 7.5,
+      minMemoryGb: 10,
+      repo: 'bartowski/TheDrummer_Rocinante-X-12B-v1-GGUF',
+      revision: '4302599a9fecd0e250c3790d77a38f3bd791fdd4',
+      sha256: {
+        'TheDrummer_Rocinante-X-12B-v1-Q4_K_M.gguf':
+            '1ca25853a19d6b15f9a94f7e5bc86f4cc88bd0c9dea12a00ea55452b4208ade6',
+      },
+      file: 'TheDrummer_Rocinante-X-12B-v1-Q4_K_M.gguf',
+      uncensored: true,
+      // The card: "Mistral v3 Tekken (NOT v7)", which is Nemo's format.
+      // Ours puts the system prompt first and knows tool calls.
+      chatTemplate: 'mistral-nemo-tools',
+      sampling: {'temperature': 0.7, 'dry_multiplier': 0.8},
+    ),
+    // Gemma 4 roleplay finetunes for 24 GB cards. Both cards: "Gemma 4 31B
+    // template, thinking or non-thinking", which their files bring, tool
+    // calls included.
+    CatalogModel(
+      id: 'artemis-31b',
+      name: 'Artemis 31B',
+      blurb:
+          'Roleplay finetune of Gemma 4 31B, for 24 GB cards. Immersive, '
+          'human-sounding writing that keeps track of the story. Strong at '
+          'romance and NSFW, and keeps its tool calls.',
+      sizeGb: 17.2,
+      minMemoryGb: 20,
+      repo: 'bartowski/TheDrummer_Artemis-31B-v1.2-GGUF',
+      revision: '72c9a54c1b6080093616d4d510a46b20c76b8a24',
+      sha256: {
+        'TheDrummer_Artemis-31B-v1.2-IQ4_XS.gguf':
+            'babfd36c14f62aea391703075d2077e544eeddf5f6b5563dbf73255ea29dab86',
+      },
+      // IQ4_XS rather than Q4_K_M: Q4_K_M filled a 24 GB card to 23 GB at
+      // a 16k span, leaving nothing for the desktop and browser.
+      file: 'TheDrummer_Artemis-31B-v1.2-IQ4_XS.gguf',
+      uncensored: true,
+      // The card: "be conservative" with samplers. Gemma's top_p/top_k with
+      // the 0.9 its sibling Orion's card suggests.
+      sampling: {'temperature': 0.9, 'top_p': 0.95, 'top_k': 64},
+    ),
+    CatalogModel(
+      id: 'orion-26b-a4b',
+      name: 'Orion 26B',
+      blurb:
+          'Roleplay finetune of Gemma 4 26B, for 24 GB cards. Only 4B of it '
+          'works per word, so it answers about as fast as an 8B model. '
+          'Strong at romance and NSFW.',
+      sizeGb: 18.0,
+      minMemoryGb: 21,
+      repo: 'bartowski/TheDrummer_Orion-26B-A4B-v1.1-GGUF',
+      revision: 'ecc1d958b6b4a83445ab80262965e151e00d97ac',
+      sha256: {
+        'TheDrummer_Orion-26B-A4B-v1.1-Q4_K_M.gguf':
+            'b0374debf3034de2c149ef4e3c3d3f30b67d27df0158ef620a445c2598754813',
+      },
+      file: 'TheDrummer_Orion-26B-A4B-v1.1-Q4_K_M.gguf',
+      uncensored: true,
+      // The card: "Low temp like 0.9 works best".
+      sampling: {'temperature': 0.9, 'top_p': 0.95, 'top_k': 64},
+    ),
     CatalogModel(
       id: 'rocinante-12b',
       name: 'Rocinante 12B',
@@ -231,6 +356,8 @@ class ModelCatalog {
       },
       file: 'Rocinante-12B-v1.1-Q4_K_M.gguf',
       uncensored: true,
+      // Rocinante X 12B took its place.
+      archived: true,
       // Its GGUF has no template at all. The card names ChatML for
       // roleplay (Mistral's format makes it ignore the character), temp 0.7
       // and DRY against repetition.
@@ -461,17 +588,19 @@ class ModelCatalog {
     if (mem == null) return null;
     CatalogModel? best;
     for (final m in models) {
-      // Models that see are a choice, not the default.
-      if (m.uncensored || m.huge || m.canSee) continue;
+      if (!_canRecommend(m)) continue;
       // Keep a little headroom for the desktop and the 8k memory span.
       if (m.minMemoryGb > mem - 0.5) continue;
       if (best == null || m.minMemoryGb > best.minMemoryGb) best = m;
     }
     return best ??
         models
-            .where((m) => !m.uncensored && !m.huge && !m.canSee)
+            .where(_canRecommend)
             .reduce((a, b) => a.minMemoryGb <= b.minMemoryGb ? a : b);
   }
+
+  static bool _canRecommend(CatalogModel m) =>
+      m.recommendable && !m.uncensored && !m.huge && !m.archived;
 
   /// Graphics memory the chosen model needs at the chosen memory span.
   /// Attached files are judged by size. Null when there is no model.

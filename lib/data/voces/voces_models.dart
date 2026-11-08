@@ -27,6 +27,7 @@ class VocesCharacter {
     this.line = '',
     this.pronouns,
     this.tags = const [],
+    this.looksTags = const [],
     this.sections = const [],
     this.portrait,
     this.art,
@@ -43,6 +44,10 @@ class VocesCharacter {
   final String line;
   final String? pronouns;
   final List<String> tags;
+
+  /// How they look as picture tags ("long black hair", "fishnet tights"),
+  /// what "Draw it" starts from: drawing models read tags, not prose.
+  final List<String> looksTags;
   final List<SheetSection> sections;
 
   /// A file name in the character's folder.
@@ -67,6 +72,7 @@ class VocesCharacter {
     String? line,
     String? pronouns,
     List<String>? tags,
+    List<String>? looksTags,
     List<SheetSection>? sections,
     String? portrait,
     bool clearPortrait = false,
@@ -77,6 +83,7 @@ class VocesCharacter {
     line: line ?? this.line,
     pronouns: pronouns ?? this.pronouns,
     tags: tags ?? this.tags,
+    looksTags: looksTags ?? this.looksTags,
     sections: sections ?? this.sections,
     portrait: clearPortrait ? null : portrait ?? this.portrait,
     art: art ?? this.art,
@@ -91,6 +98,7 @@ class VocesCharacter {
     'line': line,
     'pronouns': ?pronouns,
     'tags': tags,
+    if (looksTags.isNotEmpty) 'looksTags': looksTags,
     'sections': [for (final s in sections) s.toJson()],
     'portrait': ?portrait,
     'art': ?art,
@@ -104,6 +112,7 @@ class VocesCharacter {
     line: _s(json['line']),
     pronouns: json['pronouns'] as String?,
     tags: _strings(json['tags']),
+    looksTags: _strings(json['looksTags']),
     sections: [
       for (final s in _list(json['sections']))
         if (s is Map) SheetSection.fromJson(s),
@@ -580,6 +589,7 @@ class StorySave {
 
   StorySave copyWith({
     String? title,
+    String? worldName,
     DateTime? lastPlayed,
     int? turns,
     String? place,
@@ -587,7 +597,7 @@ class StorySave {
     id: id,
     title: title ?? this.title,
     worldId: worldId,
-    worldName: worldName,
+    worldName: worldName ?? this.worldName,
     playerId: playerId,
     playerName: playerName,
     difficulty: difficulty,

@@ -46,6 +46,8 @@ class ModelPicker extends StatefulWidget {
 }
 
 class _ModelPickerState extends State<ModelPicker> {
+  static const _idleChoices = [1, 5, 15, 30];
+
   late final _endpoint = TextEditingController(text: widget.value.llmEndpoint);
   late final _model = TextEditingController(text: widget.value.llmModel);
   late final _apiKey = TextEditingController(text: widget.value.llmApiKey);
@@ -55,6 +57,7 @@ class _ModelPickerState extends State<ModelPicker> {
   final _typed =
       <LlmProvider, ({String endpoint, String model, String apiKey})>{};
   Set<String> _downloaded = {};
+  bool? _showOlder;
   GpuInfo _gpu = GpuInfo.unknown;
 
   /// The memory span follows the model and card until the user picks one.
@@ -410,6 +413,45 @@ class _ModelPickerState extends State<ModelPicker> {
               'It will run, but slowly.'
         : null;
 
+    final older = ModelCatalog.models.where((m) => m.archived).toList();
+    // Open at first when the model in use is one of them.
+    final olderOpen =
+        _showOlder ??
+        older.any((m) => current == ModelCatalog.fileFor(modelsDir, m).path);
+
+    Widget card(CatalogModel m) => _ModelCard(
+      title: m.name,
+      subtitle:
+          '${m.blurb}\n${m.sizeGb.toStringAsFixed(1)} GB download · '
+          'about ${m.minMemoryGb} GB of graphics memory',
+      uncensored: m.uncensored,
+      sees: m.canSee,
+      danger: m.huge
+          ? 'Huge: ${m.sizeGb.round()} GB on disk and about '
+                '${m.minMemoryGb} GB of memory. Workstations only.'
+          : null,
+      warning: m.huge
+          ? null
+          : tooBig(
+              estimateNeedGb(
+                baseGb: m.minMemoryGb.toDouble(),
+                contextSize: _v.contextSize,
+              ),
+            ),
+      recommended: m == recommended,
+      selected: current == ModelCatalog.fileFor(modelsDir, m).path,
+      downloaded: _downloaded.contains(ModelCatalog.fileFor(modelsDir, m).path),
+      downloading: downloads.containsKey(m.id),
+      progress: downloads[m.id],
+      onDownload: () => _download(m),
+      onCancel: () => runtime.cancelDownload(m.id),
+      onUse: () => widget.onChanged(
+        _fitSpan(
+          _v.copyWith(modelPath: ModelCatalog.fileFor(modelsDir, m).path),
+        ),
+      ),
+    );
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -421,45 +463,37 @@ class _ModelPickerState extends State<ModelPicker> {
         const SizedBox(height: 12),
         _GpuBanner(gpu: _gpu, recommended: recommended),
         const SizedBox(height: 8),
-        // The recommended model first.
+        // The recommended model first, replaced ones folded away below.
         for (final m in [
           ?recommended,
-          ...ModelCatalog.models.where((m) => m != recommended),
+          ...ModelCatalog.models.where((m) => m != recommended && !m.archived),
         ])
-          _ModelCard(
-            title: m.name,
-            subtitle:
-                '${m.blurb}\n${m.sizeGb.toStringAsFixed(1)} GB download · '
-                'about ${m.minMemoryGb} GB of graphics memory',
-            uncensored: m.uncensored,
-            sees: m.canSee,
-            danger: m.huge
-                ? 'Huge: ${m.sizeGb.round()} GB on disk and about '
-                      '${m.minMemoryGb} GB of memory. Workstations only.'
-                : null,
-            warning: m.huge
-                ? null
-                : tooBig(
-                    estimateNeedGb(
-                      baseGb: m.minMemoryGb.toDouble(),
-                      contextSize: _v.contextSize,
-                    ),
-                  ),
-            recommended: m == recommended,
-            selected: current == ModelCatalog.fileFor(modelsDir, m).path,
-            downloaded: _downloaded.contains(
-              ModelCatalog.fileFor(modelsDir, m).path,
-            ),
-            downloading: downloads.containsKey(m.id),
-            progress: downloads[m.id],
-            onDownload: () => _download(m),
-            onCancel: () => runtime.cancelDownload(m.id),
-            onUse: () => widget.onChanged(
-              _fitSpan(
-                _v.copyWith(modelPath: ModelCatalog.fileFor(modelsDir, m).path),
+          card(m),
+        if (older.isNotEmpty) ...[
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => setState(() => _showOlder = !olderOpen),
+              icon: Icon(
+                olderOpen
+                    ? Icons.expand_less_rounded
+                    : Icons.expand_more_rounded,
               ),
+              label: Text('Older models (${older.length})'),
             ),
           ),
+          if (olderOpen) ...[
+            Padding(
+              padding: const EdgeInsets.only(left: 4, bottom: 6),
+              child: Text(
+                'Replaced by newer models above. They still work if you '
+                'already have them.',
+                style: TextStyle(color: context.palette.textMuted),
+              ),
+            ),
+            for (final m in older) card(m),
+          ],
+        ],
         if (attached != null)
           _ModelCard(
             title: p.basename(attached),
@@ -538,12 +572,31 @@ class _ModelPickerState extends State<ModelPicker> {
                   const SizedBox(width: 6),
                   const InfoIcon(
                     message:
-                        'For gaming with VoxCordis open: after a minute '
+                        'For gaming with VoxCordis open: after the wait '
                         'without typing, the model (and Eyes) leave graphics '
                         'memory. Typing loads the model again, which takes '
                         'from a few seconds to a minute, so the first reply '
-                        'after a break can be slower.',
+                        'after a break can be slower. Voces Mundi keeps the '
+                        'model loaded while it is open, unless switched off '
+                        'in Settings, General.',
                   ),
+                  if (_v.freeGpuWhenIdle) ...[
+                    const SizedBox(width: 12),
+                    GlassSelect<int>(
+                      value: _idleChoices.contains(_v.idleMinutes)
+                          ? _v.idleMinutes
+                          : 1,
+                      options: [
+                        for (final m in _idleChoices)
+                          GlassOption(
+                            m,
+                            m == 1 ? 'After 1 minute' : 'After $m minutes',
+                          ),
+                      ],
+                      onChanged: (m) =>
+                          widget.onChanged(_v.copyWith(idleMinutes: m)),
+                    ),
+                  ],
                 ],
               ),
             Row(

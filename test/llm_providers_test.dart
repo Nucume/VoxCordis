@@ -143,6 +143,28 @@ void main() {
     final local = await body('http://localhost:11434/v1');
     expect(local['max_tokens'], 50);
   });
+
+  test('extra request fields reach the server', () async {
+    Map<String, dynamic>? sent;
+    final client = LlmClient(
+      baseUrl: 'http://127.0.0.1:9/v1',
+      model: 'm',
+      extra: const {
+        'chat_template_kwargs': {'enable_thinking': false},
+      },
+      client: MockClient.streaming((req, body) async {
+        sent = jsonDecode(await body.bytesToString()) as Map<String, dynamic>;
+        return http.StreamedResponse(
+          Stream.value(utf8.encode('data: [DONE]\n\n')),
+          200,
+        );
+      }),
+    );
+    await client.chat(const [
+      {'role': 'user', 'content': 'hi'},
+    ]).drain<void>();
+    expect(sent?['chat_template_kwargs'], {'enable_thinking': false});
+  });
 }
 
 /// Hands each request body to [onBody] before [inner] answers it.

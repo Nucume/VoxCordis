@@ -36,6 +36,11 @@ enum ImageEngineChoice { off, builtIn, invoke }
 /// What happens when the human logs in to the computer.
 enum StartMode { off, onScreen, minimized }
 
+/// What the window opens to: where the human left off (the companion, or
+/// Voces Mundi when they closed the app there), always the companion, or
+/// the companion picker.
+enum OpenOnStart { lastPlace, companion, picker }
+
 /// What one picture model was last drawn with in the draw panel. A null
 /// number means "the model's own default".
 @immutable
@@ -152,9 +157,13 @@ class DrawPanelPrefs {
     this.width,
     this.height,
     this.ratio,
+    this.presets = const [],
   });
 
   final bool advanced;
+
+  /// Prompts saved as favourites, to load into the Draw panel any time.
+  final List<DrawPreset> presets;
 
   /// The size typed in the advanced options, kept whichever model is
   /// picked, and the width:height ratio ("9:16") that ties them; null for
@@ -175,6 +184,7 @@ class DrawPanelPrefs {
     String? shape,
     Map<String, DrawChoices>? perModel,
     bool? lorasOpen,
+    List<DrawPreset>? presets,
   }) => DrawPanelPrefs(
     advanced: advanced ?? this.advanced,
     lorasOpen: lorasOpen ?? this.lorasOpen,
@@ -184,6 +194,7 @@ class DrawPanelPrefs {
     width: width,
     height: height,
     ratio: ratio,
+    presets: presets ?? this.presets,
   );
 
   /// These prefs with the typed size and ratio set to these (null clears).
@@ -197,6 +208,7 @@ class DrawPanelPrefs {
         width: width,
         height: height,
         ratio: ratio,
+        presets: presets,
       );
 
   /// These prefs with [choices] kept for [model]; empty choices are dropped.
@@ -219,6 +231,7 @@ class DrawPanelPrefs {
     if (height != null) 'height': height,
     if (ratio != null) 'ratio': ratio,
     'perModel': {for (final e in perModel.entries) e.key: e.value.toJson()},
+    if (presets.isNotEmpty) 'presets': [for (final p in presets) p.toJson()],
   };
 
   factory DrawPanelPrefs.fromJson(Object? json) {
@@ -244,6 +257,42 @@ class DrawPanelPrefs {
                 Map<String, Object?>.from(e.value as Map),
               ),
       },
+      presets: [
+        if (json['presets'] is List)
+          for (final p in json['presets'] as List)
+            if (DrawPreset.fromJson(p) case final preset?) preset,
+      ],
+    );
+  }
+}
+
+/// A favourite prompt: a name, the prompt and what to leave out.
+class DrawPreset {
+  const DrawPreset({
+    required this.name,
+    required this.prompt,
+    this.negative = '',
+  });
+
+  final String name;
+  final String prompt;
+  final String negative;
+
+  Map<String, Object?> toJson() => {
+    'name': name,
+    'prompt': prompt,
+    if (negative.isNotEmpty) 'negative': negative,
+  };
+
+  static DrawPreset? fromJson(Object? json) {
+    if (json is! Map || json['prompt'] is! String) return null;
+    final prompt = json['prompt']! as String;
+    return DrawPreset(
+      name: json['name'] is String && (json['name']! as String).isNotEmpty
+          ? json['name']! as String
+          : prompt,
+      prompt: prompt,
+      negative: json['negative'] is String ? json['negative']! as String : '',
     );
   }
 }
@@ -265,6 +314,8 @@ class AppSettings {
     this.contextSize = 8192,
     this.useGpu = true,
     this.freeGpuWhenIdle = false,
+    this.idleMinutes = 1,
+    this.vocesKeepLoaded = true,
     this.chatFormat,
     this.mmprojPath,
     this.temperature,
@@ -301,8 +352,11 @@ class AppSettings {
     this.keepLogs = true,
     this.vocesMundi = false,
     this.vocesMature = false,
+    this.vocesBackdrop = true,
     this.logsOff = const [],
     this.startMode = StartMode.off,
+    this.openOnStart = OpenOnStart.lastPlace,
+    this.lastInVoces = false,
     this.automationRunsPerDay = 24,
     this.imageEngine = ImageEngineChoice.off,
     this.imageModel,
@@ -341,6 +395,13 @@ class AppSettings {
   /// Unloads the model (and Eyes) after a minute without typing, so games
   /// get the graphics card back; typing loads it again.
   final bool freeGpuWhenIdle;
+
+  /// Minutes without typing before [freeGpuWhenIdle] unloads the models.
+  final int idleMinutes;
+
+  /// While Voces Mundi is open, [freeGpuWhenIdle] waits: reading and
+  /// writing a turn there takes longer than a chat message.
+  final bool vocesKeepLoaded;
 
   /// For an attached .gguf: the chat format to use instead of the one in
   /// the file (a [ChatFormat] name). Null means automatic. Catalog models
@@ -462,6 +523,10 @@ class AppSettings {
   /// Voces Mundi. Off by default; turned on after an age check.
   final bool vocesMature;
 
+  /// A story shows its latest scene picture (else its world's) dimmed
+  /// behind the turns.
+  final bool vocesBackdrop;
+
   /// The kinds of log line not written (LogKind names), while [keepLogs]
   /// is on.
   final List<String> logsOff;
@@ -471,6 +536,12 @@ class AppSettings {
   final StartMode startMode;
 
   bool get startWithComputer => startMode != StartMode.off;
+
+  /// What the window opens to when the app starts.
+  final OpenOnStart openOnStart;
+
+  /// Voces Mundi was open when the app was last closed.
+  final bool lastInVoces;
 
   /// Most automation runs a day, so a mistake can't run up a bill with a
   /// server-hosted brain.
@@ -575,6 +646,8 @@ class AppSettings {
       contextSize: contextSize,
       useGpu: useGpu,
       freeGpuWhenIdle: freeGpuWhenIdle,
+      idleMinutes: idleMinutes,
+      vocesKeepLoaded: vocesKeepLoaded,
       chatFormat: chatFormat,
       mmprojPath: mmprojPath,
       temperature: temperature,
@@ -611,8 +684,11 @@ class AppSettings {
       keepLogs: keepLogs,
       vocesMundi: vocesMundi,
       vocesMature: vocesMature,
+      vocesBackdrop: vocesBackdrop,
       logsOff: logsOff,
       startMode: startMode,
+      openOnStart: openOnStart,
+      lastInVoces: lastInVoces,
       automationRunsPerDay: automationRunsPerDay,
       imageEngine: imageEngine,
       imageModel: imageModel,
@@ -646,6 +722,8 @@ class AppSettings {
     int? contextSize,
     bool? useGpu,
     bool? freeGpuWhenIdle,
+    int? idleMinutes,
+    bool? vocesKeepLoaded,
     String? chatFormat,
     String? mmprojPath,
     double? temperature,
@@ -681,8 +759,11 @@ class AppSettings {
     bool? keepLogs,
     bool? vocesMundi,
     bool? vocesMature,
+    bool? vocesBackdrop,
     List<String>? logsOff,
     StartMode? startMode,
+    OpenOnStart? openOnStart,
+    bool? lastInVoces,
     int? automationRunsPerDay,
     ImageEngineChoice? imageEngine,
     String? imageModel,
@@ -715,6 +796,8 @@ class AppSettings {
       contextSize: contextSize ?? this.contextSize,
       useGpu: useGpu ?? this.useGpu,
       freeGpuWhenIdle: freeGpuWhenIdle ?? this.freeGpuWhenIdle,
+      idleMinutes: idleMinutes ?? this.idleMinutes,
+      vocesKeepLoaded: vocesKeepLoaded ?? this.vocesKeepLoaded,
       chatFormat: clearChatFormat ? null : chatFormat ?? this.chatFormat,
       mmprojPath: clearMmproj ? null : mmprojPath ?? this.mmprojPath,
       temperature: clearTemperature ? null : temperature ?? this.temperature,
@@ -759,8 +842,11 @@ class AppSettings {
       keepLogs: keepLogs ?? this.keepLogs,
       vocesMundi: vocesMundi ?? this.vocesMundi,
       vocesMature: vocesMature ?? this.vocesMature,
+      vocesBackdrop: vocesBackdrop ?? this.vocesBackdrop,
       logsOff: logsOff ?? this.logsOff,
       startMode: startMode ?? this.startMode,
+      openOnStart: openOnStart ?? this.openOnStart,
+      lastInVoces: lastInVoces ?? this.lastInVoces,
       automationRunsPerDay: automationRunsPerDay ?? this.automationRunsPerDay,
       imageEngine: imageEngine ?? this.imageEngine,
       imageModel: imageModel ?? this.imageModel,
@@ -787,6 +873,8 @@ class AppSettings {
     'contextSize': contextSize,
     'useGpu': useGpu,
     'freeGpuWhenIdle': freeGpuWhenIdle,
+    'idleMinutes': idleMinutes,
+    'vocesKeepLoaded': vocesKeepLoaded,
     'chatFormat': chatFormat,
     'mmprojPath': mmprojPath,
     'temperature': temperature,
@@ -821,8 +909,11 @@ class AppSettings {
     'keepLogs': keepLogs,
     'vocesMundi': vocesMundi,
     'vocesMature': vocesMature,
+    'vocesBackdrop': vocesBackdrop,
     'logsOff': logsOff,
     'startMode': startMode.name,
+    'openOnStart': openOnStart.name,
+    'lastInVoces': lastInVoces,
     'automationRunsPerDay': automationRunsPerDay,
     'imageEngine': imageEngine.name,
     'imageModel': imageModel,
@@ -855,6 +946,8 @@ class AppSettings {
       contextSize: json['contextSize'] as int? ?? d.contextSize,
       useGpu: json['useGpu'] as bool? ?? d.useGpu,
       freeGpuWhenIdle: json['freeGpuWhenIdle'] as bool? ?? false,
+      idleMinutes: (json['idleMinutes'] as num?)?.toInt() ?? 1,
+      vocesKeepLoaded: json['vocesKeepLoaded'] as bool? ?? true,
       chatFormat: json['chatFormat'] as String?,
       mmprojPath: json['mmprojPath'] as String?,
       temperature: (json['temperature'] as num?)?.toDouble(),
@@ -913,6 +1006,7 @@ class AppSettings {
       keepLogs: json['keepLogs'] as bool? ?? true,
       vocesMundi: json['vocesMundi'] as bool? ?? false,
       vocesMature: json['vocesMature'] as bool? ?? false,
+      vocesBackdrop: json['vocesBackdrop'] as bool? ?? true,
       logsOff:
           (json['logsOff'] as List?)?.whereType<String>().toList() ?? const [],
       // Before the choice there was a switch, which always started hidden.
@@ -921,6 +1015,10 @@ class AppSettings {
           (json['startWithComputer'] == true
               ? StartMode.minimized
               : StartMode.off),
+      openOnStart:
+          OpenOnStart.values.asNameMap()[json['openOnStart']] ??
+          OpenOnStart.lastPlace,
+      lastInVoces: json['lastInVoces'] as bool? ?? false,
       automationRunsPerDay:
           json['automationRunsPerDay'] as int? ?? d.automationRunsPerDay,
       imageEngine:

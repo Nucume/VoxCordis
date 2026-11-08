@@ -12,8 +12,15 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+### New
+- **First introduction of Voces Mundi, the RPG system.** 0.4.2 introduces the first version of Voces Mundi, the RPG system running in Vox Cordis. It is fully toggleable, so if you don't want it, you won't ever see it. Has initial supports for persistent characters, multi-NPCs in worlds, lorebooks, tagging mechanics, and more. 0.4.2-a1 should have fixed most bugs, but some are still to be expected.
+- **Bigger and newer models to download.** For 24 GB graphics cards (like an RTX 3090 or 4090) there are now Qwen3.8 27B, the smartest all-rounder in the list and the one recommended on those cards, and two roleplay models built on Gemma 4: Artemis 31B, with the best writing, and Orion 26B, which answers about as fast as an 8B model. For 10-16 GB cards there are Gemma 4 12B, a modern all-rounder that can also see your pictures and is now recommended on those cards, and Rocinante X 12B, the successor to Rocinante 12B.
+- **Older models.** Rocinante 12B and Mistral Nemo 12B moved into a folded "Older models" list at the bottom of the model picker, since newer models replace them. They keep working if you already have them.
+
 ### Fixed
 - **CUDA drawing on Linux, for real this time.** 0.4.1 brought CUDA drawing, but the Linux CUDA engine it downloads wasn't part of that release yet, so Linux kept drawing with Vulkan. It is now. With an NVIDIA card, drawing and animating switch to CUDA within a day of updating, or straight away if you delete `master-920-2f88688.no-cuda` in the app's `draw` folder and restart. Settings → Logs says "Drawing with the CUDA build of sd-cli." when it's in use.
+- **No more GitHub 403 blocking the CUDA download.** GitHub allows only 60 lookups an hour from one internet address to apps that aren't signed in, and refused the CUDA engine's lookup past that (HTTP 403), which kept drawing on the slower Vulkan engine for a whole day. The app now finds the download through GitHub's public releases feed when that happens, which has no such limit, and still only installs it when the release key signed it. If GitHub refuses anyway, it tries again an hour later instead of a day, and Settings → Logs says which request was refused and why.
+- **Asking for a picture gets one.** Roleplay models sometimes answered "draw me a picture" by describing a photo in the story without actually drawing, so no picture came. Your companion is now told plainly that only drawing makes a picture, and if a reply still skips it, the app asks once more behind the scenes and the picture follows the reply.
 
 ## 0.4.1
 

@@ -17,6 +17,7 @@ import '../features/system/web_approval.dart';
 import '../features/update/update_dialog.dart';
 import '../features/update/whats_new_dialog.dart';
 import '../data/settings.dart';
+import 'companion_switcher.dart';
 import '../services/schedule/scheduler.dart';
 import '../services/system/desktop_notifier.dart';
 import '../services/system/system_tools.dart';
@@ -68,6 +69,12 @@ class _HomeShellState extends State<HomeShell>
   Future<void> _showWhatsNew() async {
     if (!mounted) return;
     final services = AppScope.of(context);
+    if (services.startPicker) {
+      services.startPicker = false;
+      await showStartPicker(context);
+      // Picking someone else or Voces Mundi replaces this window.
+      if (!mounted || services.vocesOpen.value) return;
+    }
     final news = services.whatsNew;
     services.whatsNew = null;
     if (news != null && news.notes.isNotEmpty) {

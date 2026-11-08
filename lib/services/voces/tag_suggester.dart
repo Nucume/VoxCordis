@@ -32,6 +32,9 @@ add flavour.
         ..writeln('Setting:')
         ..writeln(s.length > 3000 ? s.substring(0, 3000) : s);
     }
+    b
+      ..writeln()
+      ..writeln('Answer only with the one "Tags:" line.');
     return b.toString();
   }
 
@@ -46,8 +49,21 @@ add flavour.
     final words = (m?.group(1) ?? t)
         .split(RegExp(r'[,;/\n]'))
         .map((w) => w.replaceAll(RegExp(r'[*"“”.]'), '').trim());
-    return WorldTags.only(
-      words,
-    ).where((t) => adult || !WorldTags.mature.contains(t)).toList();
+    bool allowed(String t) => adult || !WorldTags.mature.contains(t);
+    final got = WorldTags.only(words).where(allowed).toList();
+    if (got.isNotEmpty) return got;
+    // No list as asked: the listed tags named anywhere in the answer, in
+    // the order they come.
+    final lower = t.toLowerCase();
+    final named = [
+      for (final tag in [...WorldTags.all, ...WorldTags.mature])
+        if (allowed(tag))
+          if (RegExp(
+                '\\b${RegExp.escape(tag.toLowerCase())}\\b',
+              ).firstMatch(lower)
+              case final hit?)
+            (tag, hit.start),
+    ]..sort((a, b) => a.$2.compareTo(b.$2));
+    return WorldTags.only([for (final n in named) n.$1]);
   }
 }

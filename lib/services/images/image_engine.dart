@@ -15,6 +15,7 @@ import '../runtime/download.dart';
 import '../import/soulkyn_media.dart';
 import '../runtime/runtime_controller.dart';
 import 'image_catalog.dart';
+import 'picture_info.dart';
 import 'sd_runtime.dart';
 
 /// A picture asked for, by the companion or by hand in the Images tab.
@@ -305,9 +306,11 @@ class ImageEngine extends ChangeNotifier {
         progress = null;
         notifyListeners();
         await out.parent.create(recursive: true);
-        return await out.writeAsBytes(
+        final made = await out.writeAsBytes(
           await _drawInInvoke(s, job.request, seed, _cancel!.future),
         );
+        await PictureInfo.of(r, seed, invoke: true).writeFor(made);
+        return made;
       }
       var sampling = false;
       Future<File> runWith(String exe) => SdRun.run(
@@ -344,7 +347,11 @@ class ImageEngine extends ChangeNotifier {
         _output.add('--- trying again with Vulkan ---');
         made = await runWith(await _ensureEngine(s));
       }
-      if (r is AnimateRequest) await keepThumbnail(r.image, made);
+      if (r is AnimateRequest) {
+        await keepThumbnail(r.image, made);
+      } else {
+        await PictureInfo.of(r, seed).writeFor(made);
+      }
       return made;
     } finally {
       _cancel = null;

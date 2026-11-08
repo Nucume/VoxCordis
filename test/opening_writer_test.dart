@@ -86,4 +86,12 @@ void main() {
     }
     expect(VocesWorld.fromJson(w.toJson()).tags, w.tags);
   });
+
+  test('tag suggestions fall back to tags named in the answer', () {
+    expect(TagSuggester.parse('A fantasy world with a touch of mystery.'), [
+      'Fantasy',
+      'Mystery',
+    ]);
+    expect(TagSuggester.parse('Tags:\nSci-fi, Horror'), ['Sci-fi', 'Horror']);
+  });
 }

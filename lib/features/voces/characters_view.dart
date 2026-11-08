@@ -440,7 +440,14 @@ class _CharacterEditorState extends State<_CharacterEditor> {
   final _line = TextEditingController();
   final _pronouns = TextEditingController();
   final _tags = TextEditingController();
+  final _looksTags = TextEditingController();
   final _sections = <_SectionFields>[];
+
+  /// The model is turning the Looks part into picture tags.
+  var _tagging = false;
+
+  /// "Describe them" writes for adults.
+  var _describeAdult = false;
   var _art = VocesLibrary.newArt();
 
   /// A new portrait, uploaded or drawn.
@@ -479,6 +486,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     _line.text = c?.line ?? '';
     _pronouns.text = c?.pronouns ?? '';
     _tags.text = c?.tags.join(', ') ?? '';
+    _looksTags.text = c?.looksTags.join(', ') ?? '';
     _setSections([
       if (c == null)
         for (final h in _starterSections) SheetSection(h, '')
@@ -523,6 +531,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
       line: _line.text.trim(),
       pronouns: pronouns.isEmpty ? null : pronouns,
       tags: splitTags(_tags.text),
+      looksTags: splitTags(_looksTags.text),
       sections: [
         for (final (h, t) in _sections)
           if (raw)
@@ -591,7 +600,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
       _keepDraft();
       unawaited(widget.data.reload());
     }
-    for (final c in [_name, _line, _pronouns, _tags]) {
+    for (final c in [_name, _line, _pronouns, _tags, _looksTags]) {
       c.dispose();
     }
     dropDrawn(_library, _portrait);
@@ -607,9 +616,10 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     final services = AppScope.of(context);
     return describeError(() async {
       final reply = await services.askModel(
-        CharacterDescriber.instructions,
-        CharacterDescriber.brief(idea),
+        CharacterDescriber.instructions(adult: _describeAdult),
+        CharacterDescriber.brief(idea, adult: _describeAdult),
         maxTokens: 1600,
+        what: 'Describe the character',
       );
       final got = reply == null ? null : CharacterDescriber.parse(reply);
       if (got == null) return 'The model gave nothing usable. Try again.';
@@ -619,6 +629,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
         _pronouns.text = got.pronouns;
         _line.text = got.line;
         _tags.text = got.traits.join(', ');
+        _looksTags.text = got.looksTags.join(', ');
         // Parts the human added by hand stay, after the model's.
         final own = [
           for (final (h, t) in _sections)
@@ -630,6 +641,42 @@ class _CharacterEditorState extends State<_CharacterEditor> {
       });
       return null;
     });
+  }
+
+  /// "From Looks": the chat model turns the Looks part into picture tags.
+  Future<void> _tagLooks() async {
+    final looks = looksText([
+      for (final (h, t) in _sections) SheetSection(h.text, t.text),
+    ]).trim();
+    final messenger = ScaffoldMessenger.of(context);
+    if (looks.isEmpty) {
+      messenger.showSnackBar(
+        const SnackBar(
+          content: Text('Write how they look in the Looks part first.'),
+        ),
+      );
+      return;
+    }
+    final services = AppScope.of(context);
+    setState(() => _tagging = true);
+    final error = await describeError(() async {
+      final reply = await services.askModel(
+        LooksTags.fromLooksInstructions,
+        LooksTags.fromLooksBrief(looks, pronouns: _pronouns.text),
+        maxTokens: 300,
+        what: 'Looks tags',
+        exact: true,
+      );
+      final tags = reply == null ? const <String>[] : LooksTags.parse(reply);
+      if (tags.isEmpty) return 'The model gave no tags. Try again.';
+      if (mounted) _looksTags.text = tags.join(', ');
+      return null;
+    });
+    if (!mounted) return;
+    setState(() => _tagging = false);
+    if (error != null) {
+      messenger.showSnackBar(SnackBar(content: Text(error)));
+    }
   }
 
   Future<void> _save() async {
@@ -656,6 +703,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     _line.text,
     _pronouns.text,
     _tags.text,
+    _looksTags.text,
     for (final (h, t) in _sections) '${h.text}\u0000${t.text}',
     _art,
     _portrait?.path,
@@ -697,6 +745,8 @@ class _CharacterEditorState extends State<_CharacterEditor> {
                         'e.g. a retired lighthouse keeper who talks to the '
                         'fog and knows every smuggler by name',
                     onDescribe: _describe,
+                    adult: _describeAdult,
+                    onAdult: (on) => setState(() => _describeAdult = on),
                   ),
                   const SizedBox(height: 16),
                 ],
@@ -739,26 +789,61 @@ class _CharacterEditorState extends State<_CharacterEditor> {
           EditorSection(
             'Portrait',
             Icons.face_retouching_natural_rounded,
-            VocesPictureField(
-              name: _name.text,
-              seed: _art,
-              file: _shown,
-              wide: false,
-              drawingFolder: _library.drawingFolder,
-              prompt: () => characterPrompt(
-                pronouns: _pronouns.text,
-                tags: splitTags(_tags.text),
-                line: _line.text,
-                sections: [
-                  for (final (h, t) in _sections) SheetSection(h.text, t.text),
-                ],
-              ),
-              onSeed: (seed) => setState(() => _art = seed),
-              onFile: (f) => setState(() {
-                if (f != _portrait) dropDrawn(_library, _portrait);
-                _portrait = f;
-                _cleared = f == null;
-              }),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                TextField(
+                  controller: _looksTags,
+                  minLines: 1,
+                  maxLines: 4,
+                  decoration:
+                      field(
+                        'Physical tags',
+                        hint:
+                            'black hair, undercut, green eyes, leather jacket',
+                      ).copyWith(
+                        helperText:
+                            'How they look as picture tags; Draw it starts '
+                            'from these.',
+                        suffixIcon: Tooltip(
+                          message: 'Make tags from the Looks part',
+                          child: IconButton(
+                            icon: _tagging
+                                ? const SizedBox.square(
+                                    dimension: 18,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                    ),
+                                  )
+                                : const Icon(Icons.auto_awesome_rounded),
+                            onPressed: _tagging ? null : _tagLooks,
+                          ),
+                        ),
+                      ),
+                ),
+                const SizedBox(height: 14),
+                VocesPictureField(
+                  name: _name.text,
+                  seed: _art,
+                  file: _shown,
+                  wide: false,
+                  drawingFolder: _library.drawingFolder,
+                  prompt: () => characterPrompt(
+                    pronouns: _pronouns.text,
+                    looksTags: splitTags(_looksTags.text),
+                    sections: [
+                      for (final (h, t) in _sections)
+                        SheetSection(h.text, t.text),
+                    ],
+                  ),
+                  onSeed: (seed) => setState(() => _art = seed),
+                  onFile: (f) => setState(() {
+                    if (f != _portrait) dropDrawn(_library, _portrait);
+                    _portrait = f;
+                    _cleared = f == null;
+                  }),
+                ),
+              ],
             ),
           ),
           EditorSection(

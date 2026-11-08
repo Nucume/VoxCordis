@@ -6,6 +6,7 @@ import '../../data/voces/voces_library.dart';
 import '../../data/voces/voces_models.dart';
 import 'content_rules.dart';
 import 'living_cast.dart';
+import 'story_notes.dart';
 
 /// How often people come and go on their own.
 enum Liveliness {
@@ -35,7 +36,19 @@ class StoryState {
     this.liveliness = Liveliness.normal,
     this.chain = 2,
     this.extras = const [],
+    this.notes = const StoryNotes(),
+    this.notesAt = 0,
+    this.rolls = const {},
   });
+
+  /// What the story keeps track of; see [StoryNotes].
+  final StoryNotes notes;
+
+  /// The last turn the notes were brought up to date with.
+  final int notesAt;
+
+  /// Rolls for risky turns, by turn id.
+  final Map<int, int> rolls;
 
   /// Cast in the scene, besides the player, by id.
   final List<String> present;
@@ -61,6 +74,9 @@ class StoryState {
     Liveliness? liveliness,
     int? chain,
     List<Extra>? extras,
+    StoryNotes? notes,
+    int? notesAt,
+    Map<int, int>? rolls,
   }) => StoryState(
     present: present ?? this.present,
     pinned: pinned ?? this.pinned,
@@ -68,6 +84,9 @@ class StoryState {
     liveliness: liveliness ?? this.liveliness,
     chain: chain ?? this.chain,
     extras: extras ?? this.extras,
+    notes: notes ?? this.notes,
+    notesAt: notesAt ?? this.notesAt,
+    rolls: rolls ?? this.rolls,
   );
 
   Map<String, Object?> toJson() => {
@@ -77,6 +96,10 @@ class StoryState {
     'liveliness': liveliness.name,
     'chain': chain,
     'extras': [for (final e in extras) e.toJson()],
+    if (!notes.isEmpty) 'notes': notes.toJson(),
+    if (notesAt > 0) 'notesAt': notesAt,
+    if (rolls.isNotEmpty)
+      'rolls': {for (final e in rolls.entries) '${e.key}': e.value},
   };
 
   static StoryState fromJson(Map<String, Object?> json) => StoryState(
@@ -96,6 +119,14 @@ class StoryState {
     extras: [
       for (final e in (json['extras'] as List?) ?? const []) ?Extra.fromJson(e),
     ],
+    notes: StoryNotes.fromJson(json['notes']),
+    notesAt: json['notesAt'] is int ? json['notesAt']! as int : 0,
+    rolls: {
+      if (json['rolls'] case final Map r)
+        for (final e in r.entries)
+          if (int.tryParse('${e.key}') case final id?)
+            if (e.value is int) id: e.value as int,
+    },
   );
 }
 
@@ -163,7 +194,7 @@ class StoryEngine {
     if (turn.kind == TurnKind.ask) return null;
     final named = _named(turn.text, state.present);
     if (named != null) return named;
-    if (turn.kind == TurnKind.act) return null;
+    if (turn.kind == TurnKind.act || onlyAction(turn.text)) return null;
     for (final t in before.reversed.take(4)) {
       if (t.kind.byHuman) continue;
       if (t.kind == TurnKind.character && state.present.contains(t.speakerId)) {
@@ -179,7 +210,7 @@ class StoryEngine {
   /// [turns]: a character after the narrator, the one who hasn't spoken
   /// longest; the narrator after a character.
   String? whoContinues(List<StoryTurn> turns, StoryState state) {
-    final last = turns.lastWhereOrNull((t) => t.kind != TurnKind.scene);
+    final last = turns.lastWhereOrNull((t) => !t.kind.aside);
     if (last == null || state.present.isEmpty) return null;
     if (last.kind == TurnKind.narrator) {
       final named = _named(last.text, state.present);
@@ -234,7 +265,11 @@ class StoryEngine {
   }) {
     final who = speaker == null ? null : world.cast[speaker];
     final w = world.world;
-    final recent = turns.reversed.take(8).map((t) => t.text).join('\n');
+    final recent = turns.reversed
+        .where((t) => t.kind != TurnKind.picture)
+        .take(8)
+        .map((t) => t.text)
+        .join('\n');
     final lore = <LoreEntry>{
       for (final b in world.lorebooks) ...LoreMatch.match(recent, b.entries),
       ...byMeaning,
@@ -264,6 +299,7 @@ class StoryEngine {
               : 'People without a sheet (a guard, a passer-by) are yours to '
                     'voice briefly, their words in quotes in your prose.',
         )
+        ..writeln(_playerLines)
         ..writeln(
           'Never speak, act, think or decide for $playerName: stop where '
           'they would act, and leave it to the human.',
@@ -288,6 +324,7 @@ class StoryEngine {
           'actions in *asterisks*. Never speak, act or decide for '
           '$playerName or anyone else. One or two paragraphs.',
         )
+        ..writeln(_playerLines)
         ..writeln()
         ..writeln('# ${who.name}')
         ..writeln(_sheet(who));
@@ -328,6 +365,12 @@ class StoryEngine {
         system.writeln('- ${e.name}${e.line.isEmpty ? '' : ' - ${e.line}'}');
       }
     }
+    if (!state.notes.isEmpty) {
+      system
+        ..writeln()
+        ..writeln('# Story notes')
+        ..writeln(state.notes.forPrompt(playerName));
+    }
     if (lore.isNotEmpty) {
       system
         ..writeln()
@@ -349,6 +392,13 @@ class StoryEngine {
             : '(${change.who.name} leaves now: show them going.)',
       );
     }
+    // The first reply after a rolled turn shows how it went.
+    final last = turns.lastWhereOrNull((t) => !t.kind.aside);
+    if (last != null && last.kind.byHuman) {
+      if (state.rolls[last.id] case final n?) {
+        user.writeln(Fortune.forPrompt(n, playerName));
+      }
+    }
     user.write('Now write ${nameOf(speaker)}\'s next reply.');
 
     final others = <String>[
@@ -361,11 +411,60 @@ class StoryEngine {
     ]);
   }
 
+  /// How the human writes $playerName's turns.
+  String get _playerLines =>
+      '$playerName\'s turns put what they say in "quotes" and what they do '
+      'in *asterisks*, often both in one turn; words without either are '
+      'what they say.';
+
+  /// Whether [text] only does something: actions in *asterisks* and no
+  /// words said, which goes to the narrator unless someone is named.
+  static bool onlyAction(String text) {
+    final t = text.trim();
+    if (!t.contains('*') || RegExp('["“”]').hasMatch(t)) return false;
+    return t.replaceAll(RegExp(r'\*[^*]*\*'), '').trim().isEmpty;
+  }
+
+  /// How long a story rests before opening it again starts with a recap.
+  static const recapAfter = Duration(hours: 1);
+
+  /// Whether opening a story with [turns] at [now] starts with "Previously
+  /// on…": a story of some length, left for a while.
+  ///
+  /// The first time a story is opened after VoxCordis starts it does
+  /// ([lastRecap] null); after that only when the story has rested for
+  /// [recapAfter] and the last recap is as old.
+  static bool wantsRecap(
+    List<StoryTurn> turns,
+    DateTime now, {
+    DateTime? lastRecap,
+  }) {
+    final told = turns.where((t) => !t.kind.aside).toList();
+    if (told.length < 6) return false;
+    if (lastRecap == null) return true;
+    return now.difference(told.last.ts) >= recapAfter &&
+        now.difference(lastRecap) >= recapAfter;
+  }
+
+  /// What the narrator is asked for a "Previously on…": a short recap of
+  /// the story so far, no new events.
+  ({String system, String user}) recap(List<StoryTurn> turns) => (
+    system:
+        'You are the narrator of "${world.world.name}", a roleplay story. '
+        'Write a "Previously on…" recap for $playerName, who is coming back '
+        'to the story after a break: three to five sentences in the past '
+        'tense, in your narrator\'s voice, about where things stand, who is '
+        'around and what is unresolved. Only what happened; nothing new, no '
+        'questions, no heading, no lists.',
+    user: 'The story so far:\n\n${transcript(turns)}\n\nWrite the recap.',
+  );
+
   /// The story as lines, newest last, cut to [window] characters.
   String transcript(List<StoryTurn> turns) {
     final lines = <String>[];
     var size = 0;
     for (final t in turns.reversed) {
+      if (t.kind == TurnKind.picture) continue;
       final line = switch (t.kind) {
         TurnKind.narrator => 'Narrator: ${t.text}',
         TurnKind.character => '${t.speaker}: ${t.text}',
@@ -373,6 +472,7 @@ class StoryEngine {
         TurnKind.act => '$playerName (does): ${t.text}',
         TurnKind.ask => '(The human asks the narrator: ${t.text})',
         TurnKind.scene => '[${t.text}]',
+        TurnKind.picture => '',
       };
       if (size + line.length > window && lines.isNotEmpty) break;
       lines.add(line);
@@ -435,7 +535,7 @@ class StoryEngine {
   /// turns, newest last.
   String recentText(List<StoryTurn> turns, {int count = 4}) => [
     for (final t in turns.reversed.take(count).toList().reversed)
-      if (t.kind != TurnKind.scene) t.text,
+      if (!t.kind.aside) t.text,
   ].join('\n');
 
   /// Every lore entry the story could use, switched on and not always in.

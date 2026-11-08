@@ -289,6 +289,42 @@ String? requestedOpen(String text) {
   return null;
 }
 
+/// Whether the human's message asks for a picture: "draw me something",
+/// "mind drawing a picture of yourself?", "send me a selfie". Roleplay
+/// models often answer that by describing a photo in the story without
+/// calling draw_picture, so the app asks them once more. A wrong guess
+/// only costs one short extra round, where the model can say no.
+bool askedForPicture(String text) {
+  final t = text.toLowerCase();
+  if (RegExp(
+    r'\b(draw|drawing|draws|sketch|sketching|paint|painting|doodle|'
+    r'illustrate)\b',
+  ).hasMatch(t)) {
+    return true;
+  }
+  const things =
+      r'(picture|pic|pics|photo|photos|selfie|selfies|image|'
+      r'portrait|snapshot|snap|nudes?)';
+  if (RegExp(
+    '\\b(send|show|make|take|give|create|generate|snap|see|share|'
+    'want|get)\\b[^\\n.?!]{0,40}?\\b$things\\b',
+  ).hasMatch(t)) {
+    return true;
+  }
+  return RegExp(
+    '\\b(a|an|another|one more|new|some)\\s+(\\w+\\s+)?$things\\s+'
+    '(of|for)\\b',
+  ).hasMatch(t);
+}
+
+/// Told to a model that answered a picture request without drawing.
+const missedDrawNote =
+    '[App note, not from your human: nothing was drawn. Describing a '
+    'picture in your reply doesn\'t make one; only a draw_picture call does. '
+    'If you meant to show them a picture, call draw_picture now with a '
+    'prompt for it, written the way your picture model likes. Write no other '
+    'text.]';
+
 /// What the human may be asking to start, for "open Vivaldi please" or
 /// "can you launch steam?": the words after the verb, longest first
 /// ("Vivaldi please" is cut at "please", leaving "Vivaldi"). The caller

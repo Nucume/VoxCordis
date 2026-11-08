@@ -536,6 +536,8 @@ class DescribeBox extends StatefulWidget {
     required this.hint,
     required this.what,
     required this.onDescribe,
+    this.adult = false,
+    this.onAdult,
   });
 
   final String title;
@@ -546,6 +548,11 @@ class DescribeBox extends StatefulWidget {
 
   /// Fills the editor in from the idea; an error to show, or null.
   final Future<String?> Function(String idea) onDescribe;
+
+  /// Written for adults: gore, sex and dark themes in full. The switch
+  /// shows only with Mature content on in Settings (or when already on).
+  final bool adult;
+  final ValueChanged<bool>? onAdult;
 
   @override
   State<DescribeBox> createState() => _DescribeBoxState();
@@ -581,6 +588,9 @@ class _DescribeBoxState extends State<DescribeBox> {
     final accent = Theme.of(context).colorScheme.primary;
     final size = modelBillions(AppScope.of(context).settings.value);
     final small = size != null && size < smallModelBillions;
+    final showAdult =
+        widget.onAdult != null &&
+        (widget.adult || AppScope.of(context).settings.value.vocesMature);
     return EditorCard(
       tint: accent,
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
@@ -598,6 +608,18 @@ class _DescribeBoxState extends State<DescribeBox> {
                   color: palette.text,
                 ),
               ),
+              const Spacer(),
+              if (showAdult)
+                Tooltip(
+                  message:
+                      'Write it for adults: gore, sex and dark themes in full',
+                  child: FilterChip(
+                    label: const Text('18+'),
+                    selected: widget.adult,
+                    onSelected: _busy ? null : widget.onAdult,
+                    visualDensity: VisualDensity.compact,
+                  ),
+                ),
             ],
           ),
           const SizedBox(height: 4),

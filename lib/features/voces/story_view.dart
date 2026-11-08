@@ -1,19 +1,32 @@
 import 'dart:async';
+import 'dart:io';
+import 'dart:ui' as ui;
 
+import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 import '../../app_scope.dart';
+import '../../data/settings.dart';
 import '../../data/voces/story_log.dart';
 import '../../services/logs/app_log.dart';
 import '../../data/voces/voces_library.dart';
 import '../../data/voces/voces_models.dart';
 import '../../services/voces/describer.dart';
+import '../../services/images/picture_info.dart';
 import '../../services/voces/living_cast.dart';
+import '../../services/voces/scene_tags.dart';
 import '../../services/voces/story_engine.dart';
+import '../../services/voces/story_export.dart';
+import '../../services/voces/story_notes.dart';
+import 'story_text.dart';
+import 'world_update_dialog.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/glass_popover.dart';
 import 'voces_editor.dart';
 import 'voces_home.dart';
+import 'voces_picture.dart';
 import 'voces_widgets.dart';
 
 /// Asks how to start a story in [world], starts it and opens it.
@@ -161,21 +174,21 @@ class _NewStoryDialogState extends State<_NewStoryDialog> {
                   style: muted,
                 )
               else
-                DropdownButtonFormField<String>(
-                  initialValue: _player?.id,
-                  isExpanded: true,
-                  items: [
-                    for (final c in widget.data.characters)
-                      DropdownMenuItem(
-                        value: c.id,
-                        child: Text(
+                LayoutBuilder(
+                  builder: (context, box) => GlassSelect<String?>(
+                    value: _player?.id,
+                    width: box.maxWidth,
+                    placeholder: 'Pick who you play',
+                    options: [
+                      for (final c in widget.data.characters)
+                        GlassOption(
+                          c.id,
                           c.line.isEmpty ? c.name : '${c.name} · ${c.line}',
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                  ],
-                  onChanged: (id) =>
-                      _pick(id == null ? null : widget.data.character(id)),
+                    ],
+                    onChanged: (id) =>
+                        _pick(id == null ? null : widget.data.character(id)),
+                  ),
                 ),
               const SizedBox(height: 18),
               const VocesLabel('Difficulty'),
@@ -272,8 +285,7 @@ class _NewStoryDialogState extends State<_NewStoryDialog> {
 
 /// How the human's next line goes in.
 enum _Mode {
-  say('Say', TurnKind.say, 'What do you say?'),
-  act('Do', TurnKind.act, 'What do you do?'),
+  play('You', TurnKind.say, '"What you say" and *what you do*'),
   ask('Ask the narrator', TurnKind.ask, 'Ask for something: "let night fall"');
 
   const _Mode(this.label, this.kind, this.hint);
@@ -312,7 +324,7 @@ class _StoryViewState extends State<StoryView> {
   final _input = TextEditingController();
   final _inputFocus = FocusNode();
   final _scroll = ScrollController();
-  var _mode = _Mode.say;
+  var _mode = _Mode.play;
 
   /// The side column, shown on demand in narrow windows.
   var _sideOpen = false;
@@ -375,6 +387,15 @@ class _StoryViewState extends State<StoryView> {
         _state = state;
         _turns = turns;
       });
+      final now = DateTime.now();
+      if (StoryEngine.wantsRecap(
+        turns,
+        now,
+        lastRecap: _recappedAt[widget.story.id],
+      )) {
+        _recappedAt[widget.story.id] = now;
+        unawaited(_makeRecap());
+      }
       if (turns.isEmpty) {
         final opening = world.world.openings
             .where((o) => o.title == widget.story.opening)
@@ -427,7 +448,7 @@ class _StoryViewState extends State<StoryView> {
     );
     if (!mounted) return turn;
     setState(() => _turns = [..._turns, turn]);
-    if (_state.extras.isNotEmpty && kind != TurnKind.scene) {
+    if (_state.extras.isNotEmpty && !kind.aside) {
       unawaited(
         _saveState(
           _state.copyWith(extras: LivingCast.count(_state.extras, turn)),
@@ -436,7 +457,7 @@ class _StoryViewState extends State<StoryView> {
     }
     _story = _story.copyWith(
       lastPlayed: DateTime.now(),
-      turns: _turns.where((t) => t.kind != TurnKind.scene).length,
+      turns: _turns.where((t) => !t.kind.aside).length,
       place: _state.place,
     );
     unawaited(library.saveStory(_story));
@@ -460,6 +481,30 @@ class _StoryViewState extends State<StoryView> {
     });
   }
 
+  /// A small button that puts [mark] around the selected words, or a
+  /// pair of them at the cursor to type between.
+  Widget _markButton(String mark, String tip) => Tooltip(
+    message: tip,
+    child: InkWell(
+      borderRadius: BorderRadius.circular(8),
+      onTap: () {
+        _input.value = wrapWithMark(_input.value, mark);
+        _inputFocus.requestFocus();
+      },
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Text(
+          mark == '"' ? '" "' : '* *',
+          style: TextStyle(
+            fontSize: 15,
+            fontWeight: FontWeight.w700,
+            color: context.palette.textMuted,
+          ),
+        ),
+      ),
+    ),
+  );
+
   /// The human's line, then whoever answers, and the chain after.
   Future<void> _send() async {
     final text = _input.text.trim();
@@ -468,6 +513,12 @@ class _StoryViewState extends State<StoryView> {
     final engine = _engine!;
     final before = _turns;
     final turn = await _add(_mode.kind, text);
+    if (_rollNext || Fortune.rollsOnItsOwn(turn, _story.difficulty)) {
+      await _saveState(
+        _state.copyWith(rolls: {..._state.rolls, turn.id: Fortune.roll()}),
+      );
+    }
+    if (_rollNext && mounted) setState(() => _rollNext = false);
     final who = _answererSet
         ? _answerer
         : engine.whoAnswers(turn, before, _state);
@@ -507,8 +558,112 @@ class _StoryViewState extends State<StoryView> {
           _writer = null;
         });
         unawaited(_tendCast());
+        unawaited(_keepNotes());
       }
     }
+  }
+
+  /// The composer's dice: the next turn gets a roll (a lie, a sneak…).
+  var _rollNext = false;
+  var _notesBusy = false;
+
+  /// Brings the story notes up to date every [StoryNotes.every] told
+  /// turns, or now when [force]. Waits for replies; uses the chat model.
+  Future<void> _keepNotes({bool force = false}) async {
+    final engine = _engine;
+    if (engine == null || _notesBusy || _busy || !mounted) return;
+    final fresh = [
+      for (final t in _turns)
+        if (t.id > _state.notesAt && t.id >= 0 && !t.kind.aside) t,
+    ];
+    if (fresh.isEmpty || (!force && fresh.length < StoryNotes.every)) return;
+    setState(() => _notesBusy = true);
+    try {
+      final reply = await _services.askModel(
+        StoryNotes.instructions(engine.playerName),
+        StoryNotes.brief(
+          _state.notes,
+          engine.playerName,
+          engine.transcript(fresh),
+        ),
+        maxTokens: 900,
+        what: 'Story notes',
+        exact: true,
+      );
+      final notes = reply == null ? null : StoryNotes.parse(reply);
+      if (notes != null && mounted) {
+        await _saveState(_state.copyWith(notes: notes, notesAt: fresh.last.id));
+      } else if (force && mounted) {
+        _say('The notes couldn\'t be updated this time.');
+      }
+    } on Object catch (e) {
+      _services.log.add(LogKind.errors, 'Story notes failed: $e');
+    } finally {
+      if (mounted) setState(() => _notesBusy = false);
+    }
+  }
+
+  Future<void> _editNotes() async {
+    final n = _state.notes;
+    final items = TextEditingController(text: n.itemsText);
+    final quests = TextEditingController(text: n.questsText);
+    final feelings = TextEditingController(text: n.feelingsText);
+    Widget field(TextEditingController c, String label, String hint) => Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: TextField(
+        controller: c,
+        minLines: 2,
+        maxLines: 6,
+        decoration: InputDecoration(
+          labelText: label,
+          hintText: hint,
+          alignLabelWithHint: true,
+        ),
+      ),
+    );
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Story notes'),
+        content: SizedBox(
+          width: 460,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                field(items, 'Carrying', 'One thing per line'),
+                field(quests, 'Still to do', 'One goal or promise per line'),
+                field(feelings, 'How people feel', 'Mira: wary, but warming'),
+              ],
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context, true),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    if (ok == true && mounted) {
+      await _saveState(
+        _state.copyWith(
+          notes: StoryNotes.fromText(
+            items: items.text,
+            quests: quests.text,
+            feelings: feelings.text,
+          ),
+        ),
+      );
+    }
+    items.dispose();
+    quests.dispose();
+    feelings.dispose();
   }
 
   /// Between turns: notices people the narrator named, gives a sheet to
@@ -551,6 +706,8 @@ class _StoryViewState extends State<StoryView> {
         LivingCast.finderInstructions,
         LivingCast.finderBrief(text, known.toList()),
         maxTokens: 400,
+        what: 'Who is new in the story',
+        exact: true,
       );
       if (reply == null || !mounted) return;
       final found = [
@@ -582,8 +739,14 @@ class _StoryViewState extends State<StoryView> {
         playerName: engine.playerName,
       );
       final reply = await _services.askModel(
-        CharacterDescriber.instructions,
-        CharacterDescriber.brief(LivingCast.sheetIdea(e, moments)),
+        CharacterDescriber.instructions(
+          adult: engine.mature && engine.world.world.adult,
+        ),
+        CharacterDescriber.brief(
+          LivingCast.sheetIdea(e, moments),
+          adult: engine.mature && engine.world.world.adult,
+        ),
+        what: 'A sheet for someone met in the story',
       );
       final d = reply == null ? null : CharacterDescriber.parse(reply);
       if (d == null || !mounted) return;
@@ -595,6 +758,7 @@ class _StoryViewState extends State<StoryView> {
           line: d.line.isEmpty ? e.line : d.line,
           pronouns: d.pronouns.isEmpty ? null : d.pronouns,
           tags: d.traits,
+          looksTags: d.looksTags,
           sections: d.sections,
           source: 'Met in "${_story.title}"',
           created: DateTime.now(),
@@ -644,6 +808,7 @@ class _StoryViewState extends State<StoryView> {
         LivingCast.pastInstructions,
         LivingCast.pastBrief(c.name, moments),
         maxTokens: 400,
+        what: 'A character\'s past',
       );
       final past = reply
           ?.replaceAll(RegExp(r'<think>[\s\S]*?</think>'), '')
@@ -814,7 +979,7 @@ class _StoryViewState extends State<StoryView> {
   Future<void> _retry() async {
     final last = _turns.lastOrNull;
     if (last == null || _busy || last.kind.byHuman) return;
-    if (last.kind == TurnKind.scene) return;
+    if (last.kind.aside) return;
     await _log!.dropFrom(last.id);
     setState(() => _turns = _turns.where((t) => t.id < last.id).toList());
     await _run(
@@ -884,6 +1049,429 @@ class _StoryViewState extends State<StoryView> {
     if (ok != true || !mounted) return;
     await _log!.dropFrom(turn.id);
     setState(() => _turns = _turns.where((t) => t.id < turn.id).toList());
+  }
+
+  var _drawing = false;
+
+  /// "Previously on…": written when a story is opened after a break, or
+  /// asked for from the menu; shown above the composer until closed.
+  String? _recap;
+  var _recapping = false;
+
+  /// When each story last opened with a recap since VoxCordis started.
+  static final _recappedAt = <String, DateTime>{};
+
+  Future<void> _makeRecap() async {
+    final engine = _engine;
+    if (engine == null || _recapping || _busy) return;
+    setState(() {
+      _recapping = true;
+      _recap = null;
+    });
+    String? text;
+    try {
+      final ask = engine.recap(_turns);
+      final reply = await _services.askModel(
+        ask.system,
+        ask.user,
+        maxTokens: 900,
+        what: 'Previously on…',
+      );
+      text = reply
+          ?.replaceAll(RegExp(r'<think>[\s\S]*?</think>'), '')
+          .replaceFirst(
+            RegExp(r'^\W*previously on[^\n]*\n', caseSensitive: false),
+            '',
+          )
+          .trim();
+    } on Object catch (e) {
+      _services.log.add(LogKind.errors, 'Recap failed: $e');
+    }
+    if (!mounted) return;
+    setState(() {
+      _recapping = false;
+      _recap = text == null || text.isEmpty ? null : text;
+    });
+    if (_recap == null) _say('The recap couldn\'t be written this time.');
+  }
+
+  Widget _recapCard(BuildContext context) {
+    final palette = context.palette;
+    final accent = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 800),
+          child: Container(
+            padding: const EdgeInsets.fromLTRB(16, 10, 6, 14),
+            decoration: BoxDecoration(
+              color: palette.bubble,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: accent.withValues(alpha: 0.4)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Icon(Icons.history_edu_rounded, size: 18, color: accent),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'Previously on ${_story.title}…',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          color: palette.text,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => setState(() {
+                        _recap = null;
+                        _recapping = false;
+                      }),
+                      icon: const Icon(Icons.close_rounded, size: 18),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 2),
+                if (_recap == null)
+                  Row(
+                    children: [
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        'The narrator is catching you up…',
+                        style: TextStyle(color: palette.textMuted),
+                      ),
+                    ],
+                  )
+                else
+                  ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 220),
+                    child: SingleChildScrollView(
+                      padding: const EdgeInsets.only(right: 10),
+                      child: Text.rich(
+                        storyText(
+                          _recap!,
+                          TextStyle(
+                            fontSize: 14.5,
+                            height: 1.5,
+                            color: palette.text,
+                          ),
+                          palette.textMuted,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// What shows dimmed behind the turns: the latest scene picture, else the
+  /// world's picture.
+  File? _backdrop(StoryEngine engine) {
+    if (!_services.settings.value.vocesBackdrop) return null;
+    final scene = _turns.where((t) => t.kind == TurnKind.picture).lastOrNull;
+    if (scene != null) {
+      final f = File(p.join(engine.world.folder, scene.text));
+      if (f.existsSync()) return f;
+    }
+    return engine.world.picture;
+  }
+
+  /// "Draw this" / "Draw the scene": the chat model turns the moment at
+  /// [upTo] into picture tags (with the Physical tags of those in view),
+  /// the Draw panel opens with them to change or draw, and the picture
+  /// kept joins the story. The chat model loads again after.
+  Future<void> _drawScene(StoryTurn upTo) async {
+    final services = _services;
+    final engine = _engine;
+    if (engine == null || _busy || _drawing) return;
+    if (services.settings.value.imageEngine == ImageEngineChoice.off) {
+      _say('Turn on drawing in Settings → Images first.');
+      return;
+    }
+    setState(() => _drawing = true);
+    try {
+      final adult = engine.mature && engine.world.world.adult;
+      final messenger = ScaffoldMessenger.maybeOf(context);
+      messenger?.showSnackBar(
+        const SnackBar(
+          content: Text('Writing picture tags for the scene…'),
+          duration: Duration(minutes: 2),
+        ),
+      );
+      String prompt;
+      try {
+        final reply = await services.askModel(
+          SceneTags.instructions(adult: adult),
+          SceneTags.brief(engine, _turns, upTo, place: _state.place),
+          maxTokens: 1200,
+          what: 'Scene tags',
+          exact: true,
+        );
+        prompt = reply == null
+            ? ''
+            : SceneTags.prompt(reply, engine.world.cast.values);
+      } on Object catch (e) {
+        services.log.add(LogKind.errors, 'Scene tags failed: $e');
+        prompt = '';
+      }
+      messenger?.hideCurrentSnackBar();
+      if (!mounted) return;
+      if (prompt.isEmpty) {
+        _say('The model gave no tags; write what to draw yourself.');
+      }
+      final kept = await showDialog<File>(
+        context: context,
+        builder: (_) => VocesDrawDialog(
+          prompt: prompt,
+          wide: true,
+          folder: library.drawingFolder,
+        ),
+      );
+      if (kept != null) {
+        final dir = Directory(p.join(engine.world.folder, 'pictures'));
+        await dir.create(recursive: true);
+        final to = File(
+          p.join(
+            dir.path,
+            'scene-${DateTime.now().millisecondsSinceEpoch}'
+            '${p.extension(kept.path)}',
+          ),
+        );
+        await kept.copy(to.path);
+        await PictureInfo.move(kept, to);
+        await kept.delete().then((_) {}, onError: (_) {});
+        if (mounted) {
+          await _add(
+            TurnKind.picture,
+            p.relative(to.path, from: engine.world.folder),
+          );
+        }
+      }
+    } finally {
+      // Drawing let the chat model go; have it ready for the next turn.
+      services.runtime.ensureReady(services.settings.value).ignore();
+      if (mounted) setState(() => _drawing = false);
+    }
+  }
+
+  /// A new story that goes on from [at]: everything up to it copied, this
+  /// story left as it is. The copy opens in its place.
+  Future<void> _branch(StoryTurn at) async {
+    if (_busy) return;
+    final title = await _askTitle('${_story.title} (branch)');
+    if (title == null || !mounted) return;
+    final services = _services;
+    final host = context.getInheritedWidgetOfExactType<VocesEditorHost>();
+    final copy = await library.branchStory(_story, title: title);
+    final log = await services.openStoryLog(copy.id);
+    try {
+      final upTo = [
+        for (final t in _turns)
+          if (t.id >= 0 && t.id <= at.id) t,
+      ];
+      for (final t in upTo) {
+        await log.add(
+          t.kind,
+          t.text,
+          speakerId: t.speakerId,
+          speaker: t.speaker,
+          now: t.ts,
+        );
+      }
+      await log.setState('story', _state.toJson());
+      final saved = await library.saveStory(
+        copy.copyWith(turns: upTo.where((t) => !t.kind.aside).length),
+      );
+      await widget.data.reload();
+      if (!mounted) return;
+      if (host == null) {
+        _say('"${saved.title}" is with your stories.');
+        return;
+      }
+      widget.done(null);
+      unawaited(
+        host.open<void>(
+          (done) => StoryView(data: widget.data, story: saved, done: done),
+        ),
+      );
+    } finally {
+      await log.close();
+    }
+  }
+
+  Future<String?> _askTitle(String start) {
+    final c = TextEditingController(text: start);
+    return showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Branch from here'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'A new story goes on from this turn, with everything up to '
+                'it. This one stays as it is.',
+                style: TextStyle(color: context.palette.textMuted),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: c,
+                autofocus: true,
+                decoration: const InputDecoration(labelText: 'Its title'),
+                onSubmitted: (v) =>
+                    Navigator.pop(context, v.trim().isEmpty ? null : v.trim()),
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(
+              context,
+              c.text.trim().isEmpty ? null : c.text.trim(),
+            ),
+            child: const Text('Branch'),
+          ),
+        ],
+      ),
+    ).whenComplete(c.dispose);
+  }
+
+  /// The story as one HTML page with its pictures inside, or as Markdown
+  /// with its pictures in a folder beside it.
+  Future<void> _export() async {
+    final engine = _engine;
+    if (engine == null) return;
+    final safe = _story.title.replaceAll(RegExp(r'[\\/:*?"<>|]'), '').trim();
+    final at = await getSaveLocation(
+      suggestedName: '${safe.isEmpty ? 'story' : safe}.html',
+      acceptedTypeGroups: const [
+        XTypeGroup(label: 'Web page (pictures inside)', extensions: ['html']),
+        XTypeGroup(label: 'Markdown', extensions: ['md']),
+      ],
+    );
+    if (at == null || !mounted) return;
+    final turns = [
+      for (final t in _turns)
+        if (t.id >= 0) t,
+    ];
+    try {
+      final md =
+          at.activeFilter?.label == 'Markdown' ||
+          at.path.toLowerCase().endsWith('.md');
+      if (md) {
+        final path = at.path.toLowerCase().endsWith('.md')
+            ? at.path
+            : '${p.withoutExtension(at.path)}.md';
+        final pictures = '${p.basenameWithoutExtension(path)} pictures';
+        final shots = turns.where((t) => t.kind == TurnKind.picture).toList();
+        for (final t in shots) {
+          final f = File(p.join(engine.world.folder, t.text));
+          if (!await f.exists()) continue;
+          final to = File(
+            p.join(p.dirname(path), pictures, p.basename(f.path)),
+          );
+          await to.parent.create(recursive: true);
+          await f.copy(to.path);
+        }
+        await File(path).writeAsString(
+          StoryExport.markdown(
+            title: _story.title,
+            worldName: _story.worldName,
+            player: engine.playerName,
+            turns: turns,
+            pictures: Uri.encodeComponent(pictures),
+          ),
+        );
+      } else {
+        final path = at.path.toLowerCase().endsWith('.html')
+            ? at.path
+            : '${p.withoutExtension(at.path)}.html';
+        await File(path).writeAsString(
+          await StoryExport.html(
+            title: _story.title,
+            worldName: _story.worldName,
+            player: engine.playerName,
+            turns: turns,
+            folder: engine.world.folder,
+          ),
+        );
+      }
+      _say('Story exported.');
+    } on Object catch (e) {
+      _say('The story couldn\'t be saved there: $e');
+    }
+  }
+
+  void _say(String text) => ScaffoldMessenger.maybeOf(
+    context,
+  )?.showSnackBar(SnackBar(content: Text(text)));
+
+  /// Takes what changed in the world since the story began, the parts the
+  /// human picks, into the story's own copy.
+  Future<void> _updateFromWorld() async {
+    if (_busy) {
+      _say('Wait for the reply to finish, then update.');
+      return;
+    }
+    final update = await library.worldUpdate(_story);
+    if (!mounted) return;
+    if (update == null) {
+      _say(
+        '"${_story.worldName}" is no longer in your worlds, so there is '
+        'nothing to update from.',
+      );
+      return;
+    }
+    if (update.isEmpty) {
+      _say('Nothing changed in "${_story.worldName}" since this story began.');
+      return;
+    }
+    final pick = await showWorldUpdate(
+      context,
+      worldName: update.world?.name ?? _story.worldName,
+      update: update,
+    );
+    if (pick == null || !mounted) return;
+    final saved = await library.applyWorldUpdate(
+      _story,
+      update,
+      world: pick.world,
+      lorebooks: pick.lorebooks,
+      cast: pick.cast,
+    );
+    final world = await library.storyWorld(saved);
+    if (!mounted) return;
+    setState(() {
+      _story = saved;
+      _engine = StoryEngine(
+        world,
+        mature: _services.settings.value.vocesMature,
+      );
+    });
+    _say('Updated. The story uses the new world from the next turn.');
   }
 
   Future<void> _delete() async {
@@ -975,10 +1563,25 @@ class _StoryViewState extends State<StoryView> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     Expanded(
-                      child: Column(
+                      child: Stack(
                         children: [
-                          Expanded(child: _storyList(context, engine)),
-                          _composer(context, engine),
+                          if (_backdrop(engine) case final file?)
+                            Positioned.fill(
+                              child: IgnorePointer(
+                                child: _Backdrop(
+                                  file: file,
+                                  background: palette.background,
+                                ),
+                              ),
+                            ),
+                          Column(
+                            children: [
+                              Expanded(child: _storyList(context, engine)),
+                              if (_recap != null || _recapping)
+                                _recapCard(context),
+                              _composer(context, engine),
+                            ],
+                          ),
                         ],
                       ),
                     ),
@@ -996,6 +1599,11 @@ class _StoryViewState extends State<StoryView> {
                           onSave: _saveToCharacters,
                           onKeep: _busy ? null : _promote,
                           writing: _sheets,
+                          notesBusy: _notesBusy,
+                          onEditNotes: _editNotes,
+                          onUpdateNotes: _busy || _notesBusy
+                              ? null
+                              : () => _keepNotes(force: true),
                         ),
                       ),
                     ],
@@ -1070,10 +1678,57 @@ class _StoryViewState extends State<StoryView> {
             tooltip: 'More',
             icon: const Icon(Icons.more_horiz_rounded),
             onSelected: (v) {
+              if (v == 'update') _updateFromWorld();
+              if (v == 'recap') _makeRecap();
+              if (v == 'export') _export();
+              if (v == 'branch' && _turns.isNotEmpty) _branch(_turns.last);
+              if (v == 'backdrop') {
+                final s = _services.settings;
+                s.update(
+                  s.value.copyWith(vocesBackdrop: !s.value.vocesBackdrop),
+                );
+              }
+              if (v == 'draw') {
+                final last = _turns.lastWhere(
+                  (t) => !t.kind.aside,
+                  orElse: () => _turns.last,
+                );
+                _drawScene(last);
+              }
               if (v == 'delete') _delete();
             },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'delete', child: Text('Delete story')),
+            itemBuilder: (_) => [
+              PopupMenuItem(
+                value: 'recap',
+                enabled: !_busy && !_recapping && _turns.isNotEmpty,
+                child: const Text('Previously on…'),
+              ),
+              CheckedPopupMenuItem(
+                value: 'backdrop',
+                checked: _services.settings.value.vocesBackdrop,
+                child: const Text('Picture behind the story'),
+              ),
+              const PopupMenuDivider(),
+              PopupMenuItem(
+                value: 'draw',
+                enabled: !_busy && !_drawing && _turns.isNotEmpty,
+                child: const Text('Draw the scene'),
+              ),
+              PopupMenuItem(
+                value: 'branch',
+                enabled: !_busy && _turns.isNotEmpty,
+                child: const Text('Branch from here'),
+              ),
+              PopupMenuItem(
+                value: 'export',
+                enabled: _turns.isNotEmpty,
+                child: const Text('Export story…'),
+              ),
+              const PopupMenuItem(
+                value: 'update',
+                child: Text('Update from the world'),
+              ),
+              const PopupMenuItem(value: 'delete', child: Text('Delete story')),
             ],
           ),
         ],
@@ -1129,13 +1784,20 @@ class _StoryViewState extends State<StoryView> {
                 turn: t,
                 engine: engine,
                 live: t.id == -1,
-                onEdit: t.id < 0 || _busy ? null : () => _edit(t),
+                onEdit: t.id < 0 || _busy || t.kind == TurnKind.picture
+                    ? null
+                    : () => _edit(t),
+                onDraw: t.id < 0 || _busy || _drawing || t.kind.aside
+                    ? null
+                    : () => _drawScene(t),
+                onBranch: t.id < 0 || _busy ? null : () => _branch(t),
+                roll: _state.rolls[t.id],
                 onRewind: t.id < 0 || _busy ? null : () => _rewind(t),
                 onRetry:
                     !_busy &&
                         t.id == lastAi?.id &&
                         !t.kind.byHuman &&
-                        t.kind != TurnKind.scene
+                        !t.kind.aside
                     ? _retry
                     : null,
               ),
@@ -1176,6 +1838,23 @@ class _StoryViewState extends State<StoryView> {
                         _inputFocus.requestFocus();
                       },
                     ),
+                  if (_mode == _Mode.play) ...[
+                    const SizedBox(width: 4),
+                    _markButton('"', 'Speech: "words in quotes"'),
+                    _markButton('*', 'Action: *in asterisks*'),
+                    IconButton(
+                      tooltip: _rollNext
+                          ? 'This turn gets a roll'
+                          : 'Roll for this turn: a lie, a sneak, a leap'
+                                '${_story.difficulty == Difficulty.punishing || _story.difficulty == Difficulty.grimdark ? ' (actions roll on their own here)' : ''}',
+                      isSelected: _rollNext,
+                      visualDensity: VisualDensity.compact,
+                      iconSize: 18,
+                      onPressed: () => setState(() => _rollNext = !_rollNext),
+                      icon: const Icon(Icons.casino_outlined),
+                      selectedIcon: const Icon(Icons.casino_rounded),
+                    ),
+                  ],
                   const SizedBox(width: 10),
                   if (_busy && _state.chain > 0)
                     VocesPill(
@@ -1275,11 +1954,19 @@ class _TurnTile extends StatefulWidget {
     this.onEdit,
     this.onRewind,
     this.onRetry,
+    this.onDraw,
+    this.onBranch,
+    this.roll,
   });
 
   final StoryTurn turn;
   final StoryEngine engine;
   final bool live;
+  final VoidCallback? onDraw;
+  final VoidCallback? onBranch;
+
+  /// The roll this turn got, if any.
+  final int? roll;
   final VoidCallback? onEdit;
   final VoidCallback? onRewind;
   final VoidCallback? onRetry;
@@ -1321,9 +2008,38 @@ class _TurnTileState extends State<_TurnTile> {
     final base = TextStyle(fontSize: 15, height: 1.55, color: palette.text);
     final Widget body;
     switch (t.kind) {
+      case TurnKind.picture:
+        final file = File(p.join(widget.engine.world.folder, t.text));
+        body = Align(
+          alignment: Alignment.centerLeft,
+          child: GestureDetector(
+            onTap: () => _open(file),
+            child: MouseRegion(
+              cursor: SystemMouseCursors.zoomIn,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 420),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: Image.file(
+                    file,
+                    fit: BoxFit.contain,
+                    errorBuilder: (_, _, _) => Container(
+                      padding: const EdgeInsets.all(14),
+                      color: palette.tile,
+                      child: Text(
+                        'This picture is missing.',
+                        style: TextStyle(color: palette.textMuted),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
       case TurnKind.narrator:
         body = Text.rich(
-          _styled(
+          storyText(
             StoryEngine.splitPlace(t.text).text,
             base.copyWith(fontSize: 15.5),
             palette.textMuted,
@@ -1361,7 +2077,7 @@ class _TurnTileState extends State<_TurnTile> {
                       ),
                     ),
                     const SizedBox(height: 3),
-                    Text.rich(_styled(t.text, base, palette.textMuted)),
+                    Text.rich(storyText(t.text, base, palette.textMuted)),
                   ],
                 ),
               ),
@@ -1396,12 +2112,52 @@ class _TurnTileState extends State<_TurnTile> {
                   ),
                 ),
                 const SizedBox(height: 3),
-                Text(
-                  t.text,
-                  style: t.kind == TurnKind.say
-                      ? base
-                      : base.copyWith(fontStyle: FontStyle.italic),
-                ),
+                if (widget.roll case final n?)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Tooltip(
+                      message: 'Rolled $n of 20: ${Fortune.outcome(n)}.',
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: palette.tile,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.casino_rounded,
+                              size: 13,
+                              color: n <= 5
+                                  ? Colors.redAccent
+                                  : n >= 16
+                                  ? Colors.greenAccent
+                                  : palette.textMuted,
+                            ),
+                            const SizedBox(width: 5),
+                            Text(
+                              '$n · ${Fortune.outcome(n)}',
+                              style: TextStyle(
+                                fontSize: 11.5,
+                                color: palette.textMuted,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                if (t.kind == TurnKind.say)
+                  Text.rich(storyText(t.text, base, palette.textMuted))
+                else
+                  Text(
+                    t.text,
+                    style: base.copyWith(fontStyle: FontStyle.italic),
+                  ),
               ],
             ),
           ),
@@ -1422,8 +2178,16 @@ class _TurnTileState extends State<_TurnTile> {
                     'Write it again',
                     widget.onRetry,
                   ),
+                if (widget.onDraw != null)
+                  _tool(Icons.brush_rounded, 'Draw this', widget.onDraw),
                 if (widget.onEdit != null)
                   _tool(Icons.edit_rounded, 'Edit', widget.onEdit),
+                if (widget.onBranch != null)
+                  _tool(
+                    Icons.call_split_rounded,
+                    'Branch from here',
+                    widget.onBranch,
+                  ),
                 if (widget.onRewind != null)
                   _tool(Icons.undo_rounded, 'Go back to here', widget.onRewind),
               ],
@@ -1442,6 +2206,19 @@ class _TurnTileState extends State<_TurnTile> {
     );
   }
 
+  /// The picture, big, over the story; a click closes it.
+  void _open(File file) => showDialog<void>(
+    context: context,
+    barrierColor: Colors.black87,
+    builder: (context) => GestureDetector(
+      onTap: () => Navigator.pop(context),
+      child: InteractiveViewer(
+        maxScale: 6,
+        child: Center(child: Image.file(file)),
+      ),
+    ),
+  );
+
   Widget _tool(IconData icon, String tip, VoidCallback? onTap) => IconButton(
     tooltip: tip,
     onPressed: onTap,
@@ -1454,22 +2231,30 @@ class _TurnTileState extends State<_TurnTile> {
 }
 
 /// [text] with *actions* in italics.
-TextSpan _styled(String text, TextStyle base, Color muted) {
-  final spans = <TextSpan>[];
-  final re = RegExp(r'\*([^*\n]+)\*');
-  var at = 0;
-  for (final m in re.allMatches(text)) {
-    if (m.start > at) spans.add(TextSpan(text: text.substring(at, m.start)));
-    spans.add(
-      TextSpan(
-        text: m.group(1),
-        style: TextStyle(fontStyle: FontStyle.italic, color: muted),
-      ),
-    );
-    at = m.end;
+/// [value] with [mark] around the selected words, or a pair of marks at
+/// the cursor with the cursor between them.
+TextEditingValue wrapWithMark(TextEditingValue value, String mark) {
+  final text = value.text;
+  var sel = value.selection;
+  if (!sel.isValid) {
+    sel = TextSelection.collapsed(offset: text.length);
   }
-  if (at < text.length) spans.add(TextSpan(text: text.substring(at)));
-  return TextSpan(style: base, children: spans);
+  final before = text.substring(0, sel.start);
+  final picked = text.substring(sel.start, sel.end);
+  final after = text.substring(sel.end);
+  // A space before the pair when it follows a word.
+  final gap = before.isNotEmpty && !before.endsWith(' ') && picked.isEmpty
+      ? ' '
+      : '';
+  final wrapped = '$gap$mark$picked$mark';
+  return TextEditingValue(
+    text: '$before$wrapped$after',
+    selection: TextSelection.collapsed(
+      offset: picked.isEmpty
+          ? before.length + gap.length + 1
+          : before.length + wrapped.length,
+    ),
+  );
 }
 
 /// Who's here, where, and how the story runs.
@@ -1484,8 +2269,14 @@ class _StorySide extends StatelessWidget {
     required this.onSave,
     required this.onKeep,
     required this.writing,
+    required this.notesBusy,
+    required this.onEditNotes,
+    required this.onUpdateNotes,
   });
 
+  final bool notesBusy;
+  final VoidCallback onEditNotes;
+  final VoidCallback? onUpdateNotes;
   final StoryEngine engine;
   final StoryState state;
   final bool busy;
@@ -1616,6 +2407,69 @@ class _StorySide extends StatelessWidget {
           ),
         ],
         const SizedBox(height: 20),
+        Row(
+          children: [
+            const Expanded(child: VocesLabel('Notes')),
+            if (notesBusy)
+              const Padding(
+                padding: EdgeInsets.all(8),
+                child: SizedBox.square(
+                  dimension: 14,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                ),
+              )
+            else
+              IconButton(
+                tooltip: 'Update the notes from the story now',
+                onPressed: onUpdateNotes,
+                iconSize: 16,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.sync_rounded),
+              ),
+            IconButton(
+              tooltip: 'Edit the notes',
+              onPressed: onEditNotes,
+              iconSize: 16,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.edit_note_rounded),
+            ),
+          ],
+        ),
+        const SizedBox(height: 4),
+        if (state.notes.isEmpty)
+          Text(
+            'What you carry, what is still to do and how people feel about '
+            'you. The narrator fills these in every few turns.',
+            style: muted,
+          )
+        else ...[
+          for (final (label, lines) in [
+            ('Carrying', state.notes.items),
+            ('Still to do', state.notes.quests),
+            (
+              'How people feel',
+              [
+                for (final e in state.notes.feelings.entries)
+                  '${e.key}: ${e.value}',
+              ],
+            ),
+          ])
+            if (lines.isNotEmpty) ...[
+              Padding(
+                padding: const EdgeInsets.only(top: 6, bottom: 2),
+                child: Text(label, style: muted),
+              ),
+              for (final l in lines)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 1.5),
+                  child: Text(
+                    '• $l',
+                    style: TextStyle(fontSize: 12.5, color: palette.text),
+                  ),
+                ),
+            ],
+        ],
+        const SizedBox(height: 20),
         const VocesLabel('Comings and goings'),
         const SizedBox(height: 8),
         Wrap(
@@ -1724,4 +2578,47 @@ class _StorySide extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A picture behind the story, dimmed and softened so the turns stay easy
+/// to read.
+class _Backdrop extends StatelessWidget {
+  const _Backdrop({required this.file, required this.background});
+
+  final File file;
+  final Color background;
+
+  @override
+  Widget build(BuildContext context) => AnimatedSwitcher(
+    duration: const Duration(milliseconds: 600),
+    child: Stack(
+      key: ValueKey(file.path),
+      fit: StackFit.expand,
+      children: [
+        ImageFiltered(
+          imageFilter: ui.ImageFilter.blur(sigmaX: 3, sigmaY: 3),
+          child: Opacity(
+            opacity: 0.22,
+            child: Image.file(
+              file,
+              fit: BoxFit.cover,
+              errorBuilder: (_, _, _) => const SizedBox.shrink(),
+            ),
+          ),
+        ),
+        DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                background.withValues(alpha: 0.1),
+                background.withValues(alpha: 0.55),
+              ],
+            ),
+          ),
+        ),
+      ],
+    ),
+  );
 }

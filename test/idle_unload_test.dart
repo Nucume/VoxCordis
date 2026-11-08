@@ -34,6 +34,34 @@ void main() {
     expect(runtime.idleUnloadPending, isFalse);
   });
 
+  test('the wait is a choice, and Voces Mundi can keep the model', () async {
+    final tmp = await Directory.systemTemp.createTemp('idle');
+    addTearDown(() => tmp.delete(recursive: true));
+    final runtime = RuntimeController(tmp);
+    const on = AppSettings(
+      modelPath: '/nowhere.gguf',
+      freeGpuWhenIdle: true,
+      idleMinutes: 15,
+    );
+    expect(RuntimeController.idleUnload(on), const Duration(minutes: 15));
+    expect(
+      RuntimeController.idleUnload(const AppSettings()),
+      const Duration(minutes: 1),
+    );
+    runtime.keepLoaded = true;
+    runtime.touch(on);
+    expect(runtime.idleUnloadPending, isFalse);
+    runtime
+      ..hold()
+      ..release(on);
+    expect(runtime.idleUnloadPending, isFalse);
+    // Leaving Voces Mundi starts the wait again.
+    runtime.keepLoaded = false;
+    runtime.touch(on);
+    expect(runtime.idleUnloadPending, isTrue);
+    runtime.touch(const AppSettings());
+  });
+
   test('the setting is saved', () {
     final s = AppSettings.fromJson(
       const AppSettings(freeGpuWhenIdle: true).toJson(),

@@ -13,6 +13,7 @@ import 'package:companion/data/voces/voces_library.dart';
 import 'package:companion/data/voces/voces_models.dart';
 import 'package:companion/features/chat/chat_controller.dart';
 import 'package:companion/features/settings/settings_screen.dart';
+import 'package:companion/features/voces/story_view.dart';
 import 'package:companion/features/voces/voces_home.dart';
 import 'package:companion/services/runtime/runtime_controller.dart';
 import 'package:companion/services/secret_store.dart';
@@ -23,9 +24,14 @@ void main() {
   late Directory dir;
   late AppServices services;
 
-  Future<void> setUpApp(WidgetTester tester, {required bool voces}) async {
-    dir = Directory.systemTemp.createTempSync('voces_home');
-    addTearDown(() => dir.deleteSync(recursive: true));
+  Future<void> setUpApp(
+    WidgetTester tester, {
+    required bool voces,
+    OpenOnStart open = OpenOnStart.lastPlace,
+    bool lastInVoces = false,
+  }) async {
+    final d = dir = Directory.systemTemp.createTempSync('voces_home');
+    addTearDown(() => d.deleteSync(recursive: true));
     await tester.runAsync(() async {
       final key = DatabaseKey(
         dir,
@@ -42,6 +48,8 @@ void main() {
             companionName: 'Voxette',
             companionFolder: p.join(dir.path, 'VoxCordis', 'Voxette'),
             vocesMundi: voces,
+            openOnStart: open,
+            lastInVoces: lastInVoces,
           ),
         ),
         db: await openAppDatabase(
@@ -52,7 +60,8 @@ void main() {
         dbKey: key,
       );
     });
-    addTearDown(() => tester.runAsync(services.db.close));
+    final db = services.db;
+    addTearDown(() => tester.runAsync(db.close));
     tester.view.physicalSize = const Size(1280, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -92,6 +101,125 @@ void main() {
     await tester.tap(find.text('Voces Mundi'));
     await tester.pumpAndSettle();
     expect(services.vocesOpen.value, isTrue);
+  });
+
+  testWidgets('the app opens where it was left, unless told otherwise', (
+    tester,
+  ) async {
+    await setUpApp(tester, voces: true, lastInVoces: true);
+    expect(services.vocesOpen.value, isTrue);
+    expect(services.startPicker, isFalse);
+    // Leaving Voces Mundi is remembered for next time.
+    services.vocesOpen.value = false;
+    expect(services.settings.value.lastInVoces, isFalse);
+    services.vocesOpen.value = true;
+    expect(services.settings.value.lastInVoces, isTrue);
+
+    await setUpApp(
+      tester,
+      voces: true,
+      lastInVoces: true,
+      open: OpenOnStart.companion,
+    );
+    expect(services.vocesOpen.value, isFalse);
+
+    // Voces Mundi switched off in Settings: back to the companion.
+    await setUpApp(tester, voces: false, lastInVoces: true);
+    expect(services.vocesOpen.value, isFalse);
+
+    final json = AppSettings.fromJson(
+      const AppSettings(
+        openOnStart: OpenOnStart.picker,
+        lastInVoces: true,
+      ).toJson(),
+    );
+    expect(json.openOnStart, OpenOnStart.picker);
+    expect(json.lastInVoces, isTrue);
+  });
+
+  testWidgets('the start picker offers Voces Mundi as a card', (tester) async {
+    await setUpApp(tester, voces: true, open: OpenOnStart.picker);
+    expect(services.startPicker, isTrue);
+    await tester.pumpWidget(
+      AppScope(
+        services: services,
+        child: MaterialApp(
+          home: Builder(
+            builder: (context) => TextButton(
+              onPressed: () => showStartPicker(context),
+              child: const Text('start'),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('start'));
+    await tester.pumpAndSettle();
+    expect(find.text('Welcome back'), findsOneWidget);
+    expect(find.text('Voxette'), findsOneWidget);
+    await tester.tap(find.text('Voces Mundi'));
+    await tester.pumpAndSettle();
+    expect(services.vocesOpen.value, isTrue);
+  });
+
+  test('the quote and asterisk buttons wrap words or open a pair', () {
+    // Selected words get wrapped.
+    var v = wrapWithMark(
+      const TextEditingValue(
+        text: 'I wave hello',
+        selection: TextSelection(baseOffset: 2, extentOffset: 6),
+      ),
+      '*',
+    );
+    expect(v.text, 'I *wave* hello');
+    // At the cursor: a pair, with the cursor inside.
+    v = wrapWithMark(
+      const TextEditingValue(
+        text: '*waves*',
+        selection: TextSelection.collapsed(offset: 7),
+      ),
+      '"',
+    );
+    expect(v.text, '*waves* ""');
+    expect(v.selection.baseOffset, 9);
+  });
+
+  testWidgets('the companion gallery hands back the current one too', (
+    tester,
+  ) async {
+    await setUpApp(tester, voces: true);
+    await tester.runAsync(
+      () => services.settings.update(
+        services.settings.value.copyWith(
+          otherCompanions: [
+            CompanionProfile(id: 'bea', name: 'Bea', folder: dir.path),
+          ],
+        ),
+      ),
+    );
+    ({CompanionProfile? companion, bool add})? picked;
+    await tester.pumpWidget(
+      AppScope(
+        services: services,
+        child: MaterialApp(
+          home: Scaffold(
+            body: Builder(
+              builder: (context) => TextButton(
+                onPressed: () async => picked = await pickCompanion(context),
+                child: const Text('pick'),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.text('pick'));
+    await tester.pumpAndSettle();
+    // The hearted one: the way back from Voces Mundi.
+    await tester.tap(find.text('Voxette').last);
+    await tester.pumpAndSettle();
+    expect(picked?.companion?.name, 'Voxette');
+    expect(picked?.add, isFalse);
   });
 
   testWidgets('home: worlds, characters, lorebooks and search', (tester) async {
@@ -215,7 +343,7 @@ void main() {
     await tester.tap(find.text('Draw it'));
     await tester.pumpAndSettle();
     expect(find.textContaining('Drawing is switched off'), findsOneWidget);
-    await tester.tap(find.text('Cancel').last);
+    await tester.tap(find.text('Close').last);
     await tester.pumpAndSettle();
     await tester.tap(find.text('Cancel').last);
     await tester.pumpAndSettle();
@@ -389,7 +517,8 @@ void main() {
     expect(find.text('The rainy quay'), findsOneWidget); // where
     expect(find.text('Haru (you)'), findsOneWidget);
     expect(find.text('Mira'), findsOneWidget); // here at the start
-    expect(find.text('Say'), findsOneWidget);
+    expect(find.text('You'), findsOneWidget); // say and do in one
+    expect(find.byTooltip('Action: *in asterisks*'), findsOneWidget);
     expect(find.text('Ask the narrator'), findsOneWidget);
 
     // Bringing someone in or sending them off shows as a divider.

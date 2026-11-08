@@ -157,9 +157,20 @@ class SdInstaller {
                 : RuntimeInstaller.minCudaDriverLinux);
   }
 
+  /// Set when the last CUDA attempt failed on the way (a refusal from
+  /// GitHub, a dropped line) rather than finding nothing to get.
+  bool _retrySoon = false;
+
+  /// Vulkan for a day, or for an hour when [_retrySoon] (the marker is
+  /// dated so that it runs out then).
   Future<void> _markNoCuda() async {
     await _noCudaMarker.create(recursive: true);
-    await _noCudaMarker.setLastModified(DateTime.now());
+    await _noCudaMarker.setLastModified(
+      _retrySoon
+          ? DateTime.now().subtract(const Duration(hours: 23))
+          : DateTime.now(),
+    );
+    _retrySoon = false;
   }
 
   /// Whether [exe] is the CUDA build.
@@ -221,7 +232,7 @@ class SdInstaller {
   ) async {
     try {
       if (build == 'linux-cuda') {
-        final ok = await installSignedReleaseAsset(
+        final got = await installSignedReleaseAsset(
           _http,
           asset: linuxCudaAsset,
           into: installDir(build),
@@ -230,7 +241,10 @@ class SdInstaller {
           note: note,
           what: 'CUDA drawing',
         );
-        if (!ok) return null;
+        // GitHub refused or the line dropped: look again in an hour, not a
+        // day, as a rate limit is over by then.
+        if (got == SignedAssetResult.failed) _retrySoon = true;
+        if (got != SignedAssetResult.installed) return null;
         final exe = await _findIn(installDir(build));
         if (exe == null) {
           note?.call('CUDA drawing skipped: sd-cli was not in the download.');

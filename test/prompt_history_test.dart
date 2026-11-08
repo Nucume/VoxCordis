@@ -272,6 +272,28 @@ void main() {
     }
   });
 
+  test('asking for a picture', () {
+    for (final text in [
+      'Hi Aurora, mind drawing me a picture of yourself?',
+      'send me a selfie',
+      'can I see a pic of you at the beach?',
+      'Could you make an image of a cat in space',
+      'I want a photo of you in that dress',
+      'draw something cute',
+      'got a new picture of yourself for me?',
+    ]) {
+      expect(askedForPicture(text), isTrue, reason: text);
+    }
+    for (final text in [
+      'how was your day?',
+      'I love how you think',
+      'the picture frame fell off the wall',
+      'let me know what you want for dinner',
+    ]) {
+      expect(askedForPicture(text), isFalse, reason: text);
+    }
+  });
+
   group('fitting the context', () {
     List<Map<String, Object?>> turns(int n, int chars) => [
       for (var i = 0; i < n; i++)

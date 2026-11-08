@@ -66,6 +66,7 @@ class LlmClient {
     this.progress = false,
     this.firstWait,
     this.stallWait,
+    this.extra = const {},
     http.Client? client,
   }) : _http = client ?? http.Client();
 
@@ -92,6 +93,10 @@ class LlmClient {
   /// chunks, before giving up with [LlmStalled]. Null waits forever.
   final Duration? firstWait;
   final Duration? stallWait;
+
+  /// More request fields for this server, e.g. llama-server's
+  /// `chat_template_kwargs`.
+  final Map<String, Object?> extra;
 
   /// Why the last completion ended: "stop", "length", "tool_calls"…
   String? finishReason;
@@ -206,6 +211,7 @@ class LlmClient {
               maxTokens,
         if (progress) 'return_progress': true,
         if (tools.isNotEmpty) 'tools': tools,
+        ...extra,
       });
     finishReason = null;
     // Without progress, llama-server sends the headers only once it starts

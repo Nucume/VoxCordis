@@ -4,6 +4,7 @@ import 'dart:io';
 import '../../data/desk/pictures.dart';
 import '../../data/voces/voces_library.dart';
 import '../../data/voces/voces_models.dart';
+import '../voces/describer.dart';
 import 'character_card.dart';
 import 'imported_character.dart';
 import 'scenario_split.dart';
@@ -289,10 +290,29 @@ class VocesImport {
       line: tagline ?? _firstSentence(sections.firstOrNull?.text ?? ''),
       pronouns: card.pronouns,
       tags: card.traits,
+      looksTags: looksTagsOf(card.looks),
       sections: sections,
       source: card.source,
       created: DateTime.now(),
     );
+  }
+
+  /// Picture tags from a card's looks, when they came as tags (Soulkyn's
+  /// physical tags and clothing): every part short, no sentences. A card
+  /// that describes looks in prose gives none; "From Looks" in the editor
+  /// makes them then.
+  static List<String> looksTagsOf(Map<String, String> looks) {
+    final out = <String>[];
+    for (final e in looks.entries) {
+      if (e.key == 'age' || e.key == 'medium') continue;
+      for (final raw in e.value.split(',')) {
+        final t = raw.trim().toLowerCase();
+        if (t.isEmpty) continue;
+        if (t.split(' ').length > 4 || t.contains('.')) return const [];
+        if (!out.contains(t)) out.add(t);
+      }
+    }
+    return out.take(LooksTags.max).toList();
   }
 
   /// Whether [json] is a lorebook on its own rather than a character card.

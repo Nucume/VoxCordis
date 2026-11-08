@@ -11,8 +11,9 @@ import '../../data/voces/voces_library.dart';
 import '../../data/voces/voces_models.dart';
 import '../../services/images/image_catalog.dart';
 import '../../services/images/image_engine.dart';
-import '../../services/images/sd_runtime.dart';
+import '../../services/images/picture_info.dart';
 import '../../theme/app_theme.dart';
+import '../images/draw_panel.dart';
 import 'voces_widgets.dart';
 
 /// The picture part of a world's or character's editor: its own colours
@@ -168,34 +169,38 @@ String worldPrompt({
   _firstSentence(setting),
 ]);
 
-/// What "Draw it" starts from for a character: a portrait, their looks
-/// first, then traits and line.
+/// What "Draw it" starts from for a character: a portrait and their
+/// looks. Drawing models read tags, so their picture tags are used when
+/// they have them; else a short bit of the Looks part. Traits and the
+/// one-line say who they are, not how they look, so they stay out.
 String characterPrompt({
   required String? pronouns,
-  required List<String> tags,
-  required String line,
+  required List<String> looksTags,
   required List<SheetSection> sections,
 }) {
   final who = (pronouns ?? '').toLowerCase();
-  final looks = [
-    for (final s in sections)
-      if (RegExp(
-        r'look|appear|body|physic|outfit',
-        caseSensitive: false,
-      ).hasMatch(s.heading))
-        s.text,
-  ].join(' ');
+  final looks = looksTags.isNotEmpty
+      ? looksTags.join(', ')
+      : _cut(looksText(sections), 300);
   return _join([
     'portrait',
     'upper body',
     'solo',
     if (who.startsWith('she')) '1girl' else if (who.startsWith('he')) '1boy',
     'looking at viewer',
-    _cut(looks, 600),
-    ...tags,
-    line,
+    looks,
   ]);
 }
+
+/// The sheet's parts about how they look, as one text.
+String looksText(List<SheetSection> sections) => [
+  for (final s in sections)
+    if (RegExp(
+      r'look|appear|body|physic|outfit',
+      caseSensitive: false,
+    ).hasMatch(s.heading))
+      s.text,
+].join(' ');
 
 String _join(List<String> parts) => _cut(
   [
@@ -241,63 +246,37 @@ class VocesDrawDialog extends StatefulWidget {
 }
 
 class _VocesDrawDialogState extends State<VocesDrawDialog> {
-  late final _prompt = TextEditingController(text: widget.prompt);
   final _tries = <File>[];
   File? _shown;
-  DrawJob? _job;
-  String? _error;
-  String? _model;
 
-  @override
-  void dispose() {
-    _prompt.dispose();
-    super.dispose();
+  /// Drawings still on their way: kept as tries, or deleted when the
+  /// dialog has closed.
+  final _pending = <DrawJob>{};
+  var _closed = false;
+
+  void _queued(DrawJob job) {
+    _pending.add(job);
+    job.done.then((_) {}, onError: (_) {}).whenComplete(() {
+      _pending.remove(job);
+    });
   }
 
-  Future<void> _draw(AppSettings s, List<ImageModel> ready) async {
-    final engine = AppScope.of(context).imageEngine;
-    final model = ready.firstWhere(
-      (m) => m.id == _model,
-      orElse: () => ImageCatalog.defaultFor(s, ready) ?? ready.first,
-    );
-    final job = engine.draw(
-      DrawJob(
-        DrawRequest(
-          model: model,
-          prompt: _prompt.text.trim(),
-          shape: widget.wide ? 'landscape' : 'portrait',
-        ),
-        folder: widget.folder,
-        forChat: false,
-      ),
-    );
-    setState(() {
-      _job = job;
-      _error = null;
-    });
-    try {
-      final f = await job.done;
-      if (!mounted) {
-        await _delete(f);
-        return;
-      }
-      setState(() {
-        _tries.add(f);
-        _shown = f;
-      });
-    } catch (e) {
-      if (mounted) setState(() => _error = '$e');
-    } finally {
-      if (mounted) setState(() => _job = null);
+  void _drawn(File f) {
+    if (_closed || !mounted) {
+      unawaited(_delete(f));
+      return;
     }
+    setState(() {
+      _tries.add(f);
+      _shown = f;
+    });
   }
 
   Future<void> _close(File? keep) async {
+    _closed = true;
     for (final f in _tries) {
       if (f != keep) await _delete(f);
     }
-    // One still drawing goes once it's done.
-    unawaited(_job?.done.then(_delete, onError: (_) {}));
     if (mounted) Navigator.pop(context, keep);
   }
 
@@ -305,6 +284,7 @@ class _VocesDrawDialogState extends State<VocesDrawDialog> {
     try {
       if (await f.exists()) await f.delete();
     } catch (_) {}
+    await PictureInfo.deleteFor(f);
   }
 
   @override
@@ -312,6 +292,7 @@ class _VocesDrawDialogState extends State<VocesDrawDialog> {
     final services = AppScope.of(context);
     final engine = services.imageEngine;
     final palette = context.palette;
+    final screen = MediaQuery.sizeOf(context);
     return ListenableBuilder(
       listenable: Listenable.merge([services.settings, engine]),
       builder: (context, _) {
@@ -319,157 +300,238 @@ class _VocesDrawDialogState extends State<VocesDrawDialog> {
         final ready = s.imageEngine == ImageEngineChoice.off
             ? const <ImageModel>[]
             : engine.available(s);
-        final drawing = _job != null;
-        final mine = drawing && engine.current == _job;
-        final muted = TextStyle(fontSize: 12, color: palette.textMuted);
-        return AlertDialog(
-          title: Text(widget.wide ? 'Draw the world' : 'Draw a portrait'),
-          content: SizedBox(
-            width: 560,
-            child: SingleChildScrollView(
-              // Room for the first field's floating label.
-              padding: const EdgeInsets.only(top: 8),
+        final title = Text(
+          widget.wide ? 'Draw the world' : 'Draw a portrait',
+          style: Theme.of(context).textTheme.titleLarge,
+        );
+        if (ready.isEmpty) {
+          return AlertDialog(
+            title: title,
+            content: Text(
+              s.imageEngine == ImageEngineChoice.off
+                  ? 'Drawing is switched off. Switch it on in Settings → '
+                        'Images and download a picture model, then come '
+                        'back here.'
+                  : 'There is no picture model yet. Download one in '
+                        'Settings → Images, then come back here.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => _close(null),
+                child: const Text('Close'),
+              ),
+            ],
+          );
+        }
+        final panel = DrawPanel(
+          folder: widget.folder,
+          prompt: widget.prompt,
+          title: 'What to draw',
+          shape: widget.wide ? 'landscape' : 'portrait',
+          onJob: _queued,
+          onDrawn: _drawn,
+        );
+        final preview = _Preview(
+          wide: widget.wide,
+          tries: _tries,
+          shown: _shown,
+          drawing: _pending.isNotEmpty,
+          onShow: (f) => setState(() => _shown = f),
+        );
+        final wideLayout = screen.width >= 980;
+        return Dialog(
+          insetPadding: const EdgeInsets.all(24),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: 1200,
+              maxHeight: screen.height * 0.9,
+            ),
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 20, 24, 16),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  if (ready.isEmpty)
-                    Text(
-                      s.imageEngine == ImageEngineChoice.off
-                          ? 'Drawing is switched off. Switch it on in '
-                                'Settings → Images and download a picture '
-                                'model, then come back here.'
-                          : 'There is no picture model yet. Download one in '
-                                'Settings → Images, then come back here.',
-                    )
-                  else ...[
-                    TextField(
-                      controller: _prompt,
-                      minLines: 3,
-                      maxLines: 8,
-                      enabled: !drawing,
-                      decoration: const InputDecoration(
-                        labelText: 'What to draw',
-                        alignLabelWithHint: true,
-                        helperText:
-                            'Filled in from what you wrote; change anything.',
-                      ),
-                    ),
-                    if (ready.length > 1) ...[
-                      const SizedBox(height: 12),
-                      DropdownButtonFormField<String>(
-                        initialValue:
-                            _model ?? ImageCatalog.defaultFor(s, ready)?.id,
-                        decoration: const InputDecoration(labelText: 'Model'),
-                        items: [
-                          for (final m in ready)
-                            DropdownMenuItem(value: m.id, child: Text(m.name)),
-                        ],
-                        onChanged: drawing
-                            ? null
-                            : (id) => setState(() => _model = id),
-                      ),
-                    ],
-                    const SizedBox(height: 14),
-                    if (drawing)
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          LinearProgressIndicator(
-                            value: mine ? engine.progress : null,
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            mine
-                                ? (engine.status ?? 'Drawing')
-                                : 'Waiting for another picture to finish',
-                            style: muted,
-                          ),
-                        ],
-                      ),
-                    if (_error != null)
-                      Text(
-                        _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    if (_shown != null) ...[
-                      const SizedBox(height: 10),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(14),
-                        child: AspectRatio(
-                          aspectRatio: widget.wide ? 16 / 9 : 3 / 4,
-                          child: Image.file(_shown!, fit: BoxFit.cover),
-                        ),
-                      ),
-                    ],
-                    if (_tries.length > 1) ...[
-                      const SizedBox(height: 8),
-                      SizedBox(
-                        height: 56,
-                        child: ListView(
-                          scrollDirection: Axis.horizontal,
-                          children: [
-                            for (final f in _tries)
-                              Padding(
-                                padding: const EdgeInsets.only(right: 6),
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(8),
-                                  onTap: () => setState(() => _shown = f),
-                                  child: Container(
-                                    decoration: BoxDecoration(
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        width: 2,
-                                        color: f == _shown
-                                            ? Theme.of(
-                                                context,
-                                              ).colorScheme.primary
-                                            : Colors.transparent,
-                                      ),
-                                    ),
-                                    child: ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: Image.file(
-                                        f,
-                                        width: widget.wide ? 80 : 40,
-                                        height: 52,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    ),
-                                  ),
-                                ),
+                  title,
+                  const SizedBox(height: 14),
+                  Flexible(
+                    child: wideLayout
+                        ? Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Expanded(
+                                flex: 3,
+                                child: SingleChildScrollView(child: panel),
                               ),
-                          ],
+                              const SizedBox(width: 18),
+                              Expanded(flex: 2, child: preview),
+                            ],
+                          )
+                        : SingleChildScrollView(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                panel,
+                                const SizedBox(height: 14),
+                                SizedBox(
+                                  height: widget.wide ? 300 : 420,
+                                  child: preview,
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _tries.isEmpty
+                              ? 'Tries show on the right; the ones you '
+                                    'don\'t use are deleted.'
+                              : '${_tries.length} '
+                                    '${_tries.length == 1 ? 'try' : 'tries'}'
+                                    '; the ones you don\'t use are deleted.',
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: palette.textMuted,
+                          ),
                         ),
                       ),
+                      TextButton(
+                        onPressed: () => _close(null),
+                        child: const Text('Cancel'),
+                      ),
+                      const SizedBox(width: 8),
+                      FilledButton(
+                        onPressed: _shown == null ? null : () => _close(_shown),
+                        child: const Text('Use this'),
+                      ),
                     ],
-                  ],
+                  ),
                 ],
               ),
             ),
           ),
-          actions: [
-            TextButton(
-              onPressed: () => _close(null),
-              child: const Text('Cancel'),
-            ),
-            if (ready.isNotEmpty)
-              OutlinedButton(
-                onPressed: drawing || _prompt.text.trim().isEmpty
-                    ? null
-                    : () => _draw(s, ready),
-                child: Text(_tries.isEmpty ? 'Draw' : 'Draw again'),
-              ),
-            if (_shown != null)
-              FilledButton(
-                onPressed: drawing ? null : () => _close(_shown),
-                child: const Text('Use this'),
-              ),
-          ],
         );
       },
+    );
+  }
+}
+
+/// The try shown big, and a strip of every try to pick from.
+class _Preview extends StatelessWidget {
+  const _Preview({
+    required this.wide,
+    required this.tries,
+    required this.shown,
+    required this.drawing,
+    required this.onShow,
+  });
+
+  final bool wide;
+  final List<File> tries;
+  final File? shown;
+  final bool drawing;
+  final ValueChanged<File> onShow;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    final accent = Theme.of(context).colorScheme.primary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Flexible(
+          child: Container(
+            constraints: const BoxConstraints(minHeight: 240),
+            decoration: BoxDecoration(
+              color: palette.tile,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: palette.glassBorder),
+            ),
+            clipBehavior: Clip.antiAlias,
+            alignment: Alignment.center,
+            child: shown != null
+                ? Image.file(shown!, fit: BoxFit.contain)
+                : Padding(
+                    padding: const EdgeInsets.all(20),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (drawing)
+                          const SizedBox.square(
+                            dimension: 28,
+                            child: CircularProgressIndicator(strokeWidth: 2.5),
+                          )
+                        else
+                          Icon(
+                            Icons.image_outlined,
+                            size: 36,
+                            color: palette.textMuted,
+                          ),
+                        const SizedBox(height: 10),
+                        Text(
+                          drawing
+                              ? 'Drawing…'
+                              : 'Your picture shows here. Press Draw.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(color: palette.textMuted),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ),
+        if (tries.length > 1 || drawing && tries.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          SizedBox(
+            height: 60,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: [
+                for (final f in tries)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 6),
+                    child: InkWell(
+                      borderRadius: BorderRadius.circular(8),
+                      onTap: () => onShow(f),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(8),
+                          border: Border.all(
+                            width: 2,
+                            color: f == shown ? accent : Colors.transparent,
+                          ),
+                        ),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(
+                            f,
+                            width: wide ? 92 : 42,
+                            height: 56,
+                            fit: BoxFit.cover,
+                            cacheWidth: 200,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ),
+                if (drawing)
+                  SizedBox(
+                    width: wide ? 92 : 42,
+                    child: const Center(
+                      child: SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ],
     );
   }
 }

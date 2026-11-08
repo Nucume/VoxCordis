@@ -96,8 +96,12 @@ class RuntimeInstaller {
   static String get linuxCudaAsset =>
       'llama-server-cuda-$pinnedTag-linux-x64.tar.gz';
 
+  /// Whether the last Linux CUDA attempt failed on the way rather than
+  /// finding no build.
+  bool _retrySoon = false;
+
   Future<String?> _installLinuxCuda({DownloadProgress? onProgress}) async {
-    final ok = await installSignedReleaseAsset(
+    final got = await installSignedReleaseAsset(
       _http,
       asset: linuxCudaAsset,
       into: cudaInstallDir,
@@ -105,7 +109,8 @@ class RuntimeInstaller {
       onProgress: onProgress,
       note: note,
     );
-    if (!ok) return null;
+    _retrySoon = got == SignedAssetResult.failed;
+    if (got != SignedAssetResult.installed) return null;
     final exe = await _findIn(cudaInstallDir);
     if (exe == null) {
       note?.call('CUDA build skipped: llama-server was not in the download.');
@@ -212,8 +217,13 @@ class RuntimeInstaller {
     if (wantCuda && Platform.isLinux) {
       final exe = await _installLinuxCuda(onProgress: onProgress);
       if (exe != null) return exe;
+      // A refusal from GitHub or a dropped line: look again in an hour.
       await File(_noCudaMarker).create(recursive: true);
-      await File(_noCudaMarker).setLastModified(DateTime.now());
+      await File(_noCudaMarker).setLastModified(
+        _retrySoon
+            ? DateTime.now().subtract(const Duration(hours: 23))
+            : DateTime.now(),
+      );
       note?.call('Using the Vulkan build of llama-server instead.');
       final vulkan = await _findIn(installDir);
       if (vulkan != null) return vulkan;

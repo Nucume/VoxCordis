@@ -152,9 +152,13 @@ class _CompanionSwitcherState extends State<CompanionSwitcher>
     final picked = await _showCompanionGallery(context, s);
     if (!mounted || picked == null) return;
     switch (picked) {
+      case _VocesPick():
+        await _voces();
       case _AddPick():
         await _add();
       case _CompanionPick(:final companion):
+        // Already with them: nothing to switch.
+        if (companion.id == s.companionId) return;
         await _switchTo(companion);
     }
   }
@@ -987,6 +991,7 @@ Future<({CompanionProfile? companion, bool add})?> pickCompanion(
   return switch (picked) {
     null => null,
     _AddPick() => (companion: null, add: true),
+    _VocesPick() => null,
     _CompanionPick(:final companion) => (companion: companion, add: false),
   };
 }
@@ -1004,19 +1009,47 @@ class _AddPick extends _GalleryPick {
   const _AddPick();
 }
 
+class _VocesPick extends _GalleryPick {
+  const _VocesPick();
+}
+
+/// The picker the window opens with when Settings says "The picker": every
+/// companion and Voces Mundi as cards. Closing it stays with the current
+/// companion.
+Future<void> showStartPicker(BuildContext context) async {
+  final services = AppScope.of(context);
+  final s = services.settings.value;
+  final picked = await _showCompanionGallery(context, s, start: true);
+  if (!context.mounted) return;
+  switch (picked) {
+    case null:
+      return;
+    case _VocesPick():
+      services.vocesOpen.value = true;
+    case _AddPick():
+      services.addingCompanion.value = true;
+    case _CompanionPick(:final companion):
+      if (companion.id == s.companionId) return;
+      await services.switchCompanion(
+        services.settings.value.switchedTo(companion),
+      );
+  }
+}
+
 /// Every companion as a card, the last one an empty card to create a new
 /// one. Opened from "More…" when the menu has no room for them all.
 Future<_GalleryPick?> _showCompanionGallery(
   BuildContext context,
-  AppSettings settings,
-) => showGeneralDialog<_GalleryPick>(
+  AppSettings settings, {
+  bool start = false,
+}) => showGeneralDialog<_GalleryPick>(
   context: context,
   barrierDismissible: true,
   barrierLabel: 'Close',
   barrierColor: Colors.black.withValues(alpha: 0.35),
   transitionDuration: const Duration(milliseconds: 420),
   pageBuilder: (context, animation, _) =>
-      _Gallery(settings: settings, animation: animation),
+      _Gallery(settings: settings, animation: animation, start: start),
   transitionBuilder: (context, a, _, child) {
     final curved = CurvedAnimation(
       parent: a,
@@ -1037,15 +1070,24 @@ Future<_GalleryPick?> _showCompanionGallery(
 );
 
 class _Gallery extends StatelessWidget {
-  const _Gallery({required this.settings, required this.animation});
+  const _Gallery({
+    required this.settings,
+    required this.animation,
+    this.start = false,
+  });
 
   final AppSettings settings;
   final Animation<double> animation;
+
+  /// Opened as the app starts: a greeting, and Voces Mundi as a card.
+  final bool start;
 
   @override
   Widget build(BuildContext context) {
     final palette = context.palette;
     final companions = settings.companions;
+    final voces = start && settings.vocesMundi;
+    final extra = voces ? 1 : 0;
     final screen = MediaQuery.sizeOf(context);
     return Center(
       child: SizedBox(
@@ -1071,7 +1113,11 @@ class _Gallery extends StatelessWidget {
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
-                            'Your companions',
+                            start
+                                ? settings.userName.isEmpty
+                                      ? 'Welcome back'
+                                      : 'Welcome back, ${settings.userName}'
+                                : 'Your companions',
                             style: Theme.of(context).textTheme.titleLarge
                                 ?.copyWith(fontWeight: FontWeight.w600),
                           ),
@@ -1099,7 +1145,7 @@ class _Gallery extends StatelessWidget {
                               crossAxisSpacing: 14,
                               childAspectRatio: 0.78,
                             ),
-                        itemCount: companions.length + 1,
+                        itemCount: companions.length + extra + 1,
                         itemBuilder: (context, i) {
                           // Cards arrive one after another, row by row.
                           final start = (0.2 + i * 0.05).clamp(0.0, 0.8);
@@ -1111,7 +1157,14 @@ class _Gallery extends StatelessWidget {
                               curve: Curves.easeOutBack,
                             ),
                           );
-                          final card = i == companions.length
+                          final card = voces && i == companions.length
+                              ? _VocesCard(
+                                  onTap: () => Navigator.pop(
+                                    context,
+                                    const _VocesPick(),
+                                  ),
+                                )
+                              : i == companions.length + extra
                               ? _CreateCard(
                                   onTap: () =>
                                       Navigator.pop(context, const _AddPick()),
@@ -1119,12 +1172,12 @@ class _Gallery extends StatelessWidget {
                               : _CompanionCard(
                                   companion: companions[i],
                                   current: i == 0,
-                                  onTap: i == 0
-                                      ? () => Navigator.pop(context)
-                                      : () => Navigator.pop(
-                                          context,
-                                          _CompanionPick(companions[i]),
-                                        ),
+                                  // The current one too: from Voces Mundi
+                                  // it is the way back to them.
+                                  onTap: () => Navigator.pop(
+                                    context,
+                                    _CompanionPick(companions[i]),
+                                  ),
                                 );
                           return FadeTransition(
                             opacity: a,
@@ -1236,6 +1289,97 @@ class _CompanionCard extends StatelessWidget {
 }
 
 /// The last card: empty, with a dashed edge, to create a new companion.
+/// Voces Mundi among the companions in the start picker: the warm colours
+/// of its menu row, filling a card.
+class _VocesCard extends StatelessWidget {
+  const _VocesCard({required this.onTap});
+
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final palette = context.palette;
+    const colors = _VocesRow.colors;
+    return _HoverRow(
+      onTap: onTap,
+      builder: (context, hover) => AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.all(12),
+        transform: Matrix4.translationValues(0, hover ? -4 : 0, 0),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(18),
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              for (final c in colors) c.withValues(alpha: hover ? 0.26 : 0.14),
+            ],
+          ),
+          border: Border.all(
+            color: colors.first.withValues(alpha: hover ? 0.6 : 0.3),
+          ),
+        ),
+        child: Column(
+          children: [
+            Expanded(
+              child: LayoutBuilder(
+                builder: (context, c) {
+                  final size = c.biggest.shortestSide * 0.78;
+                  return Center(
+                    child: AnimatedRotation(
+                      turns: hover ? 0.04 : 0,
+                      duration: const Duration(milliseconds: 320),
+                      curve: Curves.easeOutBack,
+                      child: Container(
+                        width: size,
+                        height: size,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(size * 0.28),
+                          gradient: const LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: colors,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: colors.first.withValues(
+                                alpha: hover ? 0.45 : 0.25,
+                              ),
+                              blurRadius: 24,
+                            ),
+                          ],
+                        ),
+                        child: Icon(
+                          Icons.public_rounded,
+                          color: Colors.white,
+                          size: size * 0.5,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            Text(
+              'Voces Mundi',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                color: palette.text,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'RPG mode',
+              style: TextStyle(fontSize: 12, color: palette.textMuted),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 class _CreateCard extends StatelessWidget {
   const _CreateCard({required this.onTap});
 

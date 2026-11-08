@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:companion/data/voces/lore_match.dart';
 import 'package:companion/data/voces/voces_library.dart';
 import 'package:companion/data/voces/voces_models.dart';
+import 'package:companion/services/voces/describer.dart';
 import 'package:companion/features/voces/voces_picture.dart';
 import 'package:companion/services/import/imported_character.dart';
 import 'package:companion/services/import/voces_import.dart';
@@ -76,6 +77,120 @@ void main() {
     expect(c.sections.single.text, 'Runs the coast.');
     expect(c.created, DateTime(2026, 11, 5));
     expect((await lib.lorebooks()).single.entries.single.keys, ['lighthouse']);
+  });
+
+  test('a story can take what changed in its world, part by part', () async {
+    final mira = await lib.saveCharacter(
+      const VocesCharacter(id: '', name: 'Mira'),
+    );
+    final haru = await lib.saveCharacter(
+      const VocesCharacter(id: '', name: 'Haru'),
+    );
+    final lore = await lib.saveLorebook(const Lorebook(id: '', name: 'Lore'));
+    final old = await lib.saveLorebook(const Lorebook(id: '', name: 'Old'));
+    var world = await lib.saveWorld(
+      VocesWorld(
+        id: '',
+        name: 'Ember',
+        setting: 'Old',
+        castIds: [mira.id],
+        lorebookIds: [lore.id, old.id],
+      ),
+    );
+    var story = await lib.startStory(world: world, player: haru, title: 'Debt');
+    expect((await lib.worldUpdate(story))!.isEmpty, isTrue);
+
+    // Edits after the story began.
+    final tomas = await lib.saveCharacter(
+      const VocesCharacter(id: '', name: 'Tomas'),
+    );
+    final extra = await lib.saveLorebook(const Lorebook(id: '', name: 'Extra'));
+    await lib.saveCharacter(mira.copyWith(name: 'Mira Vey'));
+    await lib.saveCharacter(haru.copyWith(name: 'Haru K'));
+    await lib.saveLorebook(
+      Lorebook(id: lore.id, name: 'Lore', source: 'edited'),
+    );
+    world = await lib.saveWorld(
+      world.copyWith(
+        name: 'Ember Coast',
+        setting: 'New',
+        castIds: [mira.id, tomas.id, haru.id],
+        lorebookIds: [lore.id, extra.id],
+      ),
+    );
+
+    final u = (await lib.worldUpdate(story))!;
+    expect(u.world?.setting, 'New');
+    expect(
+      {for (final b in u.lorebooks) b.book.id: b.change},
+      {
+        'lore': WorldChange.changed,
+        'extra': WorldChange.added,
+        'old': WorldChange.removed,
+      },
+    );
+    // The player keeps their own sheet.
+    expect(
+      {for (final c in u.cast) c.character.id: c.change},
+      {'mira': WorldChange.changed, 'tomas': WorldChange.added},
+    );
+
+    // Take the world, two lorebooks and the newcomer; Mira stays as she is.
+    story = await lib.applyWorldUpdate(
+      story,
+      u,
+      world: true,
+      lorebooks: {'extra', 'old'},
+      cast: {'tomas'},
+    );
+    expect(story.worldName, 'Ember Coast');
+    final sw = await lib.storyWorld(story);
+    expect(sw.world.setting, 'New');
+    expect(sw.lorebooks.map((b) => b.id).toSet(), {'lore', 'extra'});
+    expect(sw.lorebooks.firstWhere((b) => b.id == 'lore').source, '');
+    expect(sw.cast['mira']!.name, 'Mira');
+    expect(sw.cast['tomas']!.name, 'Tomas');
+    expect(sw.cast['haru']!.name, 'Haru');
+    expect((await lib.stories()).single.worldName, 'Ember Coast');
+
+    final left = (await lib.worldUpdate(story))!;
+    expect(left.world, isNull);
+    expect(left.lorebooks.single.book.id, 'lore');
+    expect(left.cast.single.character.id, 'mira');
+
+    await lib.deleteWorld(world.id);
+    expect(await lib.worldUpdate(story), isNull);
+  });
+
+  test('a branch copies the story folder under a new title', () async {
+    final haru = await lib.saveCharacter(
+      const VocesCharacter(id: '', name: 'Haru'),
+    );
+    final world = await lib.saveWorld(
+      const VocesWorld(id: '', name: 'Ember', setting: 'Rain'),
+    );
+    final story = await lib.startStory(
+      world: world,
+      player: haru,
+      title: 'Debt',
+    );
+    final pic = File(p.join(lib.storyFolder(story.id), 'pictures', 'a.png'))
+      ..createSync(recursive: true);
+    final copy = await lib.branchStory(story, title: 'Debt (branch)');
+    expect(copy.id, isNot(story.id));
+    expect(copy.title, 'Debt (branch)');
+    expect(copy.playerId, story.playerId);
+    expect(
+      File(
+        p.join(lib.storyFolder(copy.id), 'pictures', p.basename(pic.path)),
+      ).existsSync(),
+      isTrue,
+    );
+    expect((await lib.storyWorld(copy)).world.setting, 'Rain');
+    expect((await lib.stories()).map((s) => s.title).toSet(), {
+      'Debt',
+      'Debt (branch)',
+    });
   });
 
   test('a story copies the world, so later edits leave it alone', () async {
@@ -365,8 +480,7 @@ void main() {
     expect(world, isNot(contains('Crown')));
     final mira = characterPrompt(
       pronouns: 'she/her',
-      tags: ['bold'],
-      line: 'Smuggler captain',
+      looksTags: const [],
       sections: const [
         SheetSection('Who they are', 'Runs the Lantern Run.'),
         SheetSection('Looks', 'Red hair, a scar over one eye.'),
@@ -375,14 +489,110 @@ void main() {
     expect(mira, contains('1girl'));
     expect(mira, contains('Red hair, a scar over one eye.'));
     expect(mira, isNot(contains('Lantern Run')));
+    // Picture tags win over the prose.
+    final vex = characterPrompt(
+      pronouns: 'she/her',
+      looksTags: const ['black hair', 'undercut', 'purple hair', 'tattoos'],
+      sections: const [SheetSection('Looks', 'Standing six-foot-one…')],
+    );
+    expect(
+      vex,
+      'portrait, upper body, solo, 1girl, looking at viewer, '
+      'black hair, undercut, purple hair, tattoos',
+    );
     expect(
       characterPrompt(
         pronouns: 'they/them',
-        tags: const [],
-        line: '',
+        looksTags: const [],
         sections: const [],
       ),
       'portrait, upper body, solo, looking at viewer',
+    );
+  });
+
+  test('picture tags come out of a sheet and a tags-only answer', () {
+    final d = CharacterDescriber.parse('''
+Name: Vex
+Pronouns: she/her
+Line: A towering goth e-girl.
+Traits: muscular, sardonic
+Looks:
+Standing six-foot-one with jet-black hair shaved on one side.
+Physical tags:
+very tall, muscular female, black hair, undercut, purple hair, arm tattoo, fishnet pantyhose, combat boots, septum piercing
+How they talk:
+Dry. "Sure, champ."
+''')!;
+    expect(d.looksTags, [
+      'very tall',
+      'muscular female',
+      'black hair',
+      'undercut',
+      'purple hair',
+      'arm tattoo',
+      'fishnet pantyhose',
+      'combat boots',
+      'septum piercing',
+    ]);
+    expect(d.sections.map((s) => s.heading), ['Looks', 'How they talk']);
+    expect(
+      LooksTags.parse(
+        '<think>hm</think>Long_Hair, Blue Eyes, blue eyes, '
+        'a very long sentence that is not a tag at all.',
+      ),
+      ['long hair', 'blue eyes'],
+    );
+  });
+
+  test('a card with tag-style looks brings picture tags', () {
+    expect(
+      VocesImport.looksTagsOf({
+        'age': '25',
+        'hair': 'black hair, Undercut',
+        'wears': 'fishnet pantyhose, combat boots',
+        'eyes': '',
+      }),
+      ['black hair', 'undercut', 'fishnet pantyhose', 'combat boots'],
+    );
+    expect(
+      VocesImport.looksTagsOf({
+        'details': 'She has a long scar that runs from her ear to her chin.',
+      }),
+      isEmpty,
+    );
+  });
+
+  test('Describe it writes for adults only when asked', () {
+    for (final adult in [false, true]) {
+      final w = WorldDescriber.instructions(adult: adult);
+      final c = CharacterDescriber.instructions(adult: adult);
+      expect(w.contains('explicitly and in full'), adult);
+      expect(c.contains('explicitly and in full'), adult);
+      expect(c.contains('sexuality, desires and kinks'), adult);
+      expect(
+        CharacterDescriber.brief('a pit fighter', adult: adult),
+        adult
+            ? 'Idea: a pit fighter\nFor adults (18+).'
+            : 'Idea: a pit fighter',
+      );
+    }
+  });
+
+  test('picture tags survive saving', () {
+    const c = VocesCharacter(
+      id: 'vex',
+      name: 'Vex',
+      looksTags: ['black hair', 'undercut'],
+    );
+    expect(VocesCharacter.fromJson(c.toJson()).looksTags, [
+      'black hair',
+      'undercut',
+    ]);
+    expect(
+      VocesCharacter.fromJson(
+        const VocesCharacter(id: 'a', name: 'A').toJson(),
+      ).looksTags,
+      isEmpty,
     );
   });
 

@@ -706,6 +706,65 @@ class ChatController extends ChangeNotifier {
   /// What the human plainly asked to have opened: a usual folder, an
   /// address, or one of their installed apps by name ("open Vivaldi
   /// please"). Null when it's left to the model.
+  /// One short round after a reply that should have drawn a picture and
+  /// didn't. The reply stays as written; a draw_picture call, if the model
+  /// makes one now, is run and the picture follows the reply.
+  Future<void> _drawMissed(
+    LlmClient client,
+    List<Map<String, Object?>> prompt,
+    List<Map<String, Object?>> tools,
+    String reply,
+    List<String> sourceIds,
+    Set<String> seen,
+  ) async {
+    _log(
+      LogKind.decisions,
+      'Asked for a picture but didn\'t call draw_picture; asking once more',
+    );
+    final drawOnly = [
+      for (final t in tools)
+        if ((t['function'] as Map)['name'] == DrawTools.drawTool) t,
+    ];
+    final ask = [
+      ...prompt,
+      {'role': 'assistant', 'content': reply},
+      {'role': 'user', 'content': missedDrawNote},
+    ];
+    List<ToolCall>? calls;
+    phase = ChatPhase.remembering;
+    notifyListeners();
+    try {
+      await for (final event in client.chat(ask, tools: drawOnly)) {
+        if (event case ToolCallsRequested(calls: final c)) {
+          final draws = [
+            for (final x in c)
+              if (x.name == DrawTools.drawTool) withShortId(x),
+          ];
+          if (draws.isNotEmpty) calls = [draws.first];
+        }
+        if (_stopRequested) break;
+      }
+    } on Exception catch (e) {
+      _log(
+        LogKind.decisions,
+        'Asking again for the picture failed',
+        details: '$e',
+        error: true,
+      );
+      return;
+    }
+    if (calls == null || _stopRequested) {
+      _log(LogKind.decisions, 'It still didn\'t call draw_picture');
+      return;
+    }
+    prompt.add({
+      'role': 'assistant',
+      'content': reply,
+      'tool_calls': [for (final c in calls) c.toJson()],
+    });
+    await _runCalls(calls, prompt, sourceIds, seen);
+  }
+
   Future<String?> _requestedTarget(String text) async {
     if (requestedOpen(text) case final target?) return target;
     for (final words in requestedApp(text)) {
@@ -1169,6 +1228,7 @@ class ChatController extends ChangeNotifier {
       // Repeats are skipped across the whole reply.
       final seen = <String>{};
       var actedFirst = false;
+      var drew = false;
       // Roleplay models often answer "open my Pictures folder" in character
       // without calling anything, so a plain request like that is put to
       // the human by the app itself, and the model replies knowing how it
@@ -1275,6 +1335,9 @@ class ChatController extends ChangeNotifier {
                   }
                 }
                 if (known.isNotEmpty) calls = known;
+                if (known.any((x) => x.name == DrawTools.drawTool)) {
+                  drew = true;
+                }
             }
             // Leaving the loop closes the stream, which stops the server.
             if (looped) break;
@@ -1501,6 +1564,20 @@ class ChatController extends ChangeNotifier {
         }
         notifyListeners();
       }
+      // Asked for a picture, the model described one in the story instead
+      // of calling draw_picture, so nothing was drawn: ask it once more,
+      // with only draw_picture on offer. What it writes is left out; only
+      // a call counts.
+      if (!drew &&
+          !looped &&
+          !_stopRequested &&
+          userMsg != null &&
+          toolNames.contains(DrawTools.drawTool) &&
+          images.available(settings).isNotEmpty &&
+          shown().trim().isNotEmpty &&
+          askedForPicture(userMsg.content)) {
+        await _drawMissed(client, prompt, tools, shown(), sourceIds, seen);
+      }
       stopped = _stopRequested;
       if (looped) {
         toolNote = toolNote == null
@@ -1553,6 +1630,7 @@ class ChatController extends ChangeNotifier {
           details: [
             if (lastFinish.isNotEmpty) 'Finish: $lastFinish',
             if (buffer.isNotEmpty) 'Written so far:\n${shown()}',
+            if (e is LlamaServerException) 'llama-server said:\n${e.log}',
           ].join('\n'),
           error: true,
         );

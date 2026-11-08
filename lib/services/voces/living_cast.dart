@@ -228,7 +228,7 @@ Answer "none" when no named person is in it.''';
         e
       else if (turn.kind == TurnKind.say)
         e.copyWith(talked: e.talked + 1, seen: e.seen + 1)
-      else if (turn.kind != TurnKind.scene)
+      else if (!turn.kind.aside)
         e.copyWith(seen: e.seen + 1)
       else
         e,
@@ -266,7 +266,7 @@ Answer "none" when no named person is in it.''';
     final out = <String>[];
     var size = 0;
     for (final t in turns.reversed) {
-      if (t.kind == TurnKind.scene || !names(t.text, name)) continue;
+      if (t.kind.aside || !names(t.text, name)) continue;
       final who = switch (t.kind) {
         TurnKind.narrator => 'Narrator',
         TurnKind.character => t.speaker,

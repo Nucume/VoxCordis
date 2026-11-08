@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:flutter/widgets.dart';
-import 'package:http/http.dart' show Client;
+import 'package:http/http.dart' show Client, ClientException;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -37,6 +38,7 @@ import 'services/logs/app_log.dart';
 import 'services/recall/embedder.dart';
 import 'services/recall/recall.dart';
 import 'services/runtime/model_catalog.dart';
+import 'services/runtime/llama_server.dart' show serverExitHint;
 import 'services/runtime/runtime_controller.dart';
 import 'services/secret_store.dart';
 import 'services/story/story_keeper.dart';
@@ -57,7 +59,36 @@ class AppServices {
   }) {
     _use(db);
     runtime.installer.note = (m) => log.add(LogKind.errors, m);
+    final s = settings.value;
+    vocesOpen.value =
+        s.vocesMundi && s.openOnStart == OpenOnStart.lastPlace && s.lastInVoces;
+    startPicker =
+        s.openOnStart == OpenOnStart.picker &&
+        (s.otherCompanions.isNotEmpty || s.vocesMundi);
+    _keepLoadedForVoces();
+    settings.addListener(_keepLoadedForVoces);
+    // Remembered, so "Where I left off" can open Voces Mundi again.
+    vocesOpen.addListener(() {
+      final open = vocesOpen.value;
+      _keepLoadedForVoces();
+      if (settings.value.lastInVoces != open) {
+        settings.update(settings.value.copyWith(lastInVoces: open));
+      }
+    });
   }
+
+  /// Voces Mundi keeps the model loaded while it is open, when Settings
+  /// says so; leaving it starts the usual wait.
+  void _keepLoadedForVoces() {
+    final s = settings.value;
+    final keep = vocesOpen.value && s.vocesMundi && s.vocesKeepLoaded;
+    if (runtime.keepLoaded == keep) return;
+    runtime.keepLoaded = keep;
+    runtime.touch(s);
+  }
+
+  /// The companion picker is still to show, once, as the window opens.
+  bool startPicker = false;
 
   final SettingsStore settings;
   final RuntimeController runtime;
@@ -353,35 +384,95 @@ class AppServices {
   }
 
   /// One answer from the chat model to [system] and [user], without the
-  /// companion's prompt or tools; null when it can't be reached.
+  /// companion's prompt or tools; null when it can't be reached. [what]
+  /// names the request in Logs → Thinking, which shows what came back.
+  /// [exact] is for answers in a fixed form (tags, lists): the model is
+  /// asked with a low temperature, so a roleplay model keeps to the form.
   Future<String?> askModel(
     String system,
     String user, {
     int maxTokens = 1500,
+    String what = 'A helper request',
+    bool exact = false,
   }) async {
     final s = settings.value;
     final http = Client();
     runtime.hold();
+    final sampling = samplingFor(s);
     try {
-      final target = await runtime.ensureReady(s);
-      final client = LlmClient(
-        baseUrl: target.baseUrl,
-        model: target.model,
-        apiKey: target.apiKey,
-        sampling: samplingFor(s),
-        stop: stopFor(s),
-        maxTokens: maxTokens,
-        stallWait: const Duration(minutes: 2),
-        client: http,
-      );
-      final reply = StringBuffer();
-      await for (final e in client.chat([
-        {'role': 'system', 'content': system},
-        {'role': 'user', 'content': user},
-      ])) {
-        if (e is TextDelta) reply.write(e.text);
+      for (var drops = 0; ; drops++) {
+        final target = await runtime.ensureReady(s);
+        final client = LlmClient(
+          baseUrl: target.baseUrl,
+          model: target.model,
+          apiKey: target.apiKey,
+          sampling: exact
+              ? {
+                  ...sampling,
+                  'temperature': min(
+                    (sampling['temperature'] ?? 0.3).toDouble(),
+                    0.3,
+                  ),
+                }
+              : sampling,
+          stop: stopFor(s),
+          // Room for a model that thinks anyway: Gemma 4 finetunes like
+          // Artemis thought past the whole budget and answered nothing.
+          maxTokens: maxTokens + 4000,
+          // A helper answer needs no thinking; llama-server turns it on
+          // for templates that can think unless told not to.
+          extra: s.llmMode == LlmMode.builtIn
+              ? const {
+                  'chat_template_kwargs': {'enable_thinking': false},
+                }
+              : const {},
+          stallWait: const Duration(minutes: 2),
+          client: http,
+        );
+        final reply = StringBuffer();
+        var thought = 0;
+        try {
+          await for (final e in client.chat([
+            {'role': 'system', 'content': system},
+            {'role': 'user', 'content': user},
+          ])) {
+            if (e is TextDelta) reply.write(e.text);
+            if (e is ReasoningDelta) thought += e.text.length;
+          }
+        } on ClientException catch (e) {
+          // The connection dropped: the model server crashed or was
+          // stopped. Say how it ended, start it again and ask once more.
+          final exit = s.llmMode == LlmMode.builtIn
+              ? await runtime.exitOf(target.baseUrl)
+              : null;
+          log.add(
+            LogKind.errors,
+            '$what: the connection to the model dropped'
+            '${exit == null
+                ? ''
+                : exit.onPurpose
+                ? ' (the app restarted it)'
+                : ' (it stopped: ${serverExitHint(exit.code, exit.log)})'}'
+            '${drops == 0 ? '; trying again' : ''}. ${e.message}'
+            '${exit == null ? '' : '\nExit code: ${exit.code}'}'
+            '${exit == null || exit.log.isEmpty ? '' : '\nLast lines it printed:\n${exit.log}'}',
+          );
+          if (drops > 0) rethrow;
+          continue;
+        }
+        final text = reply.toString();
+        final shown = text.trim().replaceAll(RegExp(r'\s+'), ' ');
+        log.add(
+          LogKind.thinking,
+          '$what: the model answered '
+          '${shown.isEmpty ? 'nothing' : '"${shown.length > 400 ? '${shown.substring(0, 400)}…' : shown}"'}'
+          '${thought > 0 ? ' (after $thought characters of thinking)' : ''}.',
+        );
+        return text;
       }
-      return reply.toString();
+    } on Object catch (e) {
+      log.add(LogKind.errors, '$what failed: $e');
+      rethrow;
     } finally {
       http.close();
       runtime.release(settings.value);

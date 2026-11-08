@@ -29,9 +29,23 @@ void main() {
     expect(pick(6), 'qwen3-4b');
     expect(pick(7), 'qwen3-4b'); // needs some headroom
     expect(pick(8), 'qwen3-8b');
-    expect(pick(12), 'mistral-nemo-12b');
-    expect(pick(24), 'mistral-nemo-12b');
-    expect(pick(200), 'mistral-nemo-12b'); // never the huge or uncensored ones
+    expect(pick(10), 'qwen3-8b'); // never the one-trick vision model
+    expect(pick(12), 'gemma-4-12b');
+    expect(pick(16), 'gemma-4-12b');
+    expect(pick(24), 'qwen3.8-27b');
+    // Never the huge, uncensored or archived ones.
+    expect(pick(200), 'qwen3.8-27b');
+  });
+
+  test('archived models are still recognised', () {
+    final old = ModelCatalog.models.where((m) => m.archived).toList();
+    expect(
+      old.map((m) => m.id),
+      containsAll(['rocinante-12b', 'mistral-nemo-12b']),
+    );
+    for (final m in old) {
+      expect(ModelCatalog.forPath('/models/${m.file}'), m);
+    }
   });
 
   test('split models fetch every part, the loaded one last', () {
