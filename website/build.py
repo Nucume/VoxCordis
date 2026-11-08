@@ -47,7 +47,7 @@ def qa(q, a): return f'<details class="qa"><summary>{q}</summary><div><p>{a}</p>
 # ---------------------------------------------------------------- Privacy: four facts
 PRIVATE = f'''<section class="gutter" id="private"><div class="w">
   <h2>Private by default</h2>
-  <p class="lead">Everything stays on your computer unless you choose a server-hosted brain, and the app tells you when you do.</p>
+  <p class="lead">Everything stays on your computer unless you choose a server-hosted brain or connect a calendar, and the app tells you when you do. The <a href="privacy.html">privacy policy</a> spells out what is collected, how it's used and where it goes, including Google Calendar data.</p>
   <div class="four">
     <div>{I['lock']}<b>No account</b><span>Nothing to sign up for. It works offline.</span></div>
     <div>{I['chip']}<b>Your graphics card</b><span>A built-in llama.cpp brain, or any .gguf you have.</span></div>
@@ -77,7 +77,7 @@ GROUPS = [
   ('Is it really free?', 'Yes. It\'s free software under the GPL-3.0, with the source public: no subscription, no trial and nothing to cancel. The built-in brain costs nothing per message. If you use a provider key instead, that provider bills you at their prices.'),
   ('Do I need an account or an internet connection?', 'No account, ever. With a local model it works with the network switched off. Only web search, update checks or a server-hosted brain need a connection, and each one is your choice.'),
   ('What kind of computer do I need?', 'Linux or Windows 10 and 11, 64-bit. A graphics card makes the built-in brain fast: NVIDIA cards use CUDA, others Vulkan, and it falls back to the processor if it has to. Smaller models suit smaller cards, and the setup recommends one that fits. Leave room on the disk for the model, which is the big part of the download.'),
-  ('Is it finished?', 'No. It\'s early software and bugs happen, so keep your companion folder backed up. Voice, connectors such as a calendar, a macOS installer and a code-signed Windows installer are still to come.')]),
+  ('Is it finished?', 'No. It\'s early software and bugs happen, so keep your companion folder backed up. Voice, chatting through Telegram or Discord, a macOS installer and a code-signed Windows installer are still to come.')]),
  ('Installing and updating', [
   ('Windows says the installer is unsafe. Is it?', f'The installer isn\'t code-signed yet, so SmartScreen warns on the first run. Choose More info, then Run anyway. Every file and its checksum are on the <a href="{GH}/releases">Releases page</a> if you\'d rather check it yourself.'),
   ('AppImage, apt or dnf?', 'The AppImage runs on almost any distribution without installing anything. The apt and dnf repository is signed, and updates then arrive with the rest of your system.'),
@@ -93,10 +93,11 @@ GROUPS = [
   ('How does its memory work?', 'It writes down what\'s worth keeping, updates it when things change, and recalls what fits the conversation. The Memory tab shows all of it: search, pin, fix or forget anything, and bring back what you forgot.'),
   ('Can I change its personality?', 'Yes. Each companion has its own folder with <code>personality.md</code>, <code>lessons.md</code> and <code>privacy.md</code> as plain Markdown. Change a line and it reads it before the next reply.'),
   ('Can it use my computer or the web?', 'Only if you switch it on. Both are off by default. Computer access asks every time unless you allowed that exact request, and web search keeps your home network off limits.'),
+  ('Can it see my calendar?', 'If you connect one in Settings → Connections: Google Calendar, iCloud or any CalDAV calendar, or a private calendar link. It can then tell you what you have on and add, move or delete events, showing you each change first unless you turn that off. Details are in the <a href="privacy.html">privacy policy</a>.'),
   ('Does it draw pictures?', 'Yes, on your own graphics card, with stable-diffusion.cpp or an InvokeAI you run. Bring your own <code>.safetensors</code> and LoRAs, or draw by hand in the Images tab.')]),
  ('Your data', [
   ('Where does my data live?', 'In folders of your own: one per companion in <code>~/VoxCordis</code>, and the app\'s data folder for settings, chats and memories. Chats and memories are encrypted on disk.'),
-  ('What leaves my computer?', 'Only what you choose. With a local brain and the online features off, nothing does. A server-hosted brain gets the messages you send, and update checks ask GitHub.'),
+  ('What leaves my computer?', 'Only what you choose. With a local brain and the online features off, nothing does. A server-hosted brain gets the messages you send, and update checks ask GitHub. The <a href="privacy.html">privacy policy</a> lists every case.'),
   ('How do I move to a new computer?', 'Export the companion to a password-locked ZIP, or copy the folders across. The new computer asks for the encryption key once; Settings → Privacy on the old one shows it.'),
   ('How do I delete everything?', 'Delete the companion folders and the app data folder. There\'s no cloud copy anywhere to chase down.')]),
  ('Help and the project', [
@@ -113,7 +114,7 @@ BIGHEART = ('<svg class="fheart" viewBox="110 125 780 750" aria-hidden="true"><g
 FOOTER = f'''<footer class="gutter">
   <a href="#top" class="fh-link" aria-label="Back to the top">{BIGHEART}</a>
   {SOCIALS}
-  <div class="links"><a href="#faq">Questions</a><a href="{GH}">Source</a><a href="{GH}/releases">Releases</a><a href="{GH}/issues">Report a bug</a><a href="{GH}/security/policy">Security</a></div>
+  <div class="links"><a href="#faq">Questions</a><a href="{GH}">Source</a><a href="{GH}/releases">Releases</a><a href="{GH}/issues">Report a bug</a><a href="{GH}/security/policy">Security</a><a href="privacy.html">Privacy policy</a></div>
   <small>© 2026 Nucume · GPL-3.0 · Your companion's files stay on your computer.</small>
 </footer>'''
 
@@ -165,3 +166,55 @@ else:
     page = head.replace('<title>VoxCordis</title>\n', '<title>VoxCordis</title>\n<meta name="claude:viewport-fit-sides" content="cover">\n') + body
 open(os.path.join(OUT, 'index.html'), 'w', encoding='utf-8').write(page)
 print(len(page))
+
+# ---------------------------------------------------------------- privacy.html: the privacy policy (Google's verification links to it)
+UPDATED = '9 November 2026'
+POLICY = [
+ ('Who we are', '<p>VoxCordis is a free, open-source desktop app made by Nucume. It runs on your own computer. '
+  'There is no VoxCordis account and no VoxCordis server: we never receive your chats, memories, files, calendar or any other personal data, '
+  'and the app has no analytics or telemetry.</p>'),
+ ('What stays on your computer', '<p>Your companions, chats, memories, pictures, settings and logs are kept in folders on your computer. '
+  'Chats and memories are encrypted on disk, with the key in your system keyring. Passwords, API keys and sign-in tokens are kept in your '
+  'system keyring (or, on Windows, encrypted for your user account), never in the settings file.</p>'),
+ ('What leaves your computer, and only when you choose it', '<ul>'
+  '<li><b>A server-hosted brain.</b> If you choose a server or provider (for example OpenRouter, OpenAI or Anthropic) instead of the built-in brain, the conversation you send it goes to that provider, under their privacy policy.</li>'
+  '<li><b>Web search and the companion\'s browser.</b> If you turn on internet access, search requests go to the search service you pick, and pages the companion opens are fetched from their sites.</li>'
+  '<li><b>Downloads and updates.</b> The app downloads models and its own updates from GitHub and Hugging Face, and checks GitHub for new versions.</li>'
+  '<li><b>Connected calendars.</b> If you connect a calendar, the app talks directly to your calendar provider (Google, or your CalDAV server). See below.</li>'
+  '</ul>'),
+ ('Google Calendar', '<p>If you connect Google Calendar in Settings → Connections, you sign in on Google\'s own page in your browser and VoxCordis asks for two permissions:</p><ul>'
+  '<li><code>calendar.events</code>, to read your events when you ask your companion about your plans, and to add, move or delete events when you ask it to;</li>'
+  '<li><code>calendar.calendarlist.readonly</code>, to list your calendars so you can choose which ones it reads and where new events go.</li></ul>'
+  '<p><b>How the data is used.</b> Event titles, times, places and notes are read only when your companion looks at your calendar for you, '
+  'and are shown to it so it can answer you. By default you see every event it wants to add, change or delete, and nothing happens until you say yes.</p>'
+  '<p><b>Where it goes.</b> The data travels only between your computer and Google. With the built-in brain it never leaves your computer. '
+  'If you chose a server-hosted brain, the events your companion reads become part of the conversation sent to that provider, as everything in the chat does.</p>'
+  '<p><b>What is stored.</b> Google\'s sign-in token is kept in your system keyring. Events are not copied anywhere; '
+  'what your companion said about them stays in your encrypted chat history on your computer, like the rest of the chat.</p>'
+  '<p><b>What is never done.</b> Google user data is not sent to us or sold, not used for advertising, and not used to develop, improve or train AI or machine-learning models.</p>'
+  '<p>VoxCordis\'s use and transfer of information received from Google APIs to any other app will adhere to the '
+  '<a href="https://developers.google.com/terms/api-services-user-data-policy">Google API Services User Data Policy</a>, including the Limited Use requirements.</p>'
+  '<p><b>Disconnecting.</b> Settings → Connections → Disconnect removes the token from your computer and tells Google to revoke it. '
+  'You can also remove VoxCordis at <a href="https://myaccount.google.com/permissions">myaccount.google.com/permissions</a>.</p>'),
+ ('Other calendars', '<p>A CalDAV calendar (such as iCloud, Fastmail or Nextcloud) is reached with the user name and app password you enter, which are kept in your system keyring. '
+  'A private calendar link is kept there too and is only ever downloaded from. The same rules as for Google apply: events are read and changed only for you, and go nowhere else.</p>'),
+ ('Deleting your data', '<p>Disconnect any calendar in Settings → Connections. To remove everything, delete the companion folders and the app\'s data folder. '
+  'There is no copy anywhere else for us to delete.</p>'),
+ ('Children', '<p>VoxCordis is meant for adults and is not directed at children under 16.</p>'),
+ ('Changes and contact', f'<p>If this policy changes, the new version will be posted here with a new date. Questions are welcome on the <a href="{DISCORD}">Discord</a> or in <a href="{GH}/issues">GitHub Issues</a>; '
+  f'please report security problems privately, as the <a href="{GH}/security/policy">security policy</a> describes.</p>'),
+]
+if FULL:
+    policy = ''.join(f'<h3>{t}</h3>{b}' for t, b in POLICY)
+    ppage = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">\n'
+             '<link rel="icon" href="favicon.svg" type="image/svg+xml">\n<meta name="theme-color" content="#000000">\n'
+             + head.replace('<title>VoxCordis</title>', '<title>Privacy policy · VoxCordis</title>', 1)
+             + '<style>.policy{max-width:46em;margin:0 auto;padding:110px 0 60px}.policy h3{margin:34px 0 6px;font-size:21px}'
+               '.policy p,.policy li{color:var(--muted)}.policy b{color:var(--ink)}.policy a{color:var(--accent-text)}.policy ul{padding-left:1.2em}'
+               '.policy code{font-size:.9em}.policy .stamp{color:var(--faint);margin-top:8px}</style>\n'
+             + '</head>\n<body>\n' + SPRITE
+             + '<header class="top gutter" id="top-bar"><a class="brand on" href="./" aria-label="VoxCordis home">' + MINI + '<b class="bt">VOX<span>CORDIS</span></b></a>'
+               '<nav class="topnav" aria-label="Sections"><a href="./">Home</a><a href="./#download">Download</a><a href="./#faq">FAQ</a></nav><div class="tr">' + SOCIALS + '</div></header>\n'
+             + '<main class="gutter"><article class="policy"><h2>Privacy policy</h2><p class="stamp">Last updated ' + UPDATED + '</p>' + policy + '</article></main>\n'
+             + FOOTER.replace('href="#top"', 'href="./"').replace('href="#faq"', 'href="./#faq"') + '</body>\n</html>\n')
+    open(os.path.join(OUT, 'privacy.html'), 'w', encoding='utf-8').write(ppage)
