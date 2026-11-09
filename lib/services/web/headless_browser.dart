@@ -75,9 +75,6 @@ class HeadlessBrowser {
   Future<String?> executable() async =>
       await (findInstalled ?? installedBrowser)() ?? await _downloaded();
 
-  /// Whether the headless shell would have to be downloaded first.
-  Future<bool> needsDownload() async => await executable() == null;
-
   Future<String?> _downloaded() async {
     final dir = _downloadDir;
     if (!await dir.exists()) return null;

@@ -179,19 +179,28 @@ class MessageRepository {
   }
 
   /// All messages of one local day, oldest first.
+  ///
+  /// Times are kept as UTC ISO 8601 text, which sorts like the times
+  /// themselves, so the day is asked for as a span of them and the index
+  /// on `ts` finds it without reading the whole history.
   Future<List<ChatMessage>> forDay(DateTime day) async {
-    final d =
-        '${day.year.toString().padLeft(4, '0')}-'
-        '${day.month.toString().padLeft(2, '0')}-'
-        '${day.day.toString().padLeft(2, '0')}';
     final rows = await _db.query(
       'messages',
-      where: "date(ts, 'localtime') = ?",
-      whereArgs: [d],
+      where: 'ts >= ? AND ts < ?',
+      whereArgs: [
+        _instant(DateTime(day.year, day.month, day.day)),
+        _instant(DateTime(day.year, day.month, day.day + 1)),
+      ],
       orderBy: 'sort_order',
     );
     return rows.map(ChatMessage.fromRow).toList();
   }
+
+  /// [local] as the start of what [ChatMessage.ts] is saved as, to the
+  /// second: every saved time in or after that second sorts after it, and
+  /// every earlier one before it, however many decimals it was saved with.
+  static String _instant(DateTime local) =>
+      local.toUtc().toIso8601String().substring(0, 19);
 
   /// Distinct local days that have messages, newest first, for the sidebar.
   Future<List<DateTime>> days() async {

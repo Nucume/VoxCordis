@@ -65,12 +65,19 @@ void main() {
     expect(estimateNeedGb(baseGb: 8, contextSize: 4096), 8);
   });
 
-  test('picks the longest memory span the card fits', () {
-    // Qwen3 8B needs about 7 GB at 8k.
-    expect(suggestContextSize(baseGb: 7, cardGb: 8), 8192);
-    expect(suggestContextSize(baseGb: 7, cardGb: 9), 16384);
-    expect(suggestContextSize(baseGb: 7, cardGb: 12), 32768);
-    expect(suggestContextSize(baseGb: 10, cardGb: 8), 8192);
-    expect(suggestContextSize(baseGb: 7, cardGb: null), 8192);
-  });
+  test(
+    'picks the longest memory span the card fits, leaving the desktop room',
+    () {
+      // Qwen3 8B needs about 7 GB at 8k.
+      expect(suggestContextSize(baseGb: 7, cardGb: 8), 8192);
+      expect(suggestContextSize(baseGb: 7, cardGb: 9), 8192);
+      expect(suggestContextSize(baseGb: 7, cardGb: 10), 16384);
+      expect(suggestContextSize(baseGb: 7, cardGb: 12), 32768);
+      // Artemis 31B on a 24 GB card: 32k filled the card to the last
+      // gigabyte and every window crawled while being resized.
+      expect(suggestContextSize(baseGb: 20, cardGb: 24), 16384);
+      expect(suggestContextSize(baseGb: 10, cardGb: 8), 8192);
+      expect(suggestContextSize(baseGb: 7, cardGb: null), 8192);
+    },
+  );
 }

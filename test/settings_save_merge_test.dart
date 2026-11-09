@@ -74,10 +74,23 @@ const _everything = AppSettings(
   imageModel: 'sdxl',
   freeGpuForDrawing: false,
   draw: DrawPanelPrefs(perModel: {'sdxl': DrawChoices(steps: 12)}),
+  calendar: CalendarPrefs(
+    provider: CalendarProvider.caldav,
+    askFirst: false,
+    caldavUrl: 'https://cal.example.com/',
+    caldavUser: 'me',
+    calendars: ['home'],
+    writeTo: 'home',
+  ),
   pokeAfterHours: 6,
   pokeQuietFrom: 21,
   pokeQuietUntil: 9,
   pokeRepeat: true,
+  phoneAccess: true,
+  phoneKeepAwake: false,
+  phonePort: 48123,
+  phoneTailscale: true,
+  phoneFirewallPort: 48123,
 );
 
 void main() {

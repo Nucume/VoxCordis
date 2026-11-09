@@ -13,6 +13,7 @@ import '../features/settings/keep_key_dialog.dart';
 import '../features/settings/settings_screen.dart';
 import '../features/skills/skills_screen.dart';
 import '../features/system/system_approval.dart';
+import '../features/system/calendar_approval.dart';
 import '../features/system/web_approval.dart';
 import '../features/update/update_dialog.dart';
 import '../features/update/whats_new_dialog.dart';
@@ -130,7 +131,7 @@ class _HomeShellState extends State<HomeShell>
   void didChangeDependencies() {
     super.didChangeDependencies();
     final services = AppScope.of(context);
-    _chat ??= ChatController(services)..load();
+    _chat ??= services.chat;
     services.systemTools.ask = (request) async {
       await services.background?.showWindow();
       if (!mounted) return SystemApproval.deny;
@@ -141,11 +142,35 @@ class _HomeShellState extends State<HomeShell>
       );
     };
     services.webTools.ask = (request) async {
+      // Asked from the phone: answered there.
+      if (services.chat.forPhone && services.phone.anyConnected) {
+        return services.phone.ask(
+          title:
+              '${services.settings.value.companionName} wants to do something '
+              'on ${request.site}',
+          body: [
+            if (request.why.isNotEmpty) '“${request.why}”',
+            '${request.action[0].toUpperCase()}${request.action.substring(1)}',
+          ].join('\n\n'),
+        );
+      }
       await services.background?.showWindow();
       if (!mounted) return false;
       return askWebApproval(
         context,
         request,
+        companionName: services.settings.value.companionName,
+      );
+    };
+    services.calendarTools.ask = (change) async {
+      if (services.chat.forPhone && services.phone.anyConnected) {
+        return services.phone.askCalendar(change);
+      }
+      await services.background?.showWindow();
+      if (!mounted) return false;
+      return askCalendarApproval(
+        context,
+        change,
         companionName: services.settings.value.companionName,
       );
     };
@@ -176,7 +201,6 @@ class _HomeShellState extends State<HomeShell>
     _fold.dispose();
     _open.dispose();
     _scheduler?.stop();
-    _chat?.dispose();
     super.dispose();
   }
 

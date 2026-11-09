@@ -12,7 +12,7 @@ Future<Database> openAppDatabase(String path, {String? key}) async {
   return databaseFactoryFfi.openDatabase(
     path,
     options: OpenDatabaseOptions(
-      version: 7,
+      version: 8,
       onConfigure: (db) async {
         // The key comes first: nothing in the file is readable before it.
         if (key != null) {
@@ -29,6 +29,7 @@ Future<Database> openAppDatabase(String path, {String? key}) async {
         _upgradeToV5(batch);
         _upgradeToV6(batch);
         _upgradeToV7(batch);
+        _upgradeToV8(batch);
         await batch.commit(noResult: true);
       },
       onUpgrade: (db, from, _) async {
@@ -39,6 +40,7 @@ Future<Database> openAppDatabase(String path, {String? key}) async {
         if (from < 5) _upgradeToV5(batch);
         if (from < 6) _upgradeToV6(batch);
         if (from < 7) _upgradeToV7(batch);
+        if (from < 8) _upgradeToV8(batch);
         await batch.commit(noResult: true);
       },
     ),
@@ -174,4 +176,11 @@ void _upgradeToV7(Batch b) {
       through     INTEGER NOT NULL,
       updated_at  TEXT NOT NULL
     )''');
+}
+
+/// v8: the chat is read, counted and added to by `sort_order` everywhere.
+/// Without an index each of those went through the whole history, which a
+/// long (imported) chat made slow to open and to add to.
+void _upgradeToV8(Batch b) {
+  b.execute('CREATE INDEX IF NOT EXISTS messages_sort ON messages(sort_order)');
 }

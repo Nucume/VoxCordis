@@ -13,22 +13,34 @@ class Wordmark extends StatelessWidget {
       children: [
         Image.asset(AppTheme.heartMark, height: 20),
         const SizedBox(width: 8),
-        const Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: 'VOX ',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              TextSpan(
-                text: 'CORDIS',
-                style: TextStyle(fontWeight: FontWeight.w300),
-              ),
-            ],
-          ),
-          style: TextStyle(fontSize: 13, letterSpacing: 2.2),
-        ),
+        const WordmarkText(),
       ],
     );
   }
+}
+
+/// "VOX CORDIS" the way the mark writes it: the first word heavy, the
+/// second light.
+class WordmarkText extends StatelessWidget {
+  const WordmarkText({super.key, this.size = 13, this.spacing = 2.2});
+
+  final double size;
+  final double spacing;
+
+  @override
+  Widget build(BuildContext context) => Text.rich(
+    const TextSpan(
+      children: [
+        TextSpan(
+          text: 'VOX ',
+          style: TextStyle(fontWeight: FontWeight.w800),
+        ),
+        TextSpan(
+          text: 'CORDIS',
+          style: TextStyle(fontWeight: FontWeight.w300),
+        ),
+      ],
+    ),
+    style: TextStyle(fontSize: size, letterSpacing: spacing),
+  );
 }

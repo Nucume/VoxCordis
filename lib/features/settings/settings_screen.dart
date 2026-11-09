@@ -9,6 +9,9 @@ import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
 
 import '../../app_scope.dart';
+import '../export/export_dialog.dart';
+import '../import/soulkyn_chat_dialog.dart';
+import '../phone/phone_settings.dart';
 import '../../data/core_rules.dart';
 import '../../data/desk/desk_files.dart';
 import '../../data/desk/pictures.dart';
@@ -23,6 +26,7 @@ import '../../services/updater.dart';
 import '../setup/character_pickers.dart';
 import '../update/update_dialog.dart';
 import 'delete_companion_dialog.dart';
+import 'connections_settings.dart';
 import 'encryption_settings.dart';
 import 'image_settings.dart';
 import 'internet_settings.dart';
@@ -34,7 +38,9 @@ import '../../shell/window_frame.dart';
 import '../../shell/runtime_status.dart';
 import 'recall_settings.dart';
 import 'settings_tabs.dart';
+import 'settings_text.dart';
 import 'sight_settings.dart';
+import '../../shell/wordmark.dart';
 
 /// Minimal v1 Settings: General, Brain (the model) and Images. Other tabs arrive with the systems
 /// they control.
@@ -49,13 +55,12 @@ class SettingsScreen extends StatefulWidget {
   /// the next companion or the wiped one.
   final bool Function()? replying;
 
-  /// Privacy: the encryption key ([EncryptionSettings]).
-  static const appearanceTab = 1;
+  /// The tabs other screens open Settings on.
   static const imagesTab = 2;
   static const brainTab = 3;
   static const internetTab = 5;
-  static const privacyTab = 6;
-  static const logsTab = 7;
+  static const connectionsTab = 6;
+  static const privacyTab = 7;
 
   @override
   State<SettingsScreen> createState() => SettingsScreenState();
@@ -231,7 +236,7 @@ class SettingsScreenState extends State<SettingsScreen> {
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
-      length: 9,
+      length: 10,
       initialIndex: widget.initialTab,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -278,7 +283,11 @@ class SettingsScreenState extends State<SettingsScreen> {
                       onChanged: (v) => setState(() => _draft = v),
                     ),
                   ]),
-                  _page(const [_Section('Encryption'), EncryptionSettings()]),
+                  _page(const [ConnectionsSettings(), PhoneSettings()]),
+                  _page(const [
+                    SettingsSection('Encryption'),
+                    EncryptionSettings(),
+                  ]),
                   _page(const [LogsSettings()]),
                   _page(const [_About()]),
                 ],
@@ -309,6 +318,7 @@ class SettingsScreenState extends State<SettingsScreen> {
     (label: 'Brain', icon: Icons.psychology_outlined),
     (label: 'Computer', icon: Icons.computer_rounded),
     (label: 'Internet', icon: Icons.language_rounded),
+    (label: 'Connections', icon: Icons.hub_outlined),
     (label: 'Privacy', icon: Icons.shield_outlined),
     (label: 'Logs', icon: Icons.receipt_long_outlined),
     (label: 'About', icon: Icons.info_outline_rounded),
@@ -584,7 +594,7 @@ class SettingsScreenState extends State<SettingsScreen> {
     final folder = _draft.companionFolder;
     final name = _draft.companionName;
     return [
-      const _Section('You'),
+      const SettingsSection('You'),
       _field(
         _userName,
         'What should $name call you?',
@@ -597,10 +607,10 @@ class SettingsScreenState extends State<SettingsScreen> {
         onChanged: (v) =>
             setState(() => _draft = _draft.copyWith(userPronouns: v)),
       ),
-      _Section('In the background'),
+      SettingsSection('In the background'),
       _Background(value: _draft, onChanged: (v) => setState(() => _draft = v)),
       _Poke(value: _draft, onChanged: (v) => setState(() => _draft = v)),
-      _Section(name),
+      SettingsSection(name),
       _CompanionFiles(
         name: name,
         folder: folder,
@@ -610,7 +620,18 @@ class SettingsScreenState extends State<SettingsScreen> {
           await launchUrl(Uri.file(file.path));
         },
       ),
-      const _Section('Voces Mundi'),
+      _CarryOver(
+        name: name,
+        onExport: () {
+          if (_stillReplying(name)) return;
+          showExportDialog(context);
+        },
+        onImport: () {
+          if (_stillReplying(name)) return;
+          importSoulkynChat(context);
+        },
+      ),
+      const SettingsSection('Voces Mundi'),
       SwitchListTile(
         contentPadding: EdgeInsets.zero,
         value: _draft.vocesMundi,
@@ -664,7 +685,7 @@ class SettingsScreenState extends State<SettingsScreen> {
             style: TextStyle(fontSize: 12, color: context.palette.textMuted),
           ),
         ),
-      const _Section('Danger zone'),
+      const SettingsSection('Danger zone'),
       Padding(
         padding: const EdgeInsets.only(top: 8),
         child: Wrap(
@@ -712,6 +733,16 @@ class SettingsScreenState extends State<SettingsScreen> {
     ];
   }
 
+  /// Whether the companion is busy replying, saying so: an export or an
+  /// import then would miss the reply or land in the middle of it.
+  bool _stillReplying(String name) {
+    if (widget.replying?.call() != true) return false;
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text('Let $name finish replying first.')));
+    return true;
+  }
+
   Widget _field(
     TextEditingController c,
     String label, {
@@ -725,6 +756,57 @@ class SettingsScreenState extends State<SettingsScreen> {
       decoration: InputDecoration(labelText: label, hintText: hint),
     ),
   );
+}
+
+/// Export the companion to a ZIP, or bring a chat in from Soulkyn.
+class _CarryOver extends StatelessWidget {
+  const _CarryOver({
+    required this.name,
+    required this.onExport,
+    required this.onImport,
+  });
+
+  final String name;
+  final VoidCallback onExport;
+  final VoidCallback onImport;
+
+  @override
+  Widget build(BuildContext context) {
+    final muted = TextStyle(fontSize: 12, color: context.palette.textMuted);
+    return Padding(
+      padding: const EdgeInsets.only(top: 18),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Export and import'),
+          const SizedBox(height: 2),
+          Text(
+            'Take $name along as a ZIP (personality, memories, chat and '
+            'files), or bring a chat you exported from Soulkyn (.csv) into '
+            '$name\'s chat.',
+            style: muted,
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 12,
+            runSpacing: 8,
+            children: [
+              OutlinedButton.icon(
+                onPressed: onExport,
+                icon: const Icon(Icons.ios_share_rounded),
+                label: Text('Export $name…'),
+              ),
+              OutlinedButton.icon(
+                onPressed: onImport,
+                icon: const Icon(Icons.forum_outlined),
+                label: const Text('Import a Soulkyn chat…'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 /// Close to the system tray, start with the computer, the
@@ -988,22 +1070,6 @@ class _Poke extends StatelessWidget {
   }
 }
 
-class _Section extends StatelessWidget {
-  const _Section(this.title);
-  final String title;
-
-  @override
-  Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(top: 22, bottom: 2),
-    child: Text(
-      title,
-      style: Theme.of(
-        context,
-      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-    ),
-  );
-}
-
 /// The switch that lets the companion run commands and open things, the
 /// requests allowed always, and the log. Changes apply at once.
 class _SystemAccess extends StatelessWidget {
@@ -1111,7 +1177,7 @@ class _SystemAccess extends StatelessWidget {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const _Section('System access'),
+            const SettingsSection('System access'),
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
               value: s.systemAccess,
@@ -1144,7 +1210,7 @@ class _SystemAccess extends StatelessWidget {
                   ),
                 ),
               ),
-            const _Section('Always allowed'),
+            const SettingsSection('Always allowed'),
             if (s.allowedSystemActions.isEmpty)
               Padding(
                 padding: EdgeInsets.only(top: 6),
@@ -1562,21 +1628,7 @@ class _About extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text.rich(
-                    TextSpan(
-                      children: [
-                        TextSpan(
-                          text: 'VOX ',
-                          style: TextStyle(fontWeight: FontWeight.w800),
-                        ),
-                        TextSpan(
-                          text: 'CORDIS',
-                          style: TextStyle(fontWeight: FontWeight.w300),
-                        ),
-                      ],
-                    ),
-                    style: TextStyle(fontSize: 20, letterSpacing: 3),
-                  ),
+                  const WordmarkText(size: 20, spacing: 3),
                   const SizedBox(height: 2),
                   Text(
                     'A companion that lives on your computer. Chats, '
@@ -1591,10 +1643,10 @@ class _About extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         const SocialLinks(),
-        const _Section('Version'),
+        const SettingsSection('Version'),
         const SizedBox(height: 8),
         const _UpdateRow(),
-        const _Section('Licence'),
+        const SettingsSection('Licence'),
         const SizedBox(height: 6),
         Text(
           'VoxCordis is free software under the GNU General Public '

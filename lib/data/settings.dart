@@ -5,6 +5,9 @@ import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as p;
 
 import '../services/secret_store.dart';
+import 'calendar_prefs.dart';
+
+export 'calendar_prefs.dart';
 
 enum LlmMode { builtIn, external }
 
@@ -349,6 +352,11 @@ class AppSettings {
     this.searchApiKey = '',
     this.blockedSites = const [],
     this.keepRunning = false,
+    this.phoneAccess = false,
+    this.phoneKeepAwake = true,
+    this.phoneTailscale = false,
+    this.phoneFirewallPort = 0,
+    this.phonePort = defaultPhonePort,
     this.keepLogs = true,
     this.vocesMundi = false,
     this.vocesMature = false,
@@ -362,6 +370,7 @@ class AppSettings {
     this.imageModel,
     this.freeGpuForDrawing = true,
     this.draw = const DrawPanelPrefs(),
+    this.calendar = const CalendarPrefs(),
     this.pokeAfterHours = 3,
     this.pokeQuietFrom = 23,
     this.pokeQuietUntil = 8,
@@ -510,6 +519,23 @@ class AppSettings {
   /// reminders and automations still happen.
   final bool keepRunning;
 
+  /// Settings → Connections → Phone access: paired phones on the home
+  /// network may chat, look at pictures and play stories.
+  final bool phoneAccess;
+
+  /// The computer doesn't go to sleep while a phone is connected.
+  final bool phoneKeepAwake;
+
+  /// Also let in phones on the same Tailscale network, away from home.
+  final bool phoneTailscale;
+
+  /// The port VoxCordis let through the firewall for phones, or 0.
+  final int phoneFirewallPort;
+
+  /// The port phones connect to.
+  final int phonePort;
+  static const defaultPhonePort = 47800;
+
   /// Writes what the browser, the web tools, the brain and drawing do to
   /// Settings → Logs, kept in the companion's database.
   final bool keepLogs;
@@ -560,6 +586,9 @@ class AppSettings {
 
   /// What the Pictures tab's draw panel was left showing.
   final DrawPanelPrefs draw;
+
+  /// Settings → Connections → Calendar.
+  final CalendarPrefs calendar;
 
   /// Hours of silence before the companion does something on its own (a
   /// poke), or 0 for never.
@@ -681,6 +710,11 @@ class AppSettings {
       searchApiKey: searchApiKey,
       blockedSites: blockedSites,
       keepRunning: keepRunning,
+      phoneAccess: phoneAccess,
+      phoneKeepAwake: phoneKeepAwake,
+      phoneTailscale: phoneTailscale,
+      phoneFirewallPort: phoneFirewallPort,
+      phonePort: phonePort,
       keepLogs: keepLogs,
       vocesMundi: vocesMundi,
       vocesMature: vocesMature,
@@ -694,6 +728,7 @@ class AppSettings {
       imageModel: imageModel,
       freeGpuForDrawing: freeGpuForDrawing,
       draw: draw,
+      calendar: calendar,
       pokeAfterHours: pokeAfterHours,
       pokeQuietFrom: pokeQuietFrom,
       pokeQuietUntil: pokeQuietUntil,
@@ -756,6 +791,11 @@ class AppSettings {
     String? searchApiKey,
     List<String>? blockedSites,
     bool? keepRunning,
+    bool? phoneAccess,
+    bool? phoneKeepAwake,
+    bool? phoneTailscale,
+    int? phoneFirewallPort,
+    int? phonePort,
     bool? keepLogs,
     bool? vocesMundi,
     bool? vocesMature,
@@ -769,6 +809,7 @@ class AppSettings {
     String? imageModel,
     bool? freeGpuForDrawing,
     DrawPanelPrefs? draw,
+    CalendarPrefs? calendar,
     int? pokeAfterHours,
     int? pokeQuietFrom,
     int? pokeQuietUntil,
@@ -839,6 +880,11 @@ class AppSettings {
       searchApiKey: searchApiKey ?? this.searchApiKey,
       blockedSites: blockedSites ?? this.blockedSites,
       keepRunning: keepRunning ?? this.keepRunning,
+      phoneAccess: phoneAccess ?? this.phoneAccess,
+      phoneKeepAwake: phoneKeepAwake ?? this.phoneKeepAwake,
+      phoneTailscale: phoneTailscale ?? this.phoneTailscale,
+      phoneFirewallPort: phoneFirewallPort ?? this.phoneFirewallPort,
+      phonePort: phonePort ?? this.phonePort,
       keepLogs: keepLogs ?? this.keepLogs,
       vocesMundi: vocesMundi ?? this.vocesMundi,
       vocesMature: vocesMature ?? this.vocesMature,
@@ -852,6 +898,7 @@ class AppSettings {
       imageModel: imageModel ?? this.imageModel,
       freeGpuForDrawing: freeGpuForDrawing ?? this.freeGpuForDrawing,
       draw: draw ?? this.draw,
+      calendar: calendar ?? this.calendar,
       pokeAfterHours: pokeAfterHours ?? this.pokeAfterHours,
       pokeQuietFrom: pokeQuietFrom ?? this.pokeQuietFrom,
       pokeQuietUntil: pokeQuietUntil ?? this.pokeQuietUntil,
@@ -906,6 +953,11 @@ class AppSettings {
     'searxngUrl': searxngUrl,
     'blockedSites': blockedSites,
     'keepRunning': keepRunning,
+    'phoneAccess': phoneAccess,
+    'phoneKeepAwake': phoneKeepAwake,
+    'phoneTailscale': phoneTailscale,
+    'phoneFirewallPort': phoneFirewallPort,
+    'phonePort': phonePort,
     'keepLogs': keepLogs,
     'vocesMundi': vocesMundi,
     'vocesMature': vocesMature,
@@ -919,6 +971,7 @@ class AppSettings {
     'imageModel': imageModel,
     'freeGpuForDrawing': freeGpuForDrawing,
     'draw': draw.toJson(),
+    'calendar': calendar.toJson(),
     'pokeAfterHours': pokeAfterHours,
     'pokeQuietFrom': pokeQuietFrom,
     'pokeQuietUntil': pokeQuietUntil,
@@ -1003,6 +1056,12 @@ class AppSettings {
           (json['blockedSites'] as List?)?.whereType<String>().toList() ??
           const [],
       keepRunning: json['keepRunning'] as bool? ?? false,
+      phoneAccess: json['phoneAccess'] as bool? ?? false,
+      phoneKeepAwake: json['phoneKeepAwake'] as bool? ?? true,
+      phoneTailscale: json['phoneTailscale'] as bool? ?? false,
+      phoneFirewallPort: (json['phoneFirewallPort'] as num?)?.toInt() ?? 0,
+      phonePort:
+          (json['phonePort'] as num?)?.toInt() ?? AppSettings.defaultPhonePort,
       keepLogs: json['keepLogs'] as bool? ?? true,
       vocesMundi: json['vocesMundi'] as bool? ?? false,
       vocesMature: json['vocesMature'] as bool? ?? false,
@@ -1028,6 +1087,7 @@ class AppSettings {
       freeGpuForDrawing:
           json['freeGpuForDrawing'] as bool? ?? d.freeGpuForDrawing,
       draw: DrawPanelPrefs.fromJson(json['draw']),
+      calendar: CalendarPrefs.fromJson(json['calendar']),
       pokeAfterHours: json['pokeAfterHours'] as int? ?? d.pokeAfterHours,
       pokeQuietFrom: json['pokeQuietFrom'] as int? ?? d.pokeQuietFrom,
       pokeQuietUntil: json['pokeQuietUntil'] as int? ?? d.pokeQuietUntil,
@@ -1171,33 +1231,50 @@ class SettingsStore extends ChangeNotifier {
   Future<void> update(AppSettings next) async {
     _value = next;
     notifyListeners();
+    // A save still waiting for its turn writes whatever is newest when it
+    // starts, so this change rides along with it: a slider dragged across
+    // twenty values is written once or twice, not twenty times.
+    if (_waiting case final waiting?) return waiting;
     // One save at a time, each written beside the file and then swapped in,
     // so a crash mid-save can't leave a half-written file (which would send
     // the app back to setup).
-    final write = _saving.then((_) async {
-      final s = _value;
-      final secrets = this.secrets;
-      if (secrets != null && s.llmApiKey != _savedKey) {
-        await secrets.write(apiKeySecret, s.llmApiKey);
-        _savedKey = s.llmApiKey;
-      }
-      if (secrets != null && s.searchApiKey != _savedSearchKey) {
-        await secrets.write(searchKeySecret, s.searchApiKey);
-        _savedSearchKey = s.searchApiKey;
-      }
-      await _file.parent.create(recursive: true);
-      final tmp = File('${_file.path}.tmp');
-      await tmp.writeAsString('', flush: true);
-      await restrictToOwner(tmp.path);
-      await tmp.writeAsString(
-        const JsonEncoder.withIndent('  ').convert(s.toJson()),
-        flush: true,
-      );
-      await tmp.rename(_file.path);
+    final write = _saving.then((_) {
+      _waiting = null;
+      return _write();
     });
+    _waiting = write;
     _saving = write.catchError((_) {});
     await write;
   }
 
+  /// How often the file was written, for tests.
+  @visibleForTesting
+  int writes = 0;
+
+  Future<void> _write() async {
+    final s = _value;
+    writes++;
+    final secrets = this.secrets;
+    if (secrets != null && s.llmApiKey != _savedKey) {
+      await secrets.write(apiKeySecret, s.llmApiKey);
+      _savedKey = s.llmApiKey;
+    }
+    if (secrets != null && s.searchApiKey != _savedSearchKey) {
+      await secrets.write(searchKeySecret, s.searchApiKey);
+      _savedSearchKey = s.searchApiKey;
+    }
+    await _file.parent.create(recursive: true);
+    final tmp = File('${_file.path}.tmp');
+    await tmp.writeAsString('', flush: true);
+    await restrictToOwner(tmp.path);
+    await tmp.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(s.toJson()),
+      flush: true,
+    );
+    await tmp.rename(_file.path);
+  }
+
+  /// The save that hasn't started yet, if there is one.
+  Future<void>? _waiting;
   Future<void> _saving = Future.value();
 }

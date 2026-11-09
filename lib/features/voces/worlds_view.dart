@@ -901,15 +901,13 @@ class _WorldEditorState extends State<_WorldEditor> {
   Future<String?> _describe(String idea) {
     final services = AppScope.of(context);
     return describeError(() async {
-      final reply = await services.askModel(
+      final reply = await services.models.ask(
         WorldDescriber.instructions(adult: _adult),
         WorldDescriber.brief(idea, adult: _adult),
         maxTokens: 1800,
         what: 'Describe the world',
       );
-      final got = reply == null
-          ? null
-          : WorldDescriber.parse(reply, adult: _adult);
+      final got = WorldDescriber.parse(reply, adult: _adult);
       if (got == null) return 'The model gave nothing usable. Try again.';
       if (!mounted) return null;
       setState(() {
@@ -945,7 +943,7 @@ class _WorldEditorState extends State<_WorldEditor> {
       _suggestError = null;
     });
     try {
-      final reply = await services.askModel(
+      final reply = await services.models.ask(
         TagSuggester.instructions(adult: _adult),
         TagSuggester.brief(
           name: _name.text,
@@ -956,9 +954,7 @@ class _WorldEditorState extends State<_WorldEditor> {
         what: 'Suggest world tags',
         exact: true,
       );
-      final got = reply == null
-          ? const <String>[]
-          : TagSuggester.parse(reply, adult: _adult);
+      final got = TagSuggester.parse(reply, adult: _adult);
       if (!mounted) return;
       setState(() {
         if (got.isEmpty) {
@@ -1005,7 +1001,7 @@ class _WorldEditorState extends State<_WorldEditor> {
       _writeError = null;
     });
     try {
-      final reply = await services.askModel(
+      final reply = await services.models.ask(
         OpeningWriter.instructions,
         OpeningWriter.brief(
           world: world,
@@ -1017,7 +1013,7 @@ class _WorldEditorState extends State<_WorldEditor> {
         ),
         what: 'Write an opening',
       );
-      final o = reply == null ? null : OpeningWriter.parse(reply);
+      final o = OpeningWriter.parse(reply);
       if (!mounted) return;
       setState(() {
         if (o == null) {

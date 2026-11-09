@@ -134,13 +134,21 @@ class GpuInfo {
 double estimateNeedGb({required double baseGb, required int contextSize}) =>
     baseGb + max(0, contextSize - 8192) / 8192;
 
+/// Graphics memory left for the desktop and the other programs on the card
+/// when a model is loaded. The desktop itself takes 3 to 5 GB (more with a
+/// browser or Discord open) and needs more for a moment whenever a window
+/// is resized; with less than this left, resizing VoxCordis or any other
+/// window crawled while the model was loaded (KDE on Wayland, NVIDIA).
+const desktopReserveGb = 2.0;
+
 /// The longest memory span that still fits a card of [cardGb] with a model
-/// needing [baseGb] at 8k, keeping half a gigabyte for the desktop. Normal
-/// (8k) when the card is unknown or nothing longer fits.
+/// needing [baseGb] at 8k, keeping [desktopReserveGb] for the desktop.
+/// Normal (8k) when the card is unknown or nothing longer fits.
 int suggestContextSize({required double baseGb, required double? cardGb}) {
   if (cardGb == null) return 8192;
   for (final ctx in const [32768, 16384]) {
-    if (estimateNeedGb(baseGb: baseGb, contextSize: ctx) <= cardGb - 0.5) {
+    if (estimateNeedGb(baseGb: baseGb, contextSize: ctx) <=
+        cardGb - desktopReserveGb) {
       return ctx;
     }
   }

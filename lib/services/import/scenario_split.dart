@@ -1,4 +1,5 @@
 import '../../data/voces/voces_models.dart';
+import '../voces/sentence_words.dart';
 
 /// One named person found in a card's scenario.
 class ScenarioPerson {
@@ -184,68 +185,6 @@ class ScenarioSplit {
     return words.length > 50 ? '${words.substring(0, 49)}…' : words;
   }
 
-  static const _stop = {
-    'The',
-    'A',
-    'An',
-    'And',
-    'But',
-    'Or',
-    'If',
-    'When',
-    'While',
-    'You',
-    'Your',
-    'They',
-    'Their',
-    'She',
-    'He',
-    'Her',
-    'His',
-    'It',
-    'Its',
-    'This',
-    'That',
-    'These',
-    'Those',
-    'There',
-    'Here',
-    'In',
-    'On',
-    'At',
-    'Of',
-    'To',
-    'For',
-    'With',
-    'As',
-    'By',
-    'From',
-    'Each',
-    'Every',
-    'All',
-    'Some',
-    'No',
-    'Not',
-    'We',
-    'I',
-    'My',
-    'Our',
-    'One',
-    'After',
-    'Before',
-    'Then',
-    'Also',
-    'Once',
-    'Only',
-    'Most',
-    'Many',
-    'What',
-    'Who',
-    'How',
-    'Why',
-    'Where',
-  };
-
   /// The heading's words, and names said often in the body: capitalised
   /// words not at the start of a sentence.
   static List<String> _keys(String? heading, String body) {
@@ -263,7 +202,7 @@ class ScenarioSplit {
       multiLine: true,
     ).allMatches(body)) {
       final w = m.group(1)!;
-      if (_stop.contains(w.split(' ').first)) continue;
+      if (sentenceWords.contains(w.split(' ').first)) continue;
       counts[w] = (counts[w] ?? 0) + 1;
     }
     final top = counts.entries.toList()

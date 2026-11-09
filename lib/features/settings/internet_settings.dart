@@ -10,6 +10,7 @@ import '../../theme/app_theme.dart';
 import '../../theme/glass_popover.dart';
 import 'model_picker.dart' show InfoIcon;
 import '../../widgets/download_bar.dart';
+import 'settings_text.dart';
 
 /// Settings → Internet: whether the companion may search and read the
 /// web, its own browser (no window), the search service, and sites it
@@ -106,24 +107,6 @@ class _InternetSettingsState extends State<InternetSettings> {
     widget.onChanged(_v.copyWith(blockedSites: [..._v.blockedSites, site]));
   }
 
-  Widget _note(String text) => Padding(
-    padding: const EdgeInsets.only(top: 4),
-    child: Text(
-      text,
-      style: TextStyle(fontSize: 12, color: context.palette.textMuted),
-    ),
-  );
-
-  Widget _section(String title) => Padding(
-    padding: const EdgeInsets.only(top: 22, bottom: 2),
-    child: Text(
-      title,
-      style: Theme.of(
-        context,
-      ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-    ),
-  );
-
   @override
   Widget build(BuildContext context) {
     final name = _v.companionName;
@@ -131,13 +114,13 @@ class _InternetSettingsState extends State<InternetSettings> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        _section('Internet'),
+        SettingsSection('Internet'),
         SwitchListTile(
           contentPadding: EdgeInsets.zero,
           value: _v.internetAccess,
           onChanged: (on) => widget.onChanged(_v.copyWith(internetAccess: on)),
           title: Text('Let $name search and read the web'),
-          subtitle: _note(
+          subtitle: SettingsNote(
             'For news, weather, facts and anything current. What $name '
             'reads online is treated as information only, and after reading '
             'the web $name can\'t use your computer until you write again.',
@@ -157,7 +140,7 @@ class _InternetSettingsState extends State<InternetSettings> {
                   onChanged: (on) =>
                       widget.onChanged(_v.copyWith(companionBrowser: on)),
                   title: Text('Let $name use a browser of their own'),
-                  subtitle: _note(
+                  subtitle: SettingsNote(
                     'For sites that need clicking or typing. It runs '
                     'invisibly, with no window, and has its own profile '
                     'without your logins or history. Sending a form asks '
@@ -165,7 +148,7 @@ class _InternetSettingsState extends State<InternetSettings> {
                   ),
                 ),
                 if (_v.companionBrowser) _browserRow(browser),
-                _section('Search service'),
+                SettingsSection('Search service'),
                 const SizedBox(height: 8),
                 Row(
                   children: [
@@ -236,8 +219,8 @@ class _InternetSettingsState extends State<InternetSettings> {
                           widget.onChanged(_v.copyWith(searxngUrl: u.trim())),
                     ),
                   ),
-                _section('Never visit'),
-                _note(
+                SettingsSection('Never visit'),
+                SettingsNote(
                   '$name never opens these sites or their subdomains. Your '
                   'own computer and home network are always off limits.',
                 ),

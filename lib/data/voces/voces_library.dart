@@ -559,12 +559,26 @@ class VocesLibrary {
     }
   }
 
-  static Future<void> _writeJson(File f, Map<String, Object?> json) async {
-    await f.parent.create(recursive: true);
-    // Written beside and renamed, so a crash never leaves half a file.
-    final tmp = File('${f.path}.tmp');
-    await tmp.writeAsString(const JsonEncoder.withIndent('  ').convert(json));
-    await tmp.rename(f.path);
+  /// Writes to the same file wait for each other, so two saves at once
+  /// (a story played on the PC and the phone) can't trip over the same
+  /// temporary file.
+  static final _writing = <String, Future<void>>{};
+
+  static Future<void> _writeJson(File f, Map<String, Object?> json) {
+    final text = const JsonEncoder.withIndent('  ').convert(json);
+    final before = _writing[f.path] ?? Future<void>.value();
+    final next = before.catchError((Object _) {}).then((_) async {
+      await f.parent.create(recursive: true);
+      // Written beside and renamed, so a crash never leaves half a file.
+      final tmp = File('${f.path}.tmp');
+      await tmp.writeAsString(text);
+      await tmp.rename(f.path);
+    });
+    _writing[f.path] = next;
+    next.whenComplete(() {
+      if (identical(_writing[f.path], next)) _writing.remove(f.path);
+    }).ignore();
+    return next;
   }
 
   /// A folder (or file) name made from [name] that isn't taken yet:

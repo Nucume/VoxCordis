@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import 'app_scope.dart';
@@ -56,6 +57,34 @@ class _CompanionAppState extends State<CompanionApp>
     ),
   };
 
+  ThemeData? _theme;
+  (Color, Brightness, Look?, List<int>)? _themeFrom;
+
+  /// The theme for this look, built once and kept until the look changes:
+  /// this widget builds again on every settings save, and most of those
+  /// have nothing to do with colours.
+  ThemeData _themeFor(
+    Color accent,
+    Brightness brightness,
+    Look? colorway,
+    List<int> glows,
+  ) {
+    if ((_theme, _themeFrom) case (final theme?, final from?)
+        when from.$1 == accent &&
+            from.$2 == brightness &&
+            identical(from.$3, colorway) &&
+            listEquals(from.$4, glows)) {
+      return theme;
+    }
+    _themeFrom = (accent, brightness, colorway, glows);
+    return _theme = AppTheme.build(
+      accent,
+      brightness,
+      colorway: colorway,
+      glows: [for (final c in glows) Color(c)],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final services = AppScope.of(context);
@@ -88,14 +117,10 @@ class _CompanionAppState extends State<CompanionApp>
             ? colorway.colorsIn(light: true)
             : settings.value.backgroundColors;
         return MaterialApp(
+          navigatorKey: services.navigatorKey,
           title: settings.value.companionName,
           debugShowCheckedModeBanner: false,
-          theme: AppTheme.build(
-            accent,
-            brightness,
-            colorway: colorway,
-            glows: [for (final c in glows) Color(c)],
-          ),
+          theme: _themeFor(accent, brightness, colorway, glows),
           color: Colors.transparent,
           // The background under everything, the title bar included, and
           // the pages under the title bar.

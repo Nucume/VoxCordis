@@ -50,6 +50,11 @@ final whatsNewActions = <String, WhatsNewAction>{
     icon: Icons.public_rounded,
     run: (_, host) => host.openSettings(tab: SettingsScreen.internetTab),
   ),
+  'open-connections': WhatsNewAction(
+    label: 'Connect my calendar',
+    icon: Icons.event_rounded,
+    run: (_, host) => host.openSettings(tab: SettingsScreen.connectionsTab),
+  ),
 };
 
 /// Shows [entries] (newest first) in one window: the newest version open

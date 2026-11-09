@@ -8,7 +8,6 @@ import '../app_scope.dart';
 import '../data/desk/pictures.dart';
 import '../data/settings.dart';
 import '../features/chat/chat_controller.dart';
-import '../features/export/export_dialog.dart';
 import '../theme/app_theme.dart';
 import '../theme/glass_popover.dart';
 import 'portrait.dart';
@@ -125,15 +124,6 @@ class _CompanionSwitcherState extends State<CompanionSwitcher>
     }
   }
 
-  /// The current companion to a ZIP, after it finishes replying (the
-  /// reply would be missing).
-  Future<void> _export() async {
-    if (_waitForReply()) return;
-    await _close();
-    if (!mounted) return;
-    await showExportDialog(context);
-  }
-
   /// Voces Mundi, the roleplay mode, in place of the companion.
   Future<void> _voces() async {
     if (_waitForReply()) return;
@@ -204,7 +194,6 @@ class _CompanionSwitcherState extends State<CompanionSwitcher>
                         settings: s,
                         onSwitch: _switchTo,
                         onAdd: _add,
-                        onExport: _export,
                         onMore: _more,
                         onVoces: s.vocesMundi ? _voces : null,
                       ),
@@ -242,7 +231,6 @@ class _Popover extends StatelessWidget {
     required this.settings,
     required this.onSwitch,
     required this.onAdd,
-    required this.onExport,
     required this.onMore,
     this.onVoces,
   });
@@ -255,7 +243,6 @@ class _Popover extends StatelessWidget {
   final AppSettings settings;
   final ValueChanged<CompanionProfile> onSwitch;
   final VoidCallback onAdd;
-  final VoidCallback onExport;
   final VoidCallback onMore;
 
   /// Opens Voces Mundi; null while it is switched off in Settings.
@@ -263,7 +250,7 @@ class _Popover extends StatelessWidget {
 
   /// Heights of the parts, for working out how many rows fit.
   static const rowHeight = 60.0;
-  static const fixedHeight = 184.0; // header, divider, two action rows
+  static const fixedHeight = 128.0; // header, divider, one action row
 
   /// How many companions to list when [count] exist, the rest behind
   /// "More…". The current companion is always listed.
@@ -284,27 +271,8 @@ class _Popover extends StatelessWidget {
     final rows = companions.length + (hidden > 0 ? 2 : 1);
 
     // Each row starts a little after the one above it.
-    Widget staggered(int i, Widget child) {
-      final start = (0.15 + i * 0.1).clamp(0.0, 0.7);
-      final a = CurvedAnimation(
-        parent: animation,
-        curve: Interval(
-          start,
-          (start + 0.45).clamp(0.0, 1.0),
-          curve: Curves.easeOutCubic,
-        ),
-      );
-      return FadeTransition(
-        opacity: a,
-        child: SlideTransition(
-          position: Tween(
-            begin: const Offset(0, -0.25),
-            end: Offset.zero,
-          ).animate(a),
-          child: child,
-        ),
-      );
-    }
+    Widget staggered(int i, Widget child) =>
+        glassStagger(animation, i, child, step: 0.1, latest: 0.7);
 
     return GlassPopoverPanel(
       animation: animation,
@@ -365,14 +333,6 @@ class _Popover extends StatelessWidget {
                 onTap: onAdd,
               ),
             ),
-            staggered(
-              rows + 1,
-              _ActionRow(
-                icon: Icons.ios_share_rounded,
-                label: 'Export ${settings.companionName}…',
-                onTap: onExport,
-              ),
-            ),
           ],
         ),
       ),
@@ -381,39 +341,9 @@ class _Popover extends StatelessWidget {
 }
 
 /// A row that lifts and tints when the pointer is over it.
-class _HoverRow extends StatefulWidget {
-  const _HoverRow({required this.onTap, required this.builder});
-
-  final VoidCallback? onTap;
-  final Widget Function(BuildContext context, bool hover) builder;
-
-  @override
-  State<_HoverRow> createState() => _HoverRowState();
-}
-
-class _HoverRowState extends State<_HoverRow> {
-  bool _hover = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final on = _hover && widget.onTap != null;
-    return MouseRegion(
-      cursor: widget.onTap == null
-          ? SystemMouseCursors.basic
-          : SystemMouseCursors.click,
-      onEnter: (_) => setState(() => _hover = true),
-      onExit: (_) => setState(() => _hover = false),
-      child: GestureDetector(
-        onTap: widget.onTap,
-        child: AnimatedScale(
-          scale: on ? 1.02 : 1,
-          duration: const Duration(milliseconds: 160),
-          curve: Curves.easeOut,
-          child: widget.builder(context, on),
-        ),
-      ),
-    );
-  }
+class _HoverRow extends GlassHover {
+  const _HoverRow({required super.onTap, required super.builder})
+    : super(lift: 1.02, opaque: false);
 }
 
 class _CompanionRow extends StatelessWidget {

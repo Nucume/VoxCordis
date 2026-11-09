@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'dart:ui';
 
 import 'package:flutter/services.dart';
@@ -104,9 +105,16 @@ class GlassPopoverPanel extends StatelessWidget {
   }
 }
 
-/// [child] arriving a little after the row above it, as row [index].
-Widget glassStagger(Animation<double> animation, int index, Widget child) {
-  final start = (0.15 + index * 0.06).clamp(0.0, 0.55);
+/// [child] arriving a little after the row above it, as row [index]:
+/// [step] of the animation later for each row, no later than [latest].
+Widget glassStagger(
+  Animation<double> animation,
+  int index,
+  Widget child, {
+  double step = 0.06,
+  double latest = 0.55,
+}) {
+  final start = (0.15 + index * step).clamp(0.0, latest);
   final a = CurvedAnimation(
     parent: animation,
     curve: Interval(
@@ -258,7 +266,9 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   minWidth: (box?.size.width ?? 0) + _padding * 2,
-                  maxHeight: room.clamp(_rowHeight * 2, full),
+                  // At least two rows' room, but never more than the
+                  // whole list (a single option is shorter than two rows).
+                  maxHeight: room.clamp(min(_rowHeight * 2, full), full),
                 ),
                 child: IntrinsicWidth(
                   child: GlassPopoverPanel(
@@ -311,7 +321,7 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
         child: OverlayPortal(
           controller: _portal,
           overlayChildBuilder: _menu,
-          child: _Hover(
+          child: GlassHover(
             onTap: enabled ? _toggle : null,
             builder: (context, hover) => AnimatedContainer(
               key: _anchor,
@@ -421,7 +431,7 @@ class _OptionRow<T> extends StatelessWidget {
   Widget build(BuildContext context) {
     final palette = context.palette;
     final accent = Theme.of(context).colorScheme.primary;
-    return _Hover(
+    return GlassHover(
       onTap: onTap,
       builder: (context, hover) => AnimatedContainer(
         duration: const Duration(milliseconds: 160),
@@ -480,18 +490,27 @@ class _OptionRow<T> extends StatelessWidget {
   }
 }
 
-/// Lifts a little and reports hover, like the companion menu's rows.
-class _Hover extends StatefulWidget {
-  const _Hover({required this.onTap, required this.builder});
+/// Lifts a little and reports hover: a row of a glass menu. [lift] is how
+/// much it grows; [opaque] takes taps on its empty parts too.
+class GlassHover extends StatefulWidget {
+  const GlassHover({
+    super.key,
+    required this.onTap,
+    required this.builder,
+    this.lift = 1.015,
+    this.opaque = true,
+  });
 
   final VoidCallback? onTap;
   final Widget Function(BuildContext context, bool hover) builder;
+  final double lift;
+  final bool opaque;
 
   @override
-  State<_Hover> createState() => _HoverState();
+  State<GlassHover> createState() => _GlassHoverState();
 }
 
-class _HoverState extends State<_Hover> {
+class _GlassHoverState extends State<GlassHover> {
   bool _hover = false;
 
   @override
@@ -504,10 +523,10 @@ class _HoverState extends State<_Hover> {
       onEnter: (_) => setState(() => _hover = true),
       onExit: (_) => setState(() => _hover = false),
       child: GestureDetector(
-        behavior: HitTestBehavior.opaque,
+        behavior: widget.opaque ? HitTestBehavior.opaque : null,
         onTap: widget.onTap,
         child: AnimatedScale(
-          scale: on ? 1.015 : 1,
+          scale: on ? widget.lift : 1,
           duration: const Duration(milliseconds: 160),
           curve: Curves.easeOut,
           child: widget.builder(context, on),

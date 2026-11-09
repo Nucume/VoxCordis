@@ -110,10 +110,6 @@ class Background with WindowListener {
     }
   }
 
-  /// Whether closing the window puts it in the tray (rather than the
-  /// taskbar, where there is no tray to put it in).
-  bool get inTray => _inTray;
-
   /// Out of the way: into the tray, or down to the taskbar without one.
   Future<void> _putAway() async {
     if (_inTray) {

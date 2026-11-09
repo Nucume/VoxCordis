@@ -6,6 +6,8 @@ import 'dart:math';
 
 import 'package:http/http.dart' as http;
 
+import 'gpu_info.dart';
+
 /// One running `llama-server` process serving a single model on localhost.
 class LlamaServer {
   LlamaServer._(this._process, this.port, this.apiKey, this._log);
@@ -61,6 +63,13 @@ class LlamaServer {
         // much of the model in graphics memory as fits and runs the rest on
         // the CPU, so a model too big for the card is slow rather than broken.
         if (!useGpu) ...['-ngl', '0'],
+        // Leaves room on the card for the desktop: llama.cpp's own margin
+        // (1 GB) filled a 24 GB card so far that every window crawled while
+        // being resized. What doesn't fit then runs on the processor.
+        if (useGpu && !embedding) ...[
+          '--fit-target',
+          '${(desktopReserveGb * 1024).round()}',
+        ],
         if (embedding)
         // An embedding model reads each text whole, so one batch has to
         // hold a text as long as the context; mean pooling is what
@@ -102,7 +111,12 @@ class LlamaServer {
       workingDirectory: File(binary).parent.path,
       // Passed through the environment rather than the command line, which
       // other users on the machine can list.
-      environment: {'LLAMA_API_KEY': apiKey},
+      environment: {
+        'LLAMA_API_KEY': apiKey,
+        // Off the graphics card entirely: a CUDA build otherwise still opens
+        // the card and keeps a few hundred MB of it, even with -ngl 0.
+        if (!useGpu) 'CUDA_VISIBLE_DEVICES': '',
+      },
     );
     onSpawn?.call(process.pid);
 

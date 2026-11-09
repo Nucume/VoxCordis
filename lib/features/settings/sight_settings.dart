@@ -7,9 +7,8 @@ import 'package:path/path.dart' as p;
 import '../../app_scope.dart';
 import '../../data/settings.dart';
 import '../../services/runtime/model_catalog.dart';
-import '../../theme/app_theme.dart';
+import 'helper_model.dart';
 import 'model_picker.dart' show InfoIcon;
-import '../../widgets/download_bar.dart';
 
 /// Settings → Brain → Sight: whether the companion sees the pictures its
 /// human shares, a vision file for an attached model, and Eyes, the small
@@ -57,30 +56,13 @@ class _SightSettingsState extends State<SightSettings> {
 
   Future<void> _removeEyes() async {
     final runtime = AppScope.of(context).runtime;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove Eyes?'),
-        content: const SizedBox(
-          width: 400,
-          child: Text(
-            'Its files are deleted. Pictures already looked at keep their '
-            'descriptions; new ones go unseen unless the brain can see.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final ok = await confirmRemoveHelper(
+      context,
+      'Eyes',
+      'Its files are deleted. Pictures already looked at keep their '
+          'descriptions; new ones go unseen unless the brain can see.',
     );
-    if (ok != true) return;
+    if (!ok) return;
     await runtime.stopEyes();
     final dir = ModelCatalog.dirFor(_v);
     for (final path in ModelCatalog.eyes.allFiles) {
@@ -93,7 +75,6 @@ class _SightSettingsState extends State<SightSettings> {
   @override
   Widget build(BuildContext context) {
     final runtime = AppScope.of(context).runtime;
-    final muted = TextStyle(color: context.palette.textMuted, height: 1.4);
     return ListenableBuilder(
       listenable: runtime,
       builder: (context, _) {
@@ -117,30 +98,15 @@ class _SightSettingsState extends State<SightSettings> {
                   'model that can see, such as Qwen3-VL.';
         final eyes = ModelCatalog.eyes;
         final downloading = runtime.downloads.containsKey(eyes.id);
-        final progress = runtime.downloads[eyes.id];
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Sight',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  sees || eyesReady || !builtIn
-                      ? Icons.visibility_outlined
-                      : Icons.visibility_off_outlined,
-                  size: 18,
-                  color: context.palette.textMuted,
-                ),
-                const SizedBox(width: 8),
-                Expanded(child: Text(status, style: muted)),
-              ],
+            HelperStatus(
+              title: 'Sight',
+              icon: sees || eyesReady || !builtIn
+                  ? Icons.visibility_outlined
+                  : Icons.visibility_off_outlined,
+              status: status,
             ),
             if (attached) ...[
               const SizedBox(height: 12),
@@ -178,69 +144,19 @@ class _SightSettingsState extends State<SightSettings> {
             ],
             if (!sees || eyesReady || downloading) ...[
               const SizedBox(height: 12),
-              Container(
-                padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
-                decoration: BoxDecoration(
-                  color: context.palette.tile,
-                  borderRadius: BorderRadius.circular(14),
-                ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'Eyes',
-                            style: TextStyle(fontWeight: FontWeight.w600),
-                          ),
-                          const SizedBox(height: 4),
-                          Text(
-                            'A small vision model (Qwen3-VL 4B, uncensored) '
-                            'that looks at each picture once and describes '
-                            'it for $name, so any model can talk about your '
-                            'pictures. It runs on this computer, loads only '
-                            'while it looks, and needs about '
-                            '${eyes.minMemoryGb} GB of memory then.\n'
-                            '${eyes.sizeGb.toStringAsFixed(1)} GB download',
-                            style: TextStyle(
-                              fontSize: 12,
-                              height: 1.45,
-                              color: context.palette.textMuted,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    if (downloading)
-                      Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          SizedBox(
-                            width: 170,
-                            child: DownloadBar(progress: progress),
-                          ),
-                          IconButton(
-                            tooltip: 'Pause download',
-                            onPressed: () => runtime.cancelDownload(eyes.id),
-                            icon: const Icon(Icons.pause_rounded),
-                          ),
-                        ],
-                      )
-                    else if (eyesReady)
-                      TextButton(
-                        onPressed: _removeEyes,
-                        child: const Text('Remove'),
-                      )
-                    else
-                      OutlinedButton.icon(
-                        onPressed: _downloadEyes,
-                        icon: const Icon(Icons.download_rounded),
-                        label: const Text('Download'),
-                      ),
-                  ],
-                ),
+              HelperModelTile(
+                name: 'Eyes',
+                about:
+                    'A small vision model (Qwen3-VL 4B, uncensored) '
+                    'that looks at each picture once and describes '
+                    'it for $name, so any model can talk about your '
+                    'pictures. It runs on this computer, loads only '
+                    'while it looks, and needs about '
+                    '${eyes.minMemoryGb} GB of memory then.',
+                model: eyes,
+                ready: eyesReady,
+                onDownload: _downloadEyes,
+                onRemove: _removeEyes,
               ),
             ],
             if (_error case final error?) ...[

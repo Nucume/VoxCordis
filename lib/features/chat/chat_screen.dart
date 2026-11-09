@@ -1553,7 +1553,16 @@ class _SharedPicture extends StatelessWidget {
                     fit: BoxFit.cover,
                     cacheHeight: 680,
                   )
-                : Image.file(f, width: 220, height: 220, fit: BoxFit.cover),
+                // Decoded near the size shown, not the photo's own: a phone
+                // photo at full size holds some 50 MB for as long as its
+                // message is loaded.
+                : Image.file(
+                    f,
+                    width: 220,
+                    height: 220,
+                    fit: BoxFit.cover,
+                    cacheWidth: 660,
+                  ),
           ),
         ),
       ),
@@ -1596,7 +1605,13 @@ class _PendingPicture extends StatelessWidget {
     children: [
       ClipRRect(
         borderRadius: BorderRadius.circular(10),
-        child: Image.file(File(path), width: 64, height: 64, fit: BoxFit.cover),
+        child: Image.file(
+          File(path),
+          width: 64,
+          height: 64,
+          fit: BoxFit.cover,
+          cacheWidth: 192,
+        ),
       ),
       Positioned(
         top: -8,

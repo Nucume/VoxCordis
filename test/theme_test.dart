@@ -1,3 +1,4 @@
+import 'package:companion/data/looks.dart';
 import 'package:companion/data/settings.dart';
 import 'package:companion/theme/app_theme.dart';
 import 'package:companion/theme/system_theme.dart';
@@ -66,6 +67,29 @@ void main() {
     expect(light.extension<AppPalette>(), AppPalette.light);
     expect(dark.extension<AppPalette>(), AppPalette.dark);
     expect(light.colorScheme.brightness, Brightness.light);
+  });
+
+  test('the same look builds an equal theme', () {
+    // MaterialApp fades to a theme that isn't equal to the last one, and
+    // every settings save builds the theme again: unequal themes would
+    // redraw the whole window for each saved setting.
+    const accent = Color(0xFFB18CFF);
+    const glows = [Color(0xFF112233), Color(0xFF445566), Color(0xFF778899)];
+    for (final brightness in Brightness.values) {
+      for (final look in <Look?>[null, ...Look.all]) {
+        ThemeData build() => AppTheme.build(
+          accent,
+          brightness,
+          colorway: look,
+          glows: look == null ? glows : const [],
+        );
+        expect(build(), build(), reason: '${look?.id} $brightness');
+      }
+    }
+    expect(
+      AppTheme.build(accent, Brightness.dark),
+      isNot(AppTheme.build(accent, Brightness.dark, glows: glows)),
+    );
   });
 
   test('light text is readable on a light panel', () {

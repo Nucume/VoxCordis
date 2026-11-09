@@ -2,6 +2,7 @@ import 'dart:io';
 
 import '../../data/desk/desk_files.dart';
 import 'nemini_import.dart';
+import 'soulkyn_chat.dart';
 import 'untrusted_text.dart';
 
 /// A character read from another app, before the human has reviewed it.
@@ -73,6 +74,13 @@ class ImportedCharacter {
 
   /// Memories, chat and files still inside a Nemini ZIP.
   final NeminiExtras? nemini;
+
+  /// A Soulkyn chat to bring along: its messages fill the chat. Picked
+  /// with the character or added on the review step.
+  SoulkynChat? soulkynChat;
+
+  /// Whether the companion reads [soulkynChat] for memories once set up.
+  bool learnChat = true;
 
   /// The prose that becomes personality.md's body, below the app's own
   /// "About this file" section.

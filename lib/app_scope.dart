@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/widgets.dart';
-import 'package:http/http.dart' show Client, ClientException;
+import 'package:http/http.dart' show Client;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -24,21 +25,27 @@ import 'data/schedule/schedule_tools.dart';
 import 'data/settings.dart';
 import 'data/story_repository.dart';
 import 'data/voces/story_log.dart';
+import 'data/voces/voces_library.dart';
+import 'data/voces/voces_models.dart';
 import 'data/skills/skill_tools.dart';
-import 'features/chat/prompt_history.dart';
+import 'features/chat/chat_controller.dart';
+import 'features/phone/phone_api.dart';
+import 'services/calendar/calendar_service.dart';
+import 'services/calendar/calendar_tools.dart';
 import 'services/changelog.dart';
 import 'services/import/import_temp.dart';
 import 'services/system/older_copy.dart';
 import 'services/images/clip_prompt.dart';
 import 'services/import/personality_rewrite.dart';
+import 'services/import/soulkyn_chat.dart';
+import 'services/import/soulkyn_chat_learn.dart';
 import 'services/images/draw_tools.dart';
 import 'services/images/image_engine.dart';
-import 'services/llm_client.dart';
 import 'services/logs/app_log.dart';
+import 'services/model_calls.dart';
 import 'services/recall/embedder.dart';
 import 'services/recall/recall.dart';
 import 'services/runtime/model_catalog.dart';
-import 'services/runtime/llama_server.dart' show serverExitHint;
 import 'services/runtime/runtime_controller.dart';
 import 'services/secret_store.dart';
 import 'services/story/story_keeper.dart';
@@ -46,6 +53,7 @@ import 'services/system/background.dart';
 import 'services/system/desktop_notifier.dart';
 import 'services/system/system_tools.dart';
 import 'services/updater.dart';
+import 'services/voces/story_session.dart';
 import 'services/web/headless_browser.dart';
 import 'services/web/web_tools.dart';
 
@@ -92,6 +100,13 @@ class AppServices {
 
   final SettingsStore settings;
   final RuntimeController runtime;
+
+  /// Questions to the chat model outside the companion's own replies.
+  late final models = ModelCalls(
+    runtime: runtime,
+    settings: () => settings.value,
+    log: log,
+  );
   final updates = Updater();
 
   /// Encrypts every companion database; Settings → Privacy shows it.
@@ -290,7 +305,6 @@ class AppServices {
     _rewriteRunning = true;
     final http = Client();
     ({String label, String? problem})? after;
-    var held = false;
     try {
       final file = DeskFiles.fileIn(folder, DeskFiles.personality);
       if (!await file.exists() ||
@@ -298,35 +312,32 @@ class AppServices {
         return;
       }
       rewriting.value = (label: 'Rewriting personality…', problem: null);
-      runtime.hold();
-      held = true;
-      final target = await runtime.ensureReady(s);
-      final maxChars = DeskFiles.personalityMaxChars(s.contextSize);
-      final client = LlmClient(
-        baseUrl: target.baseUrl,
-        model: target.model,
-        apiKey: target.apiKey,
-        sampling: samplingFor(s),
-        stop: stopFor(s),
-        // Room for a thinking model to think first.
-        maxTokens: 6000,
-        stallWait: const Duration(minutes: 3),
-        client: http,
-      );
-      // The human may have switched companion meanwhile.
-      if (settings.value.companionFolder != folder) return;
-      final r = await PersonalityRewrite.run(
-        file,
-        client,
-        name: s.companionName,
-        pronouns: s.pronouns,
-        maxChars: maxChars,
-        progress: (done, of) => rewriting.value = (
-          label: 'Rewriting personality ${done + 1 > of ? of : done + 1}/$of…',
-          problem: null,
-        ),
-      );
-      if (r.rewritten == 0 && r.problem != null) {
+      final r = await withChatModel(runtime, () => settings.value, (
+        target,
+      ) async {
+        // The human may have switched companion meanwhile.
+        if (settings.value.companionFolder != folder) return null;
+        return PersonalityRewrite.run(
+          file,
+          chatClient(
+            target,
+            s,
+            // Room for a thinking model to think first.
+            maxTokens: 6000,
+            stallWait: const Duration(minutes: 3),
+            client: http,
+          ),
+          name: s.companionName,
+          pronouns: s.pronouns,
+          maxChars: DeskFiles.personalityMaxChars(s.contextSize),
+          progress: (done, of) => rewriting.value = (
+            label:
+                'Rewriting personality ${done + 1 > of ? of : done + 1}/$of…',
+            problem: null,
+          ),
+        );
+      });
+      if (r != null && r.rewritten == 0 && r.problem != null) {
         after = (label: 'Rewrite didn\'t work', problem: r.problem);
       }
     } on Object catch (e) {
@@ -334,13 +345,66 @@ class AppServices {
       after = (label: 'Rewrite didn\'t work', problem: '$e');
     } finally {
       http.close();
-      if (held) runtime.release(settings.value);
       _rewriteRunning = false;
       rewriting.value = after;
     }
   }
 
   bool _rewriteRunning = false;
+
+  /// What reading an imported chat for memories is doing, while it runs.
+  final learning = ValueNotifier<String?>(null);
+  bool _learnRunning = false;
+
+  /// Has the current companion read [chat], imported from Soulkyn, and
+  /// keep what matters as memories, part by part ([SoulkynChatLearn]).
+  /// Runs in the background with the chat model; stops when the human
+  /// switches companion. Returns how many memories were kept.
+  Future<int> learnFromChat(SoulkynChat chat) async {
+    if (_learnRunning) return 0;
+    _learnRunning = true;
+    final s = settings.value;
+    final id = s.companionId;
+    final name = s.companionName;
+    final parts = SoulkynChatLearn.parts(chat, name);
+    var kept = 0;
+    try {
+      final have = {
+        for (final m in await memory.current()) SoulkynChatLearn.key(m.text),
+      };
+      for (final (i, part) in parts.indexed) {
+        if (settings.value.companionId != id) break;
+        learning.value = 'Learning from the chat ${i + 1}/${parts.length}…';
+        final reply = await models.ask(
+          SoulkynChatLearn.instructions(name, chat.persona),
+          SoulkynChatLearn.brief(part, i, parts.length),
+          maxTokens: 600,
+          what: 'Memories from an imported chat',
+        );
+        if (settings.value.companionId != id) break;
+        var added = 0;
+        for (final text in SoulkynChatLearn.parse(reply)) {
+          if (!have.add(SoulkynChatLearn.key(text))) continue;
+          await memory.remember(text: text, priority: 40, origin: 'soulkyn');
+          added++;
+        }
+        if (added > 0) memoryChanged();
+        kept += added;
+      }
+    } on Object catch (e) {
+      log.add(
+        LogKind.errors,
+        'Learning from the imported chat stopped',
+        details: '$e',
+        error: true,
+      );
+    } finally {
+      _learnRunning = false;
+      learning.value = null;
+    }
+    if (kept > 0) recall.update().ignore();
+    return kept;
+  }
 
   /// Turns the human's few words into a prompt for a video model with the
   /// chat model ([ClipPrompt]). Null when it gave nothing usable; throws
@@ -355,163 +419,28 @@ class AppServices {
   }) async {
     final s = settings.value;
     final http = Client();
-    runtime.hold();
     try {
-      final target = await runtime.ensureReady(s);
-      final client = LlmClient(
-        baseUrl: target.baseUrl,
-        model: target.model,
-        apiKey: target.apiKey,
-        sampling: samplingFor(s),
-        stop: stopFor(s),
-        maxTokens: 3000,
-        stallWait: const Duration(minutes: 2),
-        client: http,
-      );
-      return await ClipPrompt.write(
-        client,
-        idea,
-        detailed: detailed,
-        seconds: seconds,
-        model: model,
-        chars: chars,
-        limit: limit,
+      return await withChatModel(
+        runtime,
+        () => settings.value,
+        (target) => ClipPrompt.write(
+          chatClient(
+            target,
+            s,
+            maxTokens: 3000,
+            stallWait: const Duration(minutes: 2),
+            client: http,
+          ),
+          idea,
+          detailed: detailed,
+          seconds: seconds,
+          model: model,
+          chars: chars,
+          limit: limit,
+        ),
       );
     } finally {
       http.close();
-      runtime.release(settings.value);
-    }
-  }
-
-  /// One answer from the chat model to [system] and [user], without the
-  /// companion's prompt or tools; null when it can't be reached. [what]
-  /// names the request in Logs → Thinking, which shows what came back.
-  /// [exact] is for answers in a fixed form (tags, lists): the model is
-  /// asked with a low temperature, so a roleplay model keeps to the form.
-  Future<String?> askModel(
-    String system,
-    String user, {
-    int maxTokens = 1500,
-    String what = 'A helper request',
-    bool exact = false,
-  }) async {
-    final s = settings.value;
-    final http = Client();
-    runtime.hold();
-    final sampling = samplingFor(s);
-    try {
-      for (var drops = 0; ; drops++) {
-        final target = await runtime.ensureReady(s);
-        final client = LlmClient(
-          baseUrl: target.baseUrl,
-          model: target.model,
-          apiKey: target.apiKey,
-          sampling: exact
-              ? {
-                  ...sampling,
-                  'temperature': min(
-                    (sampling['temperature'] ?? 0.3).toDouble(),
-                    0.3,
-                  ),
-                }
-              : sampling,
-          stop: stopFor(s),
-          // Room for a model that thinks anyway: Gemma 4 finetunes like
-          // Artemis thought past the whole budget and answered nothing.
-          maxTokens: maxTokens + 4000,
-          // A helper answer needs no thinking; llama-server turns it on
-          // for templates that can think unless told not to.
-          extra: s.llmMode == LlmMode.builtIn
-              ? const {
-                  'chat_template_kwargs': {'enable_thinking': false},
-                }
-              : const {},
-          stallWait: const Duration(minutes: 2),
-          client: http,
-        );
-        final reply = StringBuffer();
-        var thought = 0;
-        try {
-          await for (final e in client.chat([
-            {'role': 'system', 'content': system},
-            {'role': 'user', 'content': user},
-          ])) {
-            if (e is TextDelta) reply.write(e.text);
-            if (e is ReasoningDelta) thought += e.text.length;
-          }
-        } on ClientException catch (e) {
-          // The connection dropped: the model server crashed or was
-          // stopped. Say how it ended, start it again and ask once more.
-          final exit = s.llmMode == LlmMode.builtIn
-              ? await runtime.exitOf(target.baseUrl)
-              : null;
-          log.add(
-            LogKind.errors,
-            '$what: the connection to the model dropped'
-            '${exit == null
-                ? ''
-                : exit.onPurpose
-                ? ' (the app restarted it)'
-                : ' (it stopped: ${serverExitHint(exit.code, exit.log)})'}'
-            '${drops == 0 ? '; trying again' : ''}. ${e.message}'
-            '${exit == null ? '' : '\nExit code: ${exit.code}'}'
-            '${exit == null || exit.log.isEmpty ? '' : '\nLast lines it printed:\n${exit.log}'}',
-          );
-          if (drops > 0) rethrow;
-          continue;
-        }
-        final text = reply.toString();
-        final shown = text.trim().replaceAll(RegExp(r'\s+'), ' ');
-        log.add(
-          LogKind.thinking,
-          '$what: the model answered '
-          '${shown.isEmpty ? 'nothing' : '"${shown.length > 400 ? '${shown.substring(0, 400)}…' : shown}"'}'
-          '${thought > 0 ? ' (after $thought characters of thinking)' : ''}.',
-        );
-        return text;
-      }
-    } on Object catch (e) {
-      log.add(LogKind.errors, '$what failed: $e');
-      rethrow;
-    } finally {
-      http.close();
-      runtime.release(settings.value);
-    }
-  }
-
-  /// The chat model's reply to [system] and [user], piece by piece, for a
-  /// Voces Mundi story. [stop] adds lines that end the reply. Cancelling
-  /// the subscription stops the model.
-  Stream<String> streamModel(
-    String system,
-    String user, {
-    List<String> stop = const [],
-    int maxTokens = 1200,
-  }) async* {
-    final s = settings.value;
-    final http = Client();
-    runtime.hold();
-    try {
-      final target = await runtime.ensureReady(s);
-      final client = LlmClient(
-        baseUrl: target.baseUrl,
-        model: target.model,
-        apiKey: target.apiKey,
-        sampling: samplingFor(s),
-        stop: [...stopFor(s), ...stop],
-        maxTokens: maxTokens,
-        stallWait: const Duration(minutes: 2),
-        client: http,
-      );
-      await for (final e in client.chat([
-        {'role': 'system', 'content': system},
-        {'role': 'user', 'content': user},
-      ])) {
-        if (e is TextDelta) yield e.text;
-      }
-    } finally {
-      http.close();
-      runtime.release(settings.value);
     }
   }
 
@@ -533,6 +462,61 @@ class AppServices {
       final f = File('${storyDbPath(id)}$end');
       if (await f.exists()) await f.delete();
     }
+  }
+
+  /// The chat with the current companion, shared by the window and a
+  /// phone. A new one starts for each companion, and after a reset.
+  ChatController get chat {
+    final key = '${settings.value.companionId}:${resets.value}';
+    final old = _chat;
+    if (old != null && _chatFor == key) return old;
+    _chatFor = key;
+    final next = _chat = ChatController(this)..load();
+    // The window showing the old one is still fading out.
+    if (old != null) {
+      Timer(const Duration(seconds: 2), () {
+        if (!identical(_chat, old)) old.dispose();
+      });
+    }
+    return next;
+  }
+
+  ChatController? _chat;
+  String? _chatFor;
+
+  /// Lets the app's own dialogs show without a screen at hand: asking
+  /// whether a phone may connect, say.
+  final navigatorKey = GlobalKey<NavigatorState>();
+
+  /// Stories being played, by id: the window and a phone share one.
+  final _stories = <String, StorySession>{};
+
+  /// Opens [story] for playing, or joins it where the window or a phone
+  /// already plays it. [cast] is who is there at the start, for a story
+  /// not played yet. Each call needs its [releaseStory].
+  StorySession openStory(
+    VocesLibrary library,
+    StorySave story, {
+    List<String>? cast,
+  }) {
+    var s = _stories[story.id];
+    if (s == null || s.closed) {
+      s = StorySession(this, library, story, cast: cast);
+      _stories[story.id] = s;
+      unawaited(s.open());
+    }
+    s.users++;
+    return s;
+  }
+
+  /// The story [id] while someone plays it.
+  StorySession? playing(String id) => _stories[id];
+
+  /// One screen let go of [s]; the last one closes it.
+  Future<void> releaseStory(StorySession s) async {
+    if (--s.users > 0) return;
+    if (identical(_stories[s.story.id], s)) _stories.remove(s.story.id);
+    await s.close();
   }
 
   /// Set while the human is setting up another companion from the menu.
@@ -640,6 +624,20 @@ class AppServices {
     searchKey: () async => settings.value.searchApiKey,
     log: log,
   );
+
+  /// Phones on the home network using VoxCordis through the browser,
+  /// once turned on in Settings → Connections.
+  late final phone = PhoneApi(this);
+
+  /// The calendar connected in Settings → Connections.
+  late final calendar = CalendarService(
+    settings: () => settings.value,
+    secrets: settings.secrets,
+  );
+
+  /// calendar_events and the tools that change events. The window supplies
+  /// the approval dialog ([CalendarTools.ask]).
+  late final calendarTools = CalendarTools(calendar);
 
   /// The browser without a window that the companion browses with.
   late final browser = HeadlessBrowser(runtime.supportDir)..log = log;

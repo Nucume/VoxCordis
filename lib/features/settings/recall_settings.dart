@@ -3,8 +3,7 @@ import 'package:flutter/material.dart';
 import '../../app_scope.dart';
 import '../../data/settings.dart';
 import '../../services/runtime/model_catalog.dart';
-import '../../theme/app_theme.dart';
-import '../../widgets/download_bar.dart';
+import 'helper_model.dart';
 
 /// Settings → Brain → Recall: the small embedding model that finds
 /// memories and older chat by meaning.
@@ -40,30 +39,13 @@ class _RecallSettingsState extends State<RecallSettings> {
 
   Future<void> _remove() async {
     final runtime = AppScope.of(context).runtime;
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Remove Recall?'),
-        content: const SizedBox(
-          width: 400,
-          child: Text(
-            'Its file is deleted and memories are matched by words again. '
-            'Nothing is forgotten.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+    final ok = await confirmRemoveHelper(
+      context,
+      'Recall',
+      'Its file is deleted and memories are matched by words again. '
+          'Nothing is forgotten.',
     );
-    if (ok != true) return;
+    if (!ok) return;
     await runtime.stopRecall();
     final f = ModelCatalog.fileFor(
       ModelCatalog.dirFor(_v),
@@ -76,15 +58,12 @@ class _RecallSettingsState extends State<RecallSettings> {
   @override
   Widget build(BuildContext context) {
     final runtime = AppScope.of(context).runtime;
-    final muted = TextStyle(color: context.palette.textMuted, height: 1.4);
     return ListenableBuilder(
       listenable: runtime,
       builder: (context, _) {
         final name = _v.companionName;
         final ready = ModelCatalog.recallInstalled(_v);
         final recall = ModelCatalog.recall;
-        final downloading = runtime.downloads.containsKey(recall.id);
-        final progress = runtime.downloads[recall.id];
         final status = ready
             ? 'Before each reply, $name is given the memories and the older '
                   'moments of your chat that fit what you said, found by '
@@ -95,88 +74,27 @@ class _RecallSettingsState extends State<RecallSettings> {
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Text(
-              'Memory',
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w600),
-            ),
-            const SizedBox(height: 6),
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Icon(
-                  ready
-                      ? Icons.psychology_outlined
-                      : Icons.manage_search_rounded,
-                  size: 18,
-                  color: context.palette.textMuted,
-                ),
-                const SizedBox(width: 8),
-                Expanded(child: Text(status, style: muted)),
-              ],
+            HelperStatus(
+              title: 'Memory',
+              icon: ready
+                  ? Icons.psychology_outlined
+                  : Icons.manage_search_rounded,
+              status: status,
             ),
             const SizedBox(height: 12),
-            Container(
-              padding: const EdgeInsets.fromLTRB(18, 14, 14, 14),
-              decoration: BoxDecoration(
-                color: context.palette.tile,
-                borderRadius: BorderRadius.circular(14),
-              ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Recall',
-                          style: TextStyle(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                          'A small embedding model (EmbeddingGemma 300M) that '
-                          'turns memories and chat into numbers VoxCordis can '
-                          'compare by meaning, in many languages. It runs on '
-                          'this computer, on the processor, works with any '
-                          'brain, server-hosted ones too, and needs about half '
-                          'a gigabyte of memory while loaded.\n'
-                          '${recall.sizeGb.toStringAsFixed(1)} GB download',
-                          style: TextStyle(
-                            fontSize: 12,
-                            height: 1.45,
-                            color: context.palette.textMuted,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 14),
-                  if (downloading)
-                    Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        SizedBox(
-                          width: 170,
-                          child: DownloadBar(progress: progress),
-                        ),
-                        IconButton(
-                          tooltip: 'Pause download',
-                          onPressed: () => runtime.cancelDownload(recall.id),
-                          icon: const Icon(Icons.pause_rounded),
-                        ),
-                      ],
-                    )
-                  else if (ready)
-                    TextButton(onPressed: _remove, child: const Text('Remove'))
-                  else
-                    OutlinedButton.icon(
-                      onPressed: _download,
-                      icon: const Icon(Icons.download_rounded),
-                      label: const Text('Download'),
-                    ),
-                ],
-              ),
+            HelperModelTile(
+              name: 'Recall',
+              about:
+                  'A small embedding model (EmbeddingGemma 300M) that '
+                  'turns memories and chat into numbers VoxCordis can '
+                  'compare by meaning, in many languages. It runs on '
+                  'this computer, on the processor, works with any '
+                  'brain, server-hosted ones too, and needs about half '
+                  'a gigabyte of memory while loaded.',
+              model: recall,
+              ready: ready,
+              onDownload: _download,
+              onRemove: _remove,
             ),
             if (_error case final error?) ...[
               const SizedBox(height: 8),

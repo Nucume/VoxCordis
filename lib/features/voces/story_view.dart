@@ -10,14 +10,11 @@ import 'package:path/path.dart' as p;
 import '../../app_scope.dart';
 import '../../data/settings.dart';
 import '../../data/voces/story_log.dart';
-import '../../services/logs/app_log.dart';
 import '../../data/voces/voces_library.dart';
 import '../../data/voces/voces_models.dart';
-import '../../services/voces/describer.dart';
-import '../../services/images/picture_info.dart';
 import '../../services/voces/living_cast.dart';
-import '../../services/voces/scene_tags.dart';
 import '../../services/voces/story_engine.dart';
+import '../../services/voces/story_session.dart';
 import '../../services/voces/story_export.dart';
 import '../../services/voces/story_notes.dart';
 import 'story_text.dart';
@@ -314,12 +311,8 @@ class StoryView extends StatefulWidget {
 }
 
 class _StoryViewState extends State<StoryView> {
-  StoryLog? _log;
-  StoryEngine? _engine;
-  var _turns = <StoryTurn>[];
-  var _state = const StoryState();
-  late StorySave _story = widget.story;
-  Object? _error;
+  late final StorySession _s;
+  StreamSubscription<String>? _notices;
 
   final _input = TextEditingController();
   final _inputFocus = FocusNode();
@@ -333,136 +326,70 @@ class _StoryViewState extends State<StoryView> {
   String? _answerer;
   var _answererSet = false;
 
-  /// The reply being written, and by whom.
-  var _busy = false;
-  String? _writer;
-  final _writing = StringBuffer();
-
-  /// Narration since the cast was last tended, people to stow, and
-  /// extras whose sheet is being written.
-  final _newNarration = <String>[];
-  final _toStow = <String>{};
-  final _sheets = <String>{};
-  var _tending = false;
-  StreamSubscription<String>? _stream;
-  Completer<bool>? _streamDone;
-  var _jumpIn = false;
+  /// The composer's dice: the next turn gets a roll (a lie, a sneak…).
+  var _rollNext = false;
 
   VocesLibrary get library => widget.data.library;
   late final _services = AppScope.of(context);
 
+  // The story itself lives in the session, shared with a phone playing it.
+  StoryEngine? get _engine => _s.engine;
+  List<StoryTurn> get _turns => _s.turns;
+  StoryState get _state => _s.state;
+  StorySave get _story => _s.story;
+  Object? get _error => _s.error;
+  bool get _busy => _s.busy;
+  String? get _writer => _s.writer;
+  StringBuffer get _writing => _s.writing;
+  Set<String> get _sheets => _s.sheets;
+  bool get _notesBusy => _s.notesBusy;
+  bool get _drawing => _s.drawing;
+  String? get _recap => _s.recap;
+  bool get _recapping => _s.recapping;
+  bool get _jumpIn => _s.jumpedIn;
+  Future<void> _saveState(StoryState s) => _s.saveState(s);
+
+  var _opened = false;
+  var _seenTurns = 0;
+  var _seenWriting = 0;
+
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _open();
-    });
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_opened) return;
+    _opened = true;
+    _s = _services.openStory(library, widget.story, cast: widget.cast);
+    _seenTurns = _s.turns.length;
+    _s.addListener(_changed);
+    _notices = _s.notices.listen(_say);
+    _toEnd(jump: true);
   }
 
-  Future<void> _open() async {
-    final services = _services;
-    try {
-      final world = await library.storyWorld(widget.story);
-      final log = await services.openStoryLog(widget.story.id);
-      if (!mounted) {
-        await log.close();
-        return;
-      }
-      final engine = StoryEngine(
-        world,
-        mature: services.settings.value.vocesMature,
-      );
-      final saved = (await log.state())['story'];
-      final turns = await log.turns();
-      final StoryState state;
-      if (saved is Map) {
-        state = StoryState.fromJson(saved.cast<String, Object?>());
-      } else {
-        state = StoryState(present: engine.startingCast(widget.cast));
-        await log.setState('story', state.toJson());
-      }
-      setState(() {
-        _log = log;
-        _engine = engine;
-        _state = state;
-        _turns = turns;
-      });
-      final now = DateTime.now();
-      if (StoryEngine.wantsRecap(
-        turns,
-        now,
-        lastRecap: _recappedAt[widget.story.id],
-      )) {
-        _recappedAt[widget.story.id] = now;
-        unawaited(_makeRecap());
-      }
-      if (turns.isEmpty) {
-        final opening = world.world.openings
-            .where((o) => o.title == widget.story.opening)
-            .firstOrNull;
-        if (opening != null && opening.text.trim().isNotEmpty) {
-          final split = StoryEngine.splitPlace(opening.text);
-          if (split.place != null) await _setPlace(split.place!);
-          await _add(TurnKind.narrator, split.text);
-        } else {
-          await _run(null, chain: false);
-        }
-      }
+  /// Follows the story to its end as turns arrive or a reply grows.
+  void _changed() {
+    if (!mounted) return;
+    setState(() {});
+    final turns = _s.turns.length;
+    final writing = _s.writing.length;
+    if (turns != _seenTurns) {
+      _toEnd(jump: _seenTurns == 0);
+    } else if (writing > _seenWriting) {
       _toEnd(jump: true);
-    } on Object catch (e) {
-      if (mounted) setState(() => _error = e);
     }
+    _seenTurns = turns;
+    _seenWriting = writing;
   }
 
   @override
   void dispose() {
-    _stream?.cancel();
-    _log?.close();
+    _s.removeListener(_changed);
+    _notices?.cancel();
+    unawaited(_services.releaseStory(_s));
     _input.dispose();
     _inputFocus.dispose();
     _scroll.dispose();
     widget.data.reload();
     super.dispose();
-  }
-
-  Future<void> _saveState(StoryState s) async {
-    setState(() => _state = s);
-    await _log?.setState('story', s.toJson());
-  }
-
-  Future<void> _setPlace(String place) async {
-    await _saveState(_state.copyWith(place: place));
-  }
-
-  Future<StoryTurn> _add(
-    TurnKind kind,
-    String text, {
-    String? speakerId,
-    String speaker = '',
-  }) async {
-    final turn = await _log!.add(
-      kind,
-      text,
-      speakerId: speakerId,
-      speaker: speaker,
-    );
-    if (!mounted) return turn;
-    setState(() => _turns = [..._turns, turn]);
-    if (_state.extras.isNotEmpty && !kind.aside) {
-      unawaited(
-        _saveState(
-          _state.copyWith(extras: LivingCast.count(_state.extras, turn)),
-        ),
-      );
-    }
-    _story = _story.copyWith(
-      lastPlayed: DateTime.now(),
-      turns: _turns.where((t) => !t.kind.aside).length,
-      place: _state.place,
-    );
-    unawaited(library.saveStory(_story));
-    _toEnd();
-    return turn;
   }
 
   void _toEnd({bool jump = false}) {
@@ -510,98 +437,22 @@ class _StoryViewState extends State<StoryView> {
     final text = _input.text.trim();
     if (text.isEmpty || _busy) return;
     _input.clear();
-    final engine = _engine!;
-    final before = _turns;
-    final turn = await _add(_mode.kind, text);
-    if (_rollNext || Fortune.rollsOnItsOwn(turn, _story.difficulty)) {
-      await _saveState(
-        _state.copyWith(rolls: {..._state.rolls, turn.id: Fortune.roll()}),
-      );
-    }
-    if (_rollNext && mounted) setState(() => _rollNext = false);
-    final who = _answererSet
-        ? _answerer
-        : engine.whoAnswers(turn, before, _state);
-    await _run(who);
+    final roll = _rollNext;
+    if (_rollNext) setState(() => _rollNext = false);
+    await _s.send(
+      _mode.kind,
+      text,
+      roll: roll,
+      picked: _answererSet,
+      answerer: _answerer,
+    );
   }
 
   /// "Continue": the story goes on without the human.
-  Future<void> _continue() async {
-    if (_busy) return;
-    final who = _answererSet
-        ? _answerer
-        : _engine!.whoContinues(_turns, _state);
-    await _run(who);
-  }
+  Future<void> _continue() =>
+      _s.continueStory(picked: _answererSet, answerer: _answerer);
 
-  /// Writes [first]'s reply, then lets those it names answer, up to the
-  /// chain's length or until the human jumps in.
-  Future<void> _run(String? first, {bool chain = true}) async {
-    setState(() {
-      _busy = true;
-      _jumpIn = false;
-    });
-    try {
-      String? speaker = first;
-      var left = chain ? _state.chain : 0;
-      while (mounted) {
-        final reply = await _reply(speaker);
-        if (reply == null || _jumpIn || left-- <= 0) break;
-        final next = _engine!.chainsTo(reply, speaker, _state);
-        if (next == null) break;
-        speaker = next;
-      }
-    } finally {
-      if (mounted) {
-        setState(() {
-          _busy = false;
-          _writer = null;
-        });
-        unawaited(_tendCast());
-        unawaited(_keepNotes());
-      }
-    }
-  }
-
-  /// The composer's dice: the next turn gets a roll (a lie, a sneak…).
-  var _rollNext = false;
-  var _notesBusy = false;
-
-  /// Brings the story notes up to date every [StoryNotes.every] told
-  /// turns, or now when [force]. Waits for replies; uses the chat model.
-  Future<void> _keepNotes({bool force = false}) async {
-    final engine = _engine;
-    if (engine == null || _notesBusy || _busy || !mounted) return;
-    final fresh = [
-      for (final t in _turns)
-        if (t.id > _state.notesAt && t.id >= 0 && !t.kind.aside) t,
-    ];
-    if (fresh.isEmpty || (!force && fresh.length < StoryNotes.every)) return;
-    setState(() => _notesBusy = true);
-    try {
-      final reply = await _services.askModel(
-        StoryNotes.instructions(engine.playerName),
-        StoryNotes.brief(
-          _state.notes,
-          engine.playerName,
-          engine.transcript(fresh),
-        ),
-        maxTokens: 900,
-        what: 'Story notes',
-        exact: true,
-      );
-      final notes = reply == null ? null : StoryNotes.parse(reply);
-      if (notes != null && mounted) {
-        await _saveState(_state.copyWith(notes: notes, notesAt: fresh.last.id));
-      } else if (force && mounted) {
-        _say('The notes couldn\'t be updated this time.');
-      }
-    } on Object catch (e) {
-      _services.log.add(LogKind.errors, 'Story notes failed: $e');
-    } finally {
-      if (mounted) setState(() => _notesBusy = false);
-    }
-  }
+  Future<void> _keepNotes({bool force = false}) => _s.keepNotes(force: force);
 
   Future<void> _editNotes() async {
     final n = _state.notes;
@@ -666,170 +517,6 @@ class _StoryViewState extends State<StoryView> {
     feelings.dispose();
   }
 
-  /// Between turns: notices people the narrator named, gives a sheet to
-  /// the ones who came up often or were talked to, and notes what those
-  /// who left went through. Uses the chat model, so it waits for replies.
-  Future<void> _tendCast() async {
-    if (_tending || !mounted) return;
-    _tending = true;
-    try {
-      while (mounted && !_busy && _newNarration.isNotEmpty) {
-        final text = _newNarration.join('\n\n');
-        _newNarration.clear();
-        await _findExtras(text);
-      }
-      for (final id in [..._toStow]) {
-        if (!mounted || _busy) break;
-        _toStow.remove(id);
-        await _stow(id);
-      }
-      for (final e in [..._state.extras]) {
-        if (!mounted || _busy) break;
-        if (LivingCast.ripe(e)) await _promote(e);
-      }
-    } finally {
-      _tending = false;
-    }
-  }
-
-  Set<String> get _known => {
-    _engine!.playerName,
-    for (final c in _engine!.world.cast.values) c.name,
-    for (final e in _state.extras) e.name,
-  };
-
-  Future<void> _findExtras(String text) async {
-    final known = _known;
-    if (LivingCast.candidates(text, known).isEmpty) return;
-    try {
-      final reply = await _services.askModel(
-        LivingCast.finderInstructions,
-        LivingCast.finderBrief(text, known.toList()),
-        maxTokens: 400,
-        what: 'Who is new in the story',
-        exact: true,
-      );
-      if (reply == null || !mounted) return;
-      final found = [
-        for (final e in LivingCast.parseFound(reply, known))
-          if (LivingCast.names(text, e.name)) e,
-      ];
-      if (found.isEmpty) return;
-      await _saveState(
-        _state.copyWith(extras: LivingCast.merge(_state.extras, found)),
-      );
-    } on Object catch (e) {
-      _note('Voces Mundi couldn\'t look for new people in the story', e);
-    }
-  }
-
-  void _note(String what, Object e) =>
-      _services.log.add(LogKind.errors, what, details: '$e', error: true);
-
-  /// Gives extra [e] a sheet written from their moments in the story; from
-  /// then on they speak for themselves.
-  Future<void> _promote(Extra e) async {
-    if (!_sheets.add(e.name)) return;
-    setState(() {});
-    try {
-      final engine = _engine!;
-      final moments = LivingCast.excerpts(
-        e.name,
-        _turns,
-        playerName: engine.playerName,
-      );
-      final reply = await _services.askModel(
-        CharacterDescriber.instructions(
-          adult: engine.mature && engine.world.world.adult,
-        ),
-        CharacterDescriber.brief(
-          LivingCast.sheetIdea(e, moments),
-          adult: engine.mature && engine.world.world.adult,
-        ),
-        what: 'A sheet for someone met in the story',
-      );
-      final d = reply == null ? null : CharacterDescriber.parse(reply);
-      if (d == null || !mounted) return;
-      final c = await library.saveStoryCharacter(
-        _story,
-        VocesCharacter(
-          id: '',
-          name: e.name,
-          line: d.line.isEmpty ? e.line : d.line,
-          pronouns: d.pronouns.isEmpty ? null : d.pronouns,
-          tags: d.traits,
-          looksTags: d.looksTags,
-          sections: d.sections,
-          source: 'Met in "${_story.title}"',
-          created: DateTime.now(),
-        ),
-      );
-      if (!mounted) return;
-      engine.world.cast[c.id] = c;
-      final present = _state.present.contains(c.id)
-          ? _state.present
-          : [..._state.present, c.id];
-      await _saveState(
-        _state.copyWith(
-          present: present,
-          extras: [
-            for (final x in _state.extras)
-              if (x.name != e.name) x,
-          ],
-        ),
-      );
-      await _add(
-        TurnKind.scene,
-        '${c.name} now speaks for themselves',
-        speakerId: c.id,
-      );
-    } on Object catch (err) {
-      _note('Voces Mundi couldn\'t write a sheet for ${e.name}', err);
-    } finally {
-      _sheets.remove(e.name);
-      if (mounted) setState(() {});
-    }
-  }
-
-  /// Notes on [id]'s sheet what they went through, so they come back as
-  /// they left.
-  Future<void> _stow(String id) async {
-    final engine = _engine!;
-    final c = engine.world.cast[id];
-    if (c == null) return;
-    final moments = LivingCast.excerpts(
-      c.name,
-      _turns,
-      playerName: engine.playerName,
-    );
-    if (moments.isEmpty) return;
-    try {
-      final reply = await _services.askModel(
-        LivingCast.pastInstructions,
-        LivingCast.pastBrief(c.name, moments),
-        maxTokens: 400,
-        what: 'A character\'s past',
-      );
-      final past = reply
-          ?.replaceAll(RegExp(r'<think>[\s\S]*?</think>'), '')
-          .trim();
-      if (past == null || past.isEmpty || !mounted) return;
-      final saved = await library.saveStoryCharacter(
-        _story,
-        c.copyWith(
-          sections: [
-            for (final s in c.sections)
-              if (s.heading != LivingCast.pastHeading) s,
-            SheetSection(LivingCast.pastHeading, past),
-          ],
-        ),
-      );
-      engine.world.cast[id] = saved;
-    } on Object catch (e) {
-      _note('Voces Mundi couldn\'t note what ${c.name} went through', e);
-    }
-  }
-
   /// Copies a story's character into Characters, for other worlds.
   Future<void> _saveToCharacters(String id) async {
     final c = _engine!.world.cast[id];
@@ -849,144 +536,13 @@ class _StoryViewState extends State<StoryView> {
     );
   }
 
-  /// One reply by [speaker] (null: the narrator); its text once kept,
-  /// null when it was stopped or failed.
-  Future<String?> _reply(String? speaker) async {
-    final engine = _engine!;
-    CastChange? change;
-    if (speaker == null) {
-      change = engine.rollChange(_state);
-      if (change != null) {
-        final present = [..._state.present];
-        change.arrives
-            ? present.add(change.who.id)
-            : present.remove(change.who.id);
-        await _saveState(_state.copyWith(present: present));
-        await _add(TurnKind.scene, change.line, speakerId: change.who.id);
-        if (!change.arrives) _toStow.add(change.who.id);
-      }
-    }
-    final prompt = engine.prompt(
-      speaker,
-      _turns,
-      _state,
-      change: change,
-      byMeaning: await _loreByMeaning(),
-    );
-    if (!mounted) return null;
-    setState(() {
-      _writer = speaker;
-      _writing.clear();
-    });
-    final finished = Completer<bool>();
-    _streamDone = finished;
-    Object? failed;
-    _stream = _services
-        .streamModel(prompt.system, prompt.user, stop: prompt.stop)
-        .listen(
-          (piece) {
-            if (!mounted) return;
-            setState(() => _writing.write(piece));
-            _toEnd(jump: true);
-          },
-          onError: (Object e) {
-            failed = e;
-            if (!finished.isCompleted) finished.complete(false);
-          },
-          onDone: () {
-            if (!finished.isCompleted) finished.complete(true);
-          },
-          cancelOnError: true,
-        );
-    final whole = await finished.future;
-    _stream = null;
-    if (!mounted) return null;
-    var text = engine.clean(_writing.toString(), speaker);
-    setState(() => _writing.clear());
-    if (failed != null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('The model stopped: ${_short(failed!)}')),
-      );
-    }
-    if (speaker == null) {
-      final split = StoryEngine.splitPlace(text);
-      if (split.place != null) await _setPlace(split.place!);
-      text = split.text;
-    }
-    if (text.isEmpty) return null;
-    await _add(
-      speaker == null ? TurnKind.narrator : TurnKind.character,
-      text,
-      speakerId: speaker,
-      speaker: speaker == null ? '' : engine.nameOf(speaker),
-    );
-    if (speaker == null) _newNarration.add(text);
-    return whole && failed == null ? text : null;
-  }
+  Future<void> _promote(Extra e) => _s.promote(e);
 
-  /// Lore entries close in meaning to the last few turns, found with the
-  /// Recall model when it's downloaded; none otherwise, or on any trouble
-  /// (key words still work then).
-  Future<List<LoreEntry>> _loreByMeaning() async {
-    final engine = _engine!;
-    final entries = engine.loreEntries;
-    final recall = _services.recall;
-    final text = engine.recentText(_turns);
-    if (entries.isEmpty || text.trim().isEmpty || !recall.available()) {
-      return const [];
-    }
-    try {
-      final q =
-          (await recall.embedder
-                  .embed([text], query: true)
-                  .timeout(const Duration(seconds: 20)))
-              .single;
-      final scores = await recall
-          .similarity(q, [for (final e in entries) '${e.title}: ${e.text}'])
-          .timeout(const Duration(seconds: 60));
-      final order = [
-        for (var i = 0; i < entries.length; i++)
-          if (scores[i] >= StoryEngine.loreMinScore) i,
-      ]..sort((a, b) => scores[b].compareTo(scores[a]));
-      return [
-        for (final i in order.take(StoryEngine.loreByMeaning)) entries[i],
-      ];
-    } on Object catch (e) {
-      _services.log.add(
-        LogKind.errors,
-        'Voces Mundi couldn\'t look up lore by meaning; key words still work',
-        details: '$e',
-        error: true,
-      );
-      return const [];
-    }
-  }
+  static String _short(Object e) => StorySession.short(e);
 
-  static String _short(Object e) {
-    final s = e.toString();
-    return s.length > 160 ? '${s.substring(0, 160)}…' : s;
-  }
+  void _stop() => _s.stop();
 
-  /// Stops the reply being written; what's there so far is kept.
-  void _stop() {
-    _jumpIn = true;
-    _stream?.cancel();
-    final done = _streamDone;
-    if (done != null && !done.isCompleted) done.complete(false);
-  }
-
-  /// Writes the last reply again.
-  Future<void> _retry() async {
-    final last = _turns.lastOrNull;
-    if (last == null || _busy || last.kind.byHuman) return;
-    if (last.kind.aside) return;
-    await _log!.dropFrom(last.id);
-    setState(() => _turns = _turns.where((t) => t.id < last.id).toList());
-    await _run(
-      last.kind == TurnKind.character ? last.speakerId : null,
-      chain: false,
-    );
-  }
+  Future<void> _retry() => _s.retry();
 
   Future<void> _edit(StoryTurn turn) async {
     final c = TextEditingController(text: turn.text);
@@ -1017,12 +573,7 @@ class _StoryViewState extends State<StoryView> {
     );
     c.dispose();
     if (text == null || text.isEmpty || !mounted) return;
-    await _log!.edit(turn.id, text);
-    setState(
-      () => _turns = [
-        for (final t in _turns) t.id == turn.id ? t.copyWith(text: text) : t,
-      ],
-    );
+    await _s.edit(turn.id, text);
   }
 
   Future<void> _rewind(StoryTurn turn) async {
@@ -1047,53 +598,10 @@ class _StoryViewState extends State<StoryView> {
       ),
     );
     if (ok != true || !mounted) return;
-    await _log!.dropFrom(turn.id);
-    setState(() => _turns = _turns.where((t) => t.id < turn.id).toList());
+    await _s.rewind(turn.id);
   }
 
-  var _drawing = false;
-
-  /// "Previously on…": written when a story is opened after a break, or
-  /// asked for from the menu; shown above the composer until closed.
-  String? _recap;
-  var _recapping = false;
-
-  /// When each story last opened with a recap since VoxCordis started.
-  static final _recappedAt = <String, DateTime>{};
-
-  Future<void> _makeRecap() async {
-    final engine = _engine;
-    if (engine == null || _recapping || _busy) return;
-    setState(() {
-      _recapping = true;
-      _recap = null;
-    });
-    String? text;
-    try {
-      final ask = engine.recap(_turns);
-      final reply = await _services.askModel(
-        ask.system,
-        ask.user,
-        maxTokens: 900,
-        what: 'Previously on…',
-      );
-      text = reply
-          ?.replaceAll(RegExp(r'<think>[\s\S]*?</think>'), '')
-          .replaceFirst(
-            RegExp(r'^\W*previously on[^\n]*\n', caseSensitive: false),
-            '',
-          )
-          .trim();
-    } on Object catch (e) {
-      _services.log.add(LogKind.errors, 'Recap failed: $e');
-    }
-    if (!mounted) return;
-    setState(() {
-      _recapping = false;
-      _recap = text == null || text.isEmpty ? null : text;
-    });
-    if (_recap == null) _say('The recap couldn\'t be written this time.');
-  }
+  Future<void> _makeRecap() => _s.makeRecap();
 
   Widget _recapCard(BuildContext context) {
     final palette = context.palette;
@@ -1129,10 +637,7 @@ class _StoryViewState extends State<StoryView> {
                     IconButton(
                       tooltip: 'Close',
                       visualDensity: VisualDensity.compact,
-                      onPressed: () => setState(() {
-                        _recap = null;
-                        _recapping = false;
-                      }),
+                      onPressed: _s.closeRecap,
                       icon: const Icon(Icons.close_rounded, size: 18),
                     ),
                   ],
@@ -1203,9 +708,8 @@ class _StoryViewState extends State<StoryView> {
       _say('Turn on drawing in Settings → Images first.');
       return;
     }
-    setState(() => _drawing = true);
+    _s.setDrawing(true);
     try {
-      final adult = engine.mature && engine.world.world.adult;
       final messenger = ScaffoldMessenger.maybeOf(context);
       messenger?.showSnackBar(
         const SnackBar(
@@ -1213,22 +717,7 @@ class _StoryViewState extends State<StoryView> {
           duration: Duration(minutes: 2),
         ),
       );
-      String prompt;
-      try {
-        final reply = await services.askModel(
-          SceneTags.instructions(adult: adult),
-          SceneTags.brief(engine, _turns, upTo, place: _state.place),
-          maxTokens: 1200,
-          what: 'Scene tags',
-          exact: true,
-        );
-        prompt = reply == null
-            ? ''
-            : SceneTags.prompt(reply, engine.world.cast.values);
-      } on Object catch (e) {
-        services.log.add(LogKind.errors, 'Scene tags failed: $e');
-        prompt = '';
-      }
+      final prompt = await _s.sceneTags(upTo);
       messenger?.hideCurrentSnackBar();
       if (!mounted) return;
       if (prompt.isEmpty) {
@@ -1242,30 +731,11 @@ class _StoryViewState extends State<StoryView> {
           folder: library.drawingFolder,
         ),
       );
-      if (kept != null) {
-        final dir = Directory(p.join(engine.world.folder, 'pictures'));
-        await dir.create(recursive: true);
-        final to = File(
-          p.join(
-            dir.path,
-            'scene-${DateTime.now().millisecondsSinceEpoch}'
-            '${p.extension(kept.path)}',
-          ),
-        );
-        await kept.copy(to.path);
-        await PictureInfo.move(kept, to);
-        await kept.delete().then((_) {}, onError: (_) {});
-        if (mounted) {
-          await _add(
-            TurnKind.picture,
-            p.relative(to.path, from: engine.world.folder),
-          );
-        }
-      }
+      if (kept != null) await _s.addScenePicture(kept);
     } finally {
       // Drawing let the chat model go; have it ready for the next turn.
       services.runtime.ensureReady(services.settings.value).ignore();
-      if (mounted) setState(() => _drawing = false);
+      _s.setDrawing(false);
     }
   }
 
@@ -1462,15 +932,8 @@ class _StoryViewState extends State<StoryView> {
       lorebooks: pick.lorebooks,
       cast: pick.cast,
     );
-    final world = await library.storyWorld(saved);
+    await _s.useWorldUpdate(saved);
     if (!mounted) return;
-    setState(() {
-      _story = saved;
-      _engine = StoryEngine(
-        world,
-        mature: _services.settings.value.vocesMature,
-      );
-    });
     _say('Updated. The story uses the new world from the next turn.');
   }
 
@@ -1481,35 +944,15 @@ class _StoryViewState extends State<StoryView> {
       body: 'The whole story goes, for good. The world and characters stay.',
     );
     if (!ok || !mounted) return;
-    final services = _services;
-    _stop();
-    await _log?.close();
-    _log = null;
-    await services.deleteStoryLog(_story.id);
-    await library.deleteStory(_story.id);
+    await _s.deleteStory();
     widget.done(null);
   }
 
-  Future<void> _bringIn(VocesCharacter c) async {
-    if (_state.present.contains(c.id)) return;
-    await _saveState(_state.copyWith(present: [..._state.present, c.id]));
-    await _add(TurnKind.scene, '${c.name} arrives', speakerId: c.id);
-  }
+  Future<void> _bringIn(VocesCharacter c) => _s.bringIn(c.id);
 
   Future<void> _sendAway(String id) async {
-    final c = _engine!.world.cast[id];
-    await _saveState(
-      _state.copyWith(
-        present: [..._state.present]..remove(id),
-        pinned: {..._state.pinned}..remove(id),
-      ),
-    );
     if (_answerer == id) _answererSet = false;
-    if (c != null) {
-      await _add(TurnKind.scene, '${c.name} leaves', speakerId: id);
-      _toStow.add(id);
-      unawaited(_tendCast());
-    }
+    await _s.sendAway(id);
   }
 
   @override
@@ -1860,7 +1303,7 @@ class _StoryViewState extends State<StoryView> {
                     VocesPill(
                       _jumpIn ? 'Your turn next' : 'Jump in',
                       on: _jumpIn,
-                      onTap: () => setState(() => _jumpIn = true),
+                      onTap: _s.jumpIn,
                     ),
                   PopupMenuButton<String?>(
                     tooltip: 'Who answers next',
@@ -1904,7 +1347,7 @@ class _StoryViewState extends State<StoryView> {
                     maxLines: 6,
                     onChanged: (_) {
                       // Typing while others talk: the human is next.
-                      if (_busy && !_jumpIn) setState(() => _jumpIn = true);
+                      if (_busy && !_jumpIn) _s.jumpIn();
                     },
                     decoration: InputDecoration(
                       hintText: _mode.hint,
@@ -2023,6 +1466,9 @@ class _TurnTileState extends State<_TurnTile> {
                   child: Image.file(
                     file,
                     fit: BoxFit.contain,
+                    // At most 420 high on screen: twice that keeps it
+                    // sharp without holding a huge picture whole.
+                    cacheHeight: 840,
                     errorBuilder: (_, _, _) => Container(
                       padding: const EdgeInsets.all(14),
                       color: palette.tile,
@@ -2602,6 +2048,8 @@ class _Backdrop extends StatelessWidget {
             child: Image.file(
               file,
               fit: BoxFit.cover,
+              // Blurred and faint, so it never needs its full size.
+              cacheWidth: 1280,
               errorBuilder: (_, _, _) => const SizedBox.shrink(),
             ),
           ),

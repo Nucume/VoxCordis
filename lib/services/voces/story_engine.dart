@@ -459,6 +459,28 @@ class StoryEngine {
     user: 'The story so far:\n\n${transcript(turns)}\n\nWrite the recap.',
   );
 
+  /// [turns] in order, in parts that each fit [window] as a transcript: a
+  /// long stretch (a chat brought in from Soulkyn) is read a part at a
+  /// time.
+  static List<List<StoryTurn>> parts(List<StoryTurn> turns) {
+    final out = <List<StoryTurn>>[];
+    var part = <StoryTurn>[];
+    var size = 0;
+    for (final t in turns) {
+      if (t.kind == TurnKind.picture) continue;
+      final n = t.text.length + 40;
+      if (part.isNotEmpty && size + n > window) {
+        out.add(part);
+        part = [];
+        size = 0;
+      }
+      part.add(t);
+      size += n;
+    }
+    if (part.isNotEmpty) out.add(part);
+    return out;
+  }
+
   /// The story as lines, newest last, cut to [window] characters.
   String transcript(List<StoryTurn> turns) {
     final lines = <String>[];

@@ -22,15 +22,6 @@ class CompanionFolder {
 
   /// Opens the folder in Explorer, Finder, Dolphin, Nautilus…
   Future<bool> openInFileManager() => launchUrl(Uri.directory(root));
-
-  /// Resolves a path the model gave, refusing anything outside [root].
-  String resolveInside(String relative) {
-    final full = p.normalize(p.join(root, relative));
-    if (!p.isWithin(root, full) && full != p.normalize(root)) {
-      throw FileSystemException('Outside the companion folder', relative);
-    }
-    return full;
-  }
 }
 
 /// The user's home folder.

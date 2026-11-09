@@ -77,9 +77,9 @@ is installed.
 When you add a companion, **Import a character** accepts:
 
 - **Nemini exports** (ZIP): memories, chat history, notes, reminders and automations.
-- **Soulkyn characters**, by pasting a link.
+- **Soulkyn characters**, by pasting a link, and **Soulkyn chats** (.csv), into a companion or as a Voces Mundi story.
 - **Character Cards** (V1 to V3, JSON or PNG).
-- **VoxCordis exports**, from the companion menu's **Export**.
+- **VoxCordis exports**, from **Export** in Settings → General.
 
 Imported text is treated as information, never as instructions.
 

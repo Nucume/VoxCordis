@@ -22,7 +22,11 @@ class RuntimeStatus extends StatelessWidget {
     final services = AppScope.of(context);
     final runtime = services.runtime;
     return ListenableBuilder(
-      listenable: Listenable.merge([runtime, services.rewriting]),
+      listenable: Listenable.merge([
+        runtime,
+        services.rewriting,
+        services.learning,
+      ]),
       builder: (context, _) {
         final rewrite = services.rewriting.value;
         final failed = rewrite?.problem != null;
@@ -40,15 +44,31 @@ class RuntimeStatus extends StatelessWidget {
                 RuntimeState.idle => context.palette.textMuted,
                 _ => Colors.amberAccent,
               };
+        final learn = services.learning.value;
+        final learning =
+            learn != null &&
+            !rewriting &&
+            !failed &&
+            (runtime.state == RuntimeState.ready ||
+                runtime.state == RuntimeState.external);
         final busy =
             runtime.state == RuntimeState.installing ||
             runtime.state == RuntimeState.loading ||
-            rewriting;
-        final label = rewriting || failed ? rewrite!.label : runtime.statusText;
+            rewriting ||
+            learning;
+        final label = rewriting || failed
+            ? rewrite!.label
+            : learning
+            ? learn
+            : runtime.statusText;
         final detail = rewriting
             ? 'Rewriting the imported character in '
                   '${services.settings.value.companionName}\'s own words. '
                   'Replies may be slower until it is done.'
+            : learning
+            ? '${services.settings.value.companionName} is reading the '
+                  'imported chat for things worth remembering. Replies may '
+                  'be slower until it is done.'
             : failed
             ? '${rewrite!.problem}\nThe original is kept. Tap to try again.'
             : runtime.error ??

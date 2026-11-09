@@ -131,6 +131,13 @@ publish releases to a separate public repository:
 4. In the public repository, create the environment `release` (required
    reviewer: the maintainer, deployment tags: `v*`) and save the secret
    `RELEASE_SIGNING_KEY` in it, not as a repository secret.
+5. In the public repository, save the Google sign-in client (the "Desktop
+   app" client of the Google Cloud project) as the repository secrets
+   `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`. Its `release.yml` passes
+   them to both builds as `--dart-define=GOOGLE_CLIENT_ID=…` and
+   `--dart-define=GOOGLE_CLIENT_SECRET=…`. Without them a release has no
+   built-in Google sign-in, and people have to load a client file of their
+   own.
 
 Tags then still go to this repository; the pipeline pushes the source and the
 tag to the public one, which builds the app with itself as its update source.
@@ -142,6 +149,13 @@ commit, so every release's source is right next to it (GPL-3.0). This
 repository's history, pull requests and reviews stay private. Workflows are
 left out; the public repository keeps its own `release.yml`, which runs on
 the tag that comes with the commit.
+
+**No secrets in the source.** GitHub's push protection on the public
+repository refuses a push whose files hold a secret it recognises (v0.4.3
+was stopped by the Google client secret), and then nothing is published.
+Build-time values go in as `--dart-define` from the public repository's
+secrets instead; the release job here fails early when the source still
+holds a Google client secret.
 
 ## Installing unsigned builds
 

@@ -21,6 +21,7 @@ import '../settings/model_picker.dart';
 import '../images/soulkyn_download_dialog.dart';
 import 'character_pickers.dart';
 import 'import_step.dart';
+import '../../shell/wordmark.dart';
 
 enum _Step {
   welcome('', Size(560, 440)),
@@ -290,6 +291,15 @@ class _SetupWizardState extends State<SetupWizard> {
       nextDb: db,
     );
     services.addingCompanion.value = false;
+    _learnChat(services, imported);
+  }
+
+  /// Has the new companion read the Soulkyn chat it came with, when the
+  /// human asked for that on the review step.
+  static void _learnChat(AppServices services, ImportedCharacter? imported) {
+    final chat = imported?.soulkynChat;
+    if (chat == null || !imported!.learnChat) return;
+    services.learnFromChat(chat).ignore();
   }
 
   /// The portrait chosen in setup is the companion's avatar in its folder
@@ -346,6 +356,7 @@ class _SetupWizardState extends State<SetupWizard> {
     await services.settings.update(next);
     services.runtime.ensureReady(next).ignore();
     services.rewriteIfAsked().ignore();
+    _learnChat(services, imported);
   }
 
   void _dropGallery() {
@@ -466,21 +477,7 @@ class _SetupWizardState extends State<SetupWizard> {
           child: Image.asset(AppTheme.heartMark, height: 110),
         ),
         const SizedBox(height: 24),
-        const Text.rich(
-          TextSpan(
-            children: [
-              TextSpan(
-                text: 'VOX ',
-                style: TextStyle(fontWeight: FontWeight.w800),
-              ),
-              TextSpan(
-                text: 'CORDIS',
-                style: TextStyle(fontWeight: FontWeight.w300),
-              ),
-            ],
-          ),
-          style: TextStyle(fontSize: 30, letterSpacing: 5),
-        ),
+        const WordmarkText(size: 30, spacing: 5),
         const SizedBox(height: 12),
         Text(
           _adding

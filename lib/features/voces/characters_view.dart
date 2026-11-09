@@ -615,13 +615,13 @@ class _CharacterEditorState extends State<_CharacterEditor> {
   Future<String?> _describe(String idea) {
     final services = AppScope.of(context);
     return describeError(() async {
-      final reply = await services.askModel(
+      final reply = await services.models.ask(
         CharacterDescriber.instructions(adult: _describeAdult),
         CharacterDescriber.brief(idea, adult: _describeAdult),
         maxTokens: 1600,
         what: 'Describe the character',
       );
-      final got = reply == null ? null : CharacterDescriber.parse(reply);
+      final got = CharacterDescriber.parse(reply);
       if (got == null) return 'The model gave nothing usable. Try again.';
       if (!mounted) return null;
       setState(() {
@@ -660,14 +660,14 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     final services = AppScope.of(context);
     setState(() => _tagging = true);
     final error = await describeError(() async {
-      final reply = await services.askModel(
+      final reply = await services.models.ask(
         LooksTags.fromLooksInstructions,
         LooksTags.fromLooksBrief(looks, pronouns: _pronouns.text),
         maxTokens: 300,
         what: 'Looks tags',
         exact: true,
       );
-      final tags = reply == null ? const <String>[] : LooksTags.parse(reply);
+      final tags = LooksTags.parse(reply);
       if (tags.isEmpty) return 'The model gave no tags. Try again.';
       if (mounted) _looksTags.text = tags.join(', ');
       return null;

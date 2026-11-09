@@ -11,6 +11,9 @@ enum LogKind {
   decisions('Decisions'),
   chat('Chat'),
   drawing('Drawing'),
+
+  /// Phones and other devices coming and going.
+  connections('Connections'),
   errors('Errors');
 
   const LogKind(this.label);

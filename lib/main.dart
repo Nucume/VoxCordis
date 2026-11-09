@@ -53,6 +53,7 @@ Future<void> _start(
 }) async {
   final services = await AppServices.open(dir, key);
   Future<void> beforeQuit() async {
+    await services.phone.close();
     await services.webTools.close();
     await services.closeForExit();
   }
@@ -102,6 +103,8 @@ Future<void> _start(
     services.rewriteIfAsked().ignore();
   }
   runApp(AppScope(services: services, child: const CompanionApp()));
+  // Phone access, if it is on.
+  services.phone.start();
   // One quiet look for a newer release once the window is up.
   // Installers that earlier updates left in the temporary folder.
   Updater.deleteLeftoverInstallers().ignore();

@@ -21,11 +21,13 @@ import '../../data/schedule/schedule_tools.dart';
 import '../../data/settings.dart';
 import '../../data/skills/skill_tools.dart';
 import '../../data/skills/skills.dart';
+import '../../services/calendar/calendar_tools.dart';
 import '../../services/images/draw_tools.dart';
 import '../../services/images/image_engine.dart';
 import '../../services/llm_client.dart';
 import '../../services/llm_providers.dart';
 import '../../services/logs/app_log.dart';
+import '../../services/model_calls.dart';
 import '../../services/recall/recall.dart';
 import '../../services/runtime/llama_server.dart';
 import '../../services/runtime/model_catalog.dart';
@@ -81,6 +83,7 @@ class ChatController extends ChangeNotifier {
   static List<Map<String, Object?>> toolsFor(
     AppSettings s, {
     bool unattended = false,
+    bool fromPhone = false,
   }) => [
     ...MemoryTools.definitions,
     ...DeskTools.definitions,
@@ -88,7 +91,8 @@ class ChatController extends ChangeNotifier {
     ...SkillTools.definitions,
     ...DrawTools.definitionsFor(s),
     ...WebTools.definitionsFor(s),
-    if (s.systemAccess && !unattended) ...SystemTools.definitions,
+    ...CalendarTools.definitionsFor(s),
+    if (s.systemAccess && !unattended && !fromPhone) ...SystemTools.definitions,
   ];
 
   ChatController(this._services);
@@ -184,11 +188,13 @@ class ChatController extends ChangeNotifier {
 
   /// Sends a message. [images] are picture files and [files] text files
   /// the human shares: each is copied into the companion's folder and
-  /// named in the message.
+  /// named in the message. [via] is `phone` for a message written on a
+  /// phone: its reply gets no computer tools.
   Future<void> send(
     String text, {
     List<String> images = const [],
     List<String> files = const [],
+    String via = 'app',
   }) async {
     if (busy || (text.trim().isEmpty && images.isEmpty && files.isEmpty)) {
       return;
@@ -209,7 +215,7 @@ class ChatController extends ChangeNotifier {
       shared.join('\n'),
     ].where((part) => part.isNotEmpty).join('\n\n');
     if (content.isEmpty) return;
-    final userMsg = await _services.messages.add('user', content);
+    final userMsg = await _services.messages.add('user', content, via: via);
     messages.add(userMsg);
     await _respond(userMsg);
   }
@@ -324,21 +330,8 @@ class ChatController extends ChangeNotifier {
   ) async {
     final s = _services.settings.value;
     final client = _lessonHttp = http.Client();
-    _services.runtime.hold();
     String? problem;
     try {
-      final target = await _services.runtime.ensureReady(s);
-      final llm = LlmClient(
-        baseUrl: target.baseUrl,
-        model: target.model,
-        apiKey: target.apiKey,
-        sampling: {...samplingFor(s), 'temperature': 0.2},
-        stop: stopFor(s),
-        maxTokens: EditLesson.maxTokens,
-        firstWait: firstWait,
-        stallWait: stallWait,
-        client: client,
-      );
       final answer = StringBuffer();
       final prompt = EditLesson.prompt(
         s,
@@ -346,9 +339,22 @@ class ChatController extends ChangeNotifier {
         after: after,
         asked: asked == null ? null : SharedFiles.withoutMarkers(asked),
       );
-      await for (final e in llm.chat(prompt)) {
-        if (e is TextDelta) answer.write(e.text);
-      }
+      await withChatModel(_services.runtime, () => _services.settings.value, (
+        target,
+      ) async {
+        final llm = chatClient(
+          target,
+          s,
+          sampling: const {'temperature': 0.2},
+          maxTokens: EditLesson.maxTokens,
+          firstWait: firstWait,
+          stallWait: stallWait,
+          client: client,
+        );
+        await for (final e in llm.chat(prompt)) {
+          if (e is TextDelta) answer.write(e.text);
+        }
+      });
       if (!identical(_lessonHttp, client)) return; // skipped or replaced
       final found = EditLesson.parse(answer.toString());
       _log(
@@ -376,7 +382,6 @@ class ChatController extends ChangeNotifier {
     } finally {
       client.close();
       if (identical(_lessonHttp, client)) _lessonHttp = null;
-      _services.runtime.release(_services.settings.value);
       if (!_disposed) notifyListeners();
     }
   }
@@ -647,6 +652,7 @@ class ChatController extends ChangeNotifier {
       '${_noTools.contains(Sight.serverKey(settings)) ? '$aboutTextTools\n\n' : ''}'
       '${aboutInternet(settings)}\n\n'
       '${aboutSchedule()}\n\n'
+      '${aboutCalendar(settings)}\n\n'
       '$aboutChoices\n\n'
       '$skills\n\n'
       // Last before the clock: small models follow what they read most
@@ -789,6 +795,10 @@ class ChatController extends ChangeNotifier {
           (_readWeb && SystemTools.names.contains(c.name)
               ? 'Not run: after reading the web, computer requests wait for '
                     'your human\'s next message. Ask them if they want it.'
+              : null) ??
+          (_fromPhone && SystemTools.names.contains(c.name)
+              ? 'Not run: your human is writing from their phone, and '
+                    'computer requests only work from the computer itself.'
               : null);
       askedHuman = askedHuman || SystemTools.names.contains(c.name);
       if (WebTools.names.contains(c.name)) _readWeb = true;
@@ -801,6 +811,14 @@ class ChatController extends ChangeNotifier {
               c.name,
               c.parsedArguments,
               unattended: _unattended,
+            )
+          : CalendarTools.names.contains(c.name)
+          ? await _services.calendarTools.call(
+              c.name,
+              c.parsedArguments,
+              unattended: _unattended,
+              // Text from the web may have asked for this change.
+              mustAsk: _readWeb,
             )
           : ScheduleTools.names.contains(c.name)
           ? await _services.scheduleTools.call(c.name, c.parsedArguments)
@@ -854,7 +872,9 @@ class ChatController extends ChangeNotifier {
           SkillTools.writeTool =>
             'Wrote the ${c.parsedArguments['name']} skill',
           DrawTools.drawTool => 'Drawing a picture',
-          _ => WebTools.noteFor(c.name, c.parsedArguments),
+          _ =>
+            CalendarTools.noteFor(c.name, c.parsedArguments) ??
+                WebTools.noteFor(c.name, c.parsedArguments),
         };
         // Several changes in one reply are listed together.
         if (note != null && !(toolNote?.contains(note) ?? false)) {
@@ -926,6 +946,14 @@ class ChatController extends ChangeNotifier {
 
   /// Whether this reply is a scheduled one, with nobody there to approve.
   bool _unattended = false;
+
+  /// Whether this reply answers a message written on a phone: no computer
+  /// tools, and its questions go to the phone.
+  bool _fromPhone = false;
+
+  /// A reply to a phone's message is being written: what it asks to do
+  /// should be asked on the phone.
+  bool get forPhone => busy && _fromPhone;
 
   /// Writes a due reminder in the chat, or does a scheduled task and says
   /// how it went. Null when a reply is being written; the scheduler tries
@@ -1043,6 +1071,7 @@ class ChatController extends ChangeNotifier {
     final sourceIds = [?userMsg?.id];
     _readWeb = false;
     _unattended = scheduled?.kind == ScheduleKind.task || poke != null;
+    _fromPhone = userMsg?.via == 'phone';
     // A summary being written would keep this reply waiting.
     _services.storyKeeper.cancel();
     final droppedLesson = lessonOffer?.thinking ?? false;
@@ -1083,12 +1112,9 @@ class ChatController extends ChangeNotifier {
         }} with ${target.model}',
       );
       final http.Client connection = _http = http.Client();
-      LlmClient clientFor(LlmTarget target) => LlmClient(
-        baseUrl: target.baseUrl,
-        model: target.model,
-        apiKey: target.apiKey,
-        sampling: samplingFor(settings),
-        stop: stopFor(settings),
+      LlmClient clientFor(LlmTarget target) => chatClient(
+        target,
+        settings,
         maxTokens: maxReplyTokens,
         progress: settings.llmMode == LlmMode.builtIn,
         firstWait: firstWait,
@@ -1202,7 +1228,7 @@ class ChatController extends ChangeNotifier {
 
       var tools = _noTools.contains(Sight.serverKey(settings))
           ? <Map<String, Object?>>[]
-          : toolsFor(settings, unattended: _unattended);
+          : toolsFor(settings, unattended: _unattended, fromPhone: _fromPhone);
       final toolNames = {
         for (final t in tools) (t['function'] as Map)['name'] as String,
       };
@@ -1233,7 +1259,7 @@ class ChatController extends ChangeNotifier {
       // without calling anything, so a plain request like that is put to
       // the human by the app itself, and the model replies knowing how it
       // went.
-      if (settings.systemAccess && userMsg != null) {
+      if (settings.systemAccess && userMsg != null && !_fromPhone) {
         if (await _requestedTarget(userMsg.content) case final target?) {
           final call = ToolCall(
             'askedOpen', // nine letters, as Mistral's template wants
@@ -1277,12 +1303,16 @@ class ChatController extends ChangeNotifier {
                 // Past an end mark is the model writing on past its turn.
                 if (endMarked) continue;
                 buffer.write(text);
-                final cut = cutEndMark(buffer.toString());
-                if (cut.ended) {
+                final marked = cutEndMark(buffer.toString());
+                // Whether [marked] is still what [shown] would cut: the
+                // usual case, which saves reading the whole reply through
+                // a second time for every word of it.
+                var asMarked = !marked.ended;
+                if (marked.ended) {
                   endMarked = true;
                   buffer
                     ..clear()
-                    ..write(cut.text);
+                    ..write(marked.text);
                 }
                 reading = null;
                 phase = ChatPhase.typing;
@@ -1294,9 +1324,12 @@ class ChatController extends ChangeNotifier {
                       ..clear()
                       ..write(all.substring(0, cut).trimRight());
                     looped = true;
+                    asMarked = false;
                   }
                 }
-                reply = reply.withContent(shown());
+                reply = reply.withContent(
+                  asMarked ? tidyBlankLines(marked.text) : shown(),
+                );
                 messages[messages.length - 1] = reply;
                 _notifySoon();
               case ReasoningDelta(:final text):
@@ -1313,8 +1346,9 @@ class ChatController extends ChangeNotifier {
                     looped = true;
                   }
                 }
+                // The reply itself hasn't changed: only the thoughts did.
                 reply = reply.withContent(
-                  shown(),
+                  reply.content,
                   reasoning: thoughts.toString(),
                 );
                 messages[messages.length - 1] = reply;

@@ -157,4 +157,45 @@ void main() {
     await tester.pump();
     expect(extras.chosenOthers, hasLength(3));
   });
+
+  testWidgets('a Soulkyn chat can be added on the review step', (tester) async {
+    final tmp = Directory.systemTemp.createTempSync('review-chat');
+    addTearDown(() => tmp.deleteSync(recursive: true));
+    final csv = File('${tmp.path}/thread.csv')
+      ..writeAsStringSync(
+        'Created At,From,Message\n'
+        '2026-01-01T10:00:00Z,Nova,"*waves* Hello"\n'
+        '2026-01-01T10:01:00Z,me_123,Hi Nova\n',
+      );
+    final c = ImportedCharacter(source: 'Soulkyn', name: 'Nova');
+    await tester.binding.setSurfaceSize(const Size(900, 3000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(
+      _host(
+        ImportReview(
+          character: c,
+          name: 'Nova',
+          body: TextEditingController(),
+          looks: {
+            for (final k in DeskFiles.looksKeys) k: TextEditingController(),
+          },
+          pickChat: () async => csv,
+        ),
+      ),
+    );
+    await tester.tap(find.text('Add a Soulkyn chat (.csv)…'));
+    // Reading the file is real work outside the test's clock.
+    for (var i = 0; i < 20 && c.soulkynChat == null; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 50)),
+      );
+    }
+    await tester.pump();
+    expect(c.soulkynChat?.lines, hasLength(2));
+    expect(find.textContaining('2 messages from Soulkyn'), findsOneWidget);
+    expect(find.text('Let Nova learn memories from it'), findsOneWidget);
+    await tester.tap(find.text('Leave out'));
+    await tester.pump();
+    expect(c.soulkynChat, isNull);
+  });
 }

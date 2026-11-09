@@ -103,9 +103,16 @@ void main() {
       path,
       options: OpenDatabaseOptions(
         version: 1,
-        onCreate: (db, _) => db.execute(
-          'CREATE TABLE memories (id TEXT PRIMARY KEY, valid_to TEXT)',
-        ),
+        onCreate: (db, _) async {
+          await db.execute(
+            'CREATE TABLE memories (id TEXT PRIMARY KEY, valid_to TEXT)',
+          );
+          // Version 1 had the chat too, which a later version indexes.
+          await db.execute(
+            'CREATE TABLE messages (id TEXT PRIMARY KEY, '
+            'sort_order INTEGER NOT NULL)',
+          );
+        },
       ),
     );
     await old.close();

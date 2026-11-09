@@ -14,6 +14,10 @@ import '../../data/voces/voces_models.dart';
 import '../../services/import/avatar_download.dart';
 import '../../services/import/imported_character.dart';
 import '../../services/import/voces_import.dart';
+import '../../services/voces/chat_import.dart';
+import '../import/soulkyn_chat_dialog.dart' show readSoulkynChat;
+import 'chat_import_dialog.dart';
+import 'story_view.dart' show playStory;
 import '../../shell/companion_switcher.dart';
 import '../../theme/app_theme.dart';
 import 'characters_view.dart';
@@ -257,11 +261,20 @@ class _VocesHomeState extends State<VocesHome> {
               subtitle: Text('Characters, and RPG or World cards as worlds'),
             ),
           ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(context, 'chat'),
+            child: const ListTile(
+              leading: Icon(Icons.forum_outlined),
+              title: Text('A Soulkyn chat (.csv)'),
+              subtitle: Text('A chat you exported there, as a story to go on'),
+            ),
+          ),
         ],
       ),
     );
     if (how == null || !mounted) return;
     final data = _data!;
+    if (how == 'chat') return _importChat(data);
     try {
       VocesImported? read;
       if (how == 'file') {
@@ -271,7 +284,8 @@ class _VocesHomeState extends State<VocesHome> {
       } else {
         final got = await showDialog<Object>(
           context: context,
-          builder: (_) => SoulkynImportDialog(pickFile: _pickCard),
+          builder: (_) =>
+              SoulkynImportDialog(pickFile: _pickCard, offerChat: false),
         );
         if (got is ImportedCharacter) {
           read = VocesImport.fromCard(null, got);
@@ -303,6 +317,50 @@ class _VocesHomeState extends State<VocesHome> {
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
+  /// A chat exported from Soulkyn, as a story: asks where it goes and who
+  /// the human plays, saves it and opens it.
+  Future<void> _importChat(VocesData data) async {
+    final chat = await readSoulkynChat(context);
+    if (chat == null || !mounted) return;
+    final plan = await showDialog<ChatStoryPlan>(
+      context: context,
+      builder: (_) => ChatStoryDialog(chat: chat, data: data),
+    );
+    if (plan == null || !mounted) return;
+    final services = AppScope.of(context);
+    try {
+      final story = await VocesChatImport.save(
+        chat,
+        data.library,
+        openLog: services.openStoryLog,
+        world: plan.world,
+        narratorLed: plan.how != ChatWorld.character,
+        adult: plan.adult,
+        player: plan.player,
+        title: plan.title,
+      );
+      await data.reload();
+      if (!mounted) return;
+      if (plan.adult && !data.mature()) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'The story is saved. It shows once Mature content is on in '
+              'Settings.',
+            ),
+          ),
+        );
+        return;
+      }
+      await playStory(context, data, story);
+    } on Object catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('The chat couldn\'t be imported: $e')),
+      );
     }
   }
 

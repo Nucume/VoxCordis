@@ -7,6 +7,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import '../../data/desk/desk_files.dart';
 import '../../data/settings.dart';
 import 'imported_character.dart';
+import 'soulkyn_chat.dart';
 
 /// Writes a reviewed import into the companion folder at the end of setup,
 /// before [DeskFiles.ensure] fills in whatever it did not bring.
@@ -50,7 +51,22 @@ class ImportWriter {
     if (c.privacy != null && c.privacy!.trim().isNotEmpty) {
       await put(DeskFiles.privacy, '${c.privacy!.trim()}\n');
     }
-    return await c.nemini?.apply(db: db, folder: folder) ??
+    final brought =
+        await c.nemini?.apply(db: db, folder: folder) ??
         (memories: 0, messages: 0, files: 0, tasks: 0);
+    final chat = c.soulkynChat;
+    if (chat == null) return brought;
+    final added = await SoulkynChatImport.intoCompanion(
+      db,
+      chat,
+      userName: s.userName,
+      now: now,
+    );
+    return (
+      memories: brought.memories,
+      messages: brought.messages + added,
+      files: brought.files,
+      tasks: brought.tasks,
+    );
   }
 }

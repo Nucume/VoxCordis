@@ -10,7 +10,10 @@ favicon), built by a small script with no packages:
 
 - `src/home.html` is the welcome screen and the tour (the app rebuilt for the
   web, with Voxette as the example companion); `build.py` adds the other
-  sections (privacy, download, setting up, the guide, questions) and the footer.
+  sections (Voces Mundi, privacy, download, questions) and the footer.
+- `src/voces.css` styles the Voces Mundi section. Its globe mark takes the
+  Colorway's heart colours, like the heart. Its screenshots are placeholders
+  until there are real stories to show.
 - `src/site.js` holds the theme and Colorways (kept in localStorage as
   `vc-theme` and `vc-way`), the download buttons and the apt/dnf commands.
 - `static/` is copied as is: the Hanken Grotesk font (SIL OFL, see

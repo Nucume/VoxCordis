@@ -81,6 +81,7 @@ code { font-family: var(--mono); font-size: .88em; }
 .no-js .brand .logo, .no-js .brand .bt { opacity: 1; }
 .topnav { display: flex; gap: 26px; font-size: 15px; color: var(--muted); }
 .topnav a { text-decoration: none; } .topnav a:hover { color: var(--ink); }
+@media (max-width: 1000px) { .topnav { gap: 18px; } }
 .tr { display: flex; align-items: center; gap: 6px; }
 .socials { display: flex; gap: 6px; }
 .socials a { width: 36px; height: 36px; display: grid; place-items: center; border-radius: 50%; color: var(--muted); border: 1px solid var(--line); transition: color .2s, border-color .2s; }

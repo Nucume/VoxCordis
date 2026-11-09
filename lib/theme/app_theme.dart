@@ -125,6 +125,44 @@ class AppPalette extends ThemeExtension<AppPalette> {
     rim: rim ?? this.rim,
   );
 
+  // Equal by what it holds: the theme is built afresh on every settings
+  // save, and MaterialApp fades to a theme that isn't equal to the last,
+  // redrawing the whole window on each frame of the fade.
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is AppPalette &&
+          other.background == background &&
+          other.glass == glass &&
+          other.glassBorder == glassBorder &&
+          listEquals(other.glassSheen, glassSheen) &&
+          other.text == text &&
+          other.textMuted == textMuted &&
+          other.tile == tile &&
+          other.bubble == bubble &&
+          other.codeFill == codeFill &&
+          other.glowAlpha == glowAlpha &&
+          other.lightness == lightness &&
+          other.highlight == highlight &&
+          listEquals(other.rim, rim);
+
+  @override
+  int get hashCode => Object.hash(
+    background,
+    glass,
+    glassBorder,
+    Object.hashAll(glassSheen),
+    text,
+    textMuted,
+    tile,
+    bubble,
+    codeFill,
+    glowAlpha,
+    lightness,
+    highlight,
+    Object.hashAll(rim),
+  );
+
   static const dark = AppPalette(
     background: Color(0xFF0E0B16),
     glass: Color(0xD91B1727),

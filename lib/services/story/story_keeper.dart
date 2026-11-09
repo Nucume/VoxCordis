@@ -9,6 +9,7 @@ import '../../features/chat/chat_text.dart';
 import '../../features/chat/prompt_history.dart';
 import '../llm_client.dart';
 import '../logs/app_log.dart';
+import '../model_calls.dart';
 import '../runtime/runtime_controller.dart';
 
 /// Keeps the story so far: as messages age out of the prompt's recent
@@ -112,24 +113,22 @@ class StoryKeeper {
       return;
     }
     final client = _http = http.Client();
-    runtime.hold();
     try {
-      final target = await runtime.ensureReady(s);
-      final llm = LlmClient(
-        baseUrl: target.baseUrl,
-        model: target.model,
-        apiKey: target.apiKey,
-        sampling: {...samplingFor(s), 'temperature': 0.3},
-        stop: stopFor(s),
-        maxTokens: maxTokens,
-        firstWait: const Duration(minutes: 5),
-        stallWait: const Duration(seconds: 90),
-        client: client,
-      );
       final text = StringBuffer();
-      await for (final e in llm.chat(prompt(s, current?.text, turns))) {
-        if (e is TextDelta) text.write(e.text);
-      }
+      await withChatModel(runtime, settings, (target) async {
+        final llm = chatClient(
+          target,
+          s,
+          sampling: const {'temperature': 0.3},
+          maxTokens: maxTokens,
+          firstWait: const Duration(minutes: 5),
+          stallWait: const Duration(seconds: 90),
+          client: client,
+        );
+        await for (final e in llm.chat(prompt(s, current?.text, turns))) {
+          if (e is TextDelta) text.write(e.text);
+        }
+      });
       final summary = tidyBlankLines(cutEndMark(text.toString()).text).trim();
       if (summary.isEmpty) {
         log?.add(
@@ -158,7 +157,6 @@ class StoryKeeper {
     } finally {
       client.close();
       if (identical(_http, client)) _http = null;
-      runtime.release(settings());
     }
   }
 

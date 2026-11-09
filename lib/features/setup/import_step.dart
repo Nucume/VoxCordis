@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../../data/desk/desk_files.dart';
 import '../../services/import/avatar_download.dart';
@@ -11,6 +12,7 @@ import '../../services/import/character_card.dart';
 import '../../services/import/imported_character.dart';
 import '../../services/import/nemini_import.dart';
 import '../../services/import/soulkyn_browser.dart';
+import '../../services/import/soulkyn_chat.dart';
 import '../../services/import/soulkyn_link.dart';
 import '../../services/import/untrusted_text.dart';
 import '../../services/system/system_tools.dart';
@@ -27,10 +29,10 @@ enum ImportSource {
   ),
   soulkyn(
     'Soulkyn',
-    'Paste the link to a character\'s page, or use the exporter '
-        'bookmarklet\'s .json.',
+    'Paste the link to a character\'s page, or pick a chat you exported '
+        'there (.csv) to bring your conversation along.',
     Icons.auto_awesome_outlined,
-    XTypeGroup(label: 'Soulkyn export', extensions: ['json']),
+    XTypeGroup(label: 'Soulkyn export', extensions: ['json', 'csv']),
   ),
   card(
     'Character card',
@@ -49,9 +51,12 @@ enum ImportSource {
 
   /// Reads [file]. Cards and Soulkyn files are told apart by what is in
   /// them, so picking the wrong one of those two still works.
-  Future<ImportedCharacter> read(File file, {String? password}) =>
+  Future<ImportedCharacter> read(File file, {String? password}) async =>
       switch (this) {
         nemini => NeminiExport.read(file, password: password),
+        _ when await SoulkynChat.looksLikeOne(file) => (await SoulkynChat.read(
+          file,
+        )).asCharacter(),
         _ => CharacterCard.read(file),
       };
 }
@@ -267,7 +272,12 @@ class ImportReview extends StatefulWidget {
     required this.name,
     required this.body,
     required this.looks,
+    this.pickChat,
   });
+
+  /// Picks a chat export; the system's open dialog unless a test replaces
+  /// it.
+  final Future<File?> Function()? pickChat;
 
   final ImportedCharacter character;
   final String name;
@@ -289,6 +299,34 @@ class _ImportReviewState extends State<ImportReview> {
       ...UntrustedText.flags(widget.character.lessons!),
     for (final l in widget.looks.values) ...UntrustedText.flags(l.text),
   ];
+
+  String? _chatError;
+
+  Future<void> _addChat() async {
+    final File? file;
+    if (widget.pickChat case final pick?) {
+      file = await pick();
+    } else {
+      final f = await openFile(
+        acceptedTypeGroups: const [
+          XTypeGroup(label: 'Soulkyn chat export', extensions: ['csv']),
+        ],
+      );
+      file = f == null ? null : File(f.path);
+    }
+    if (file == null || !mounted) return;
+    try {
+      final chat = await SoulkynChat.read(file);
+      if (mounted) {
+        setState(() {
+          widget.character.soulkynChat = chat;
+          _chatError = null;
+        });
+      }
+    } on ImportException catch (e) {
+      if (mounted) setState(() => _chatError = e.message);
+    }
+  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
@@ -420,6 +458,60 @@ class _ImportReviewState extends State<ImportReview> {
               style: small,
             ),
         ],
+        if (nemini == null) ...[
+          const SizedBox(height: 14),
+          const Text('Chat history', style: header),
+          const SizedBox(height: 4),
+          if (c.soulkynChat case final chat?) ...[
+            Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    '${chat.lines.length} messages from Soulkyn, '
+                    '${DateFormat.yMMMd().format(chat.first.toLocal())} to '
+                    '${DateFormat.yMMMd().format(chat.last.toLocal())}. '
+                    'They go into the chat as they are.',
+                    style: small,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => setState(() => c.soulkynChat = null),
+                  child: const Text('Leave out'),
+                ),
+              ],
+            ),
+            CheckboxListTile(
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+              controlAffinity: ListTileControlAffinity.leading,
+              value: c.learnChat,
+              onChanged: (v) => setState(() => c.learnChat = v!),
+              title: Text('Let ${widget.name} learn memories from it'),
+              subtitle: Text(
+                'Once set up, ${widget.name} reads the chat part by part and '
+                'keeps what matters as memories. It uses the model in the '
+                'background for a while.',
+                style: small,
+              ),
+            ),
+          ] else ...[
+            Text(
+              'Chatted with them on Soulkyn? Export the chat there and add '
+              'it here to carry on where you left off.',
+              style: small,
+            ),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: TextButton.icon(
+                onPressed: _addChat,
+                icon: const Icon(Icons.forum_outlined, size: 18),
+                label: const Text('Add a Soulkyn chat (.csv)…'),
+              ),
+            ),
+            if (_chatError case final e?)
+              Text(e, style: small.copyWith(color: Colors.redAccent)),
+          ],
+        ],
         const SizedBox(height: 14),
         const Text('Looks', style: header),
         const SizedBox(height: 8),
@@ -489,9 +581,13 @@ class SoulkynImportDialog extends StatefulWidget {
     required this.pickFile,
     this.fetch,
     this.browser,
+    this.offerChat = true,
   });
 
   final Future<File?> Function() pickFile;
+
+  /// Whether a chat export (.csv) may be picked instead of a link.
+  final bool offerChat;
   final Future<ImportedCharacter> Function(Uri url)? fetch;
 
   /// Makes the browser window reader; [SoulkynBrowser] unless a test
@@ -786,12 +882,21 @@ class _SoulkynImportDialogState extends State<SoulkynImportDialog> {
                   'over.',
                 ),
               ),
-              Align(
-                alignment: Alignment.centerLeft,
-                child: TextButton(
-                  onPressed: _busy ? null : _useExporter,
-                  child: const Text('Use the exporter or a .json file instead'),
-                ),
+              Wrap(
+                spacing: 8,
+                children: [
+                  TextButton(
+                    onPressed: _busy ? null : _useExporter,
+                    child: const Text(
+                      'Use the exporter or a .json file instead',
+                    ),
+                  ),
+                  if (widget.offerChat)
+                    TextButton(
+                      onPressed: _busy ? null : _choose,
+                      child: const Text('Start from a chat export (.csv)'),
+                    ),
+                ],
               ),
             ],
           );

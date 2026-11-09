@@ -32,7 +32,7 @@ I = {
  'cap': '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" d="m2 9 10-5 10 5-10 5zM6 11v5c3 2 9 2 12 0v-5"/></svg>',
  'chip': '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="6" y="6" width="12" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path stroke="currentColor" stroke-width="1.8" stroke-linecap="round" d="M9 3v3m6-3v3M9 18v3m6-3v3M3 9h3m-3 6h3m12-6h3m-3 6h3"/></svg>',
 }
-NAV = [('#tour', 'Meet Voxette'), ('#private', 'Privacy'), ('#download', 'Download'), ('#faq', 'FAQ')]
+NAV = [('#tour', 'Meet Voxette'), ('#voces', 'Voces Mundi'), ('#private', 'Privacy'), ('#download', 'Download'), ('#faq', 'FAQ')]
 NAVLINKS = ''.join(f'<a href="{h}">{t}</a>' for h, t in NAV)
 SOCIALS = ('<div class="socials">' + ''.join(f'<a href="{u}" aria-label="{n}" title="{n}">{I[k]}</a>' for n, u, k in
            [('Discord', DISCORD, 'discord'), ('X', X, 'x'), ('Reddit', REDDIT, 'reddit'), ('GitHub', GH, 'github')]) + '</div>')
@@ -43,6 +43,45 @@ LOOK = ('<div class="lookm"><button type="button" class="lookbtn" aria-haspopup=
         '<p>Colorway</p><div class="ways" data-ways role="group" aria-label="Colorways"></div></div></div>')
 
 def qa(q, a): return f'<details class="qa"><summary>{q}</summary><div><p>{a}</p></div></details>'
+
+# ---------------------------------------------------------------- Voces Mundi: the story mode, "Voces Mundi, by VoxCordis"
+# Its mark is a globe drawn in the heart's strands and nodes, with the heart's heartbeat line for its equator.
+# Like the heart, it takes the Colorway's colours (--k1..--k4, deepened on the light theme by base.css).
+VM_DEFS = ('<defs><linearGradient id="vm-g" gradientUnits="userSpaceOnUse" x1="38" y1="0" x2="162" y2="0"><stop offset="0" style="stop-color:var(--k1)"/><stop offset=".38" style="stop-color:var(--k2)"/><stop offset=".64" style="stop-color:var(--k3)"/><stop offset="1" style="stop-color:var(--k4)"/></linearGradient>'
+  '<radialGradient id="vm-h" cx="100" cy="100" r="76" gradientUnits="userSpaceOnUse"><stop offset="0" style="stop-color:var(--k2);stop-opacity:.3"/><stop offset="1" style="stop-color:var(--k3);stop-opacity:0"/></radialGradient>'
+  '<filter id="vm-neon" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="7" result="b2"/><feComponentTransfer in="b2" result="b2o"><feFuncA type="linear" slope=".85"/></feComponentTransfer>'
+  '<feGaussianBlur in="SourceGraphic" stdDeviation="1.6" result="b1"/><feMorphology in="SourceGraphic" operator="erode" radius=".8" result="e"/><feColorMatrix in="e" type="matrix" values=".55 0 0 0 .45 0 .55 0 0 .45 0 0 .55 0 .45 0 0 0 .6 0"/><feGaussianBlur stdDeviation=".35" result="core"/>'
+  '<feMerge><feMergeNode in="b2o"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/><feMergeNode in="core"/></feMerge></filter>'
+  '<filter id="vm-soft" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB"><feGaussianBlur in="SourceGraphic" stdDeviation="3" result="b"/><feComponentTransfer in="b" result="bo"><feFuncA type="linear" slope=".35"/></feComponentTransfer><feMerge><feMergeNode in="bo"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>')
+def globe(cls, bold=False, glow=True):
+    """bold: for small sizes, thicker lines and no hairlines, like the heart's .logo."""
+    w = (lambda x: f'{x * 2:.1f}') if bold else (lambda x: f'{x:g}')
+    rings = '' if bold else '<path d="M46 69A54 8 0 0 0 154 69M46 131A54 8 0 0 0 154 131" stroke-width="2.2" opacity=".7"/>'
+    nodes = [(100, 38, 5), (100, 162, 5), (38, 100, 4.6), (162, 100, 4.6)] + ([] if bold else [(78.4, 76, 3), (121.6, 76, 3), (78.4, 138.5, 3), (121.6, 138.5, 3), (171, 52, 2.2), (30, 152, 1.8)])
+    return (f'<svg class="{cls}" viewBox="0 0 200 200" aria-hidden="true">' + ('<circle cx="100" cy="100" r="76" fill="url(#vm-h)"/>' if glow else '')
+            + '<g' + (' filter="url(#vm-neon)"' if glow else '') + ' stroke="url(#vm-g)" fill="url(#vm-g)" stroke-linecap="round" stroke-linejoin="round"><g fill="none">'
+            f'<circle cx="100" cy="100" r="62" stroke-width="{w(5.5)}"/><ellipse cx="100" cy="100" rx="26" ry="62" stroke-width="{w(2.8)}"/>{rings}'
+            f'<path d="M38 100H72L79 100 85 88 92 116 100 60 108 136 115 92 121 100H162" stroke-width="{w(5)}"/></g>'
+            + ''.join(f'<circle cx="{x}" cy="{y}" r="{r * (1.4 if bold else 1):g}"/>' for x, y, r in nodes) + '</g></svg>')
+# Screenshots of the app (static/voces/), with an example library and story
+VM_SHOTS = [
+ ('library', 'The library', 'Your worlds, characters and lorebooks, with the story you were playing at the top.'),
+ ('new-story', 'Starting a story', 'Pick who you play, how hard the world is, how it begins and who is there.'),
+ ('story', 'A story in play', 'The narrator, the cast and you, with story notes and a dice roll for a risky move.'),
+]
+VOCES = f'''<section class="gutter vm" id="voces"><div class="w">
+  <svg width="0" height="0" style="position:absolute" aria-hidden="true">{VM_DEFS}</svg>
+  <div class="vm-mark">{globe('vmark')}<div class="vm-word" role="img" aria-label="Voces Mundi"><b>VOCES</b><span>MUNDI</span></div><div class="vm-by">by <b>VOX</b> CORDIS</div></div>
+  <h2>Step inside the story</h2>
+  <p class="lead">Voces Mundi is where your model becomes a narrator and a whole cast. Worlds come to life around the character you play, on your own computer, as privately as everything else.</p>
+  <ol class="vm-steps">
+    <li><i>1</i><b>Pick a world</b><span>Make one in a few lines, or bring a character card or lorebook. Your model writes the opening.</span></li>
+    <li><i>2</i><b>Pick who you play</b><span>Any of your characters, the same hero in many worlds. Choose how kind or punishing it gets.</span></li>
+    <li><i>3</i><b>Play</b><span>Say, do, or ask the narrator. People come and go, answer each other, and remember what you did.</span></li>
+  </ol>
+  <div class="vm-shots">''' + ''.join(f'<figure><a class="vm-shot" href="voces/{f}.webp" target="_blank" rel="noopener"><img src="voces/{f}.webp" width="1440" height="900" loading="lazy" alt="Voces Mundi: {t.lower()}"></a><figcaption><b>{t}</b>{d}</figcaption></figure>' for f, t, d in VM_SHOTS) + f'''</div>
+  <p class="vm-quiet">Switch it on in Settings → General. Worlds marked 18+ stay hidden unless you turn on mature content.</p>
+</div></section>'''
 
 # ---------------------------------------------------------------- Privacy: four facts
 PRIVATE = f'''<section class="gutter" id="private"><div class="w">
@@ -128,7 +167,7 @@ APPWINDOW = rd('app.html').replace('TITLEBAR', TITLEBAR, 1).replace('PFP', PFP, 
 # ---------------------------------------------------------------- assemble
 h = rd('home.html')
 h = (h.replace('<canvas class="glow"', SPRITE + '\n<canvas class="glow"', 1).replace('MINI<b', MINI + '<b', 1).replace('NAVLINKS', NAVLINKS, 1)
-      .replace('SOCIALS LOOK', SOCIALS + LOOK, 1).replace('SECTIONS', '\n'.join([PRIVATE, DOWNLOAD, FAQ]), 1).replace('FOOTER', FOOTER, 1).replace('APPWINDOW', APPWINDOW, 1))
+      .replace('SOCIALS LOOK', SOCIALS + LOOK, 1).replace('SECTIONS', '\n'.join([VOCES, PRIVATE, DOWNLOAD, FAQ]), 1).replace('FOOTER', FOOTER, 1).replace('APPWINDOW', APPWINDOW, 1))
 # the chat tour paints its little pictures with the same icons as the page
 JS = 'const ICON = ' + json.dumps({k: I[k] for k in ['spark', 'file', 'clock', 'cap']}) + ', MINI = ' + json.dumps(MINI) + ';\n'
 FONT_LINKS = ('<link rel="preconnect" href="https://fonts.googleapis.com">\n<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>\n'
@@ -136,7 +175,7 @@ FONT_LINKS = ('<link rel="preconnect" href="https://fonts.googleapis.com">\n<lin
 # The real site serves its own copy of the font (static/fonts, OFL), so a visit asks nothing of Google.
 FONT_FACE = ("@font-face{font-family:'Hanken Grotesk';font-style:normal;font-weight:400 700;font-display:swap;"
              "src:url(fonts/hanken-grotesk-latin.woff2) format('woff2')}\n")
-css = (FONT_FACE if FULL else '') + rd('base.css') + rd('app.css') + rd('pages.css')
+css = (FONT_FACE if FULL else '') + rd('base.css') + rd('app.css') + rd('pages.css') + rd('voces.css')
 body = h + '<script>\n' + JS + rd('home.js') + rd('app.js') + rd('flow.js') + '</script>\n'
 DESC = 'A private AI companion that lives on your computer. Free and open source, for Linux and Windows.'
 head = ('<title>VoxCordis</title>\n<meta name="description" content="' + DESC + '">\n'
