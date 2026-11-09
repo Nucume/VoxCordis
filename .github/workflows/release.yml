@@ -88,9 +88,16 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: flutter pub get
-      - run: >-
+      # The Google sign-in client lives in this repository's secrets, not in
+      # the source, because push protection refuses it in a commit.
+      - env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: >-
           flutter build linux --release --build-name "${VERSION%%-*}"
           --dart-define=APP_VERSION="$VERSION" --dart-define=UPDATE_REPO="$UPDATE_REPO"
+          --dart-define=GOOGLE_CLIENT_ID="$GOOGLE_CLIENT_ID"
+          --dart-define=GOOGLE_CLIENT_SECRET="$GOOGLE_CLIENT_SECRET"
       - name: AppImage
         run: packaging/linux/build-appimage.sh build/linux/x64/release/bundle "$VERSION" dist
       - uses: actions/upload-artifact@v4
@@ -237,10 +244,15 @@ jobs:
           flutter-version: ${{ env.FLUTTER_VERSION }}
           cache: true
       - run: flutter pub get
-      - run: |
+      - env:
+          GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET: ${{ secrets.GOOGLE_CLIENT_SECRET }}
+        run: |
           $buildName = ($env:VERSION -split '-')[0]
           flutter build windows --release --build-name $buildName `
-            --dart-define=APP_VERSION=$env:VERSION --dart-define=UPDATE_REPO=$env:UPDATE_REPO
+            --dart-define=APP_VERSION=$env:VERSION --dart-define=UPDATE_REPO=$env:UPDATE_REPO `
+            --dart-define=GOOGLE_CLIENT_ID=$env:GOOGLE_CLIENT_ID `
+            --dart-define=GOOGLE_CLIENT_SECRET=$env:GOOGLE_CLIENT_SECRET
       - name: Ship the MSVC runtime next to the app
         # Flutter apps need it and a fresh Windows may not have it installed.
         run: |
