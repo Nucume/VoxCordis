@@ -5,6 +5,7 @@ import 'package:url_launcher/url_launcher.dart';
 import '../../app_scope.dart';
 import '../../data/settings.dart';
 import '../../services/calendar/calendar_event.dart';
+import '../../services/calendar/calendar_tools.dart';
 import '../../theme/app_theme.dart';
 import '../../theme/glass_popover.dart';
 import 'model_picker.dart' show InfoIcon;
@@ -253,6 +254,20 @@ class _ConnectionsSettingsState extends State<ConnectionsSettings> {
           ],
         ),
       ),
+      if (!CalendarTools.brainMayRead(s)) ...[
+        const SizedBox(height: 8),
+        SettingsNote(
+          CalendarTools.brainBlocked,
+          color: Theme.of(context).colorScheme.error,
+        ),
+      ] else if (CalendarTools.noTrainingRouting(s)) ...[
+        const SizedBox(height: 8),
+        const SettingsNote(
+          'With OpenRouter, VoxCordis asks only for providers that don\'t '
+          'keep or train on what they\'re sent, as Google requires. A few '
+          'models may not be offered that way.',
+        ),
+      ],
       if (c.canWrite)
         SwitchListTile(
           contentPadding: EdgeInsets.zero,

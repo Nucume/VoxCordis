@@ -805,4 +805,53 @@ void main() {
       expect(await service.source(), isNull);
     },
   );
+
+  group('Google Calendar data stays away from AI services that train', () {
+    AppSettings brain(String endpoint, {LlmMode mode = LlmMode.external}) =>
+        AppSettings(
+          llmMode: mode,
+          llmEndpoint: endpoint,
+          calendar: const CalendarPrefs(provider: CalendarProvider.google),
+        );
+
+    test('the built-in brain, local servers and no-training APIs may read', () {
+      for (final s in [
+        brain('https://example.com/v1', mode: LlmMode.builtIn),
+        brain('http://localhost:11434/v1'),
+        brain('http://192.168.1.20:8080/v1'),
+        brain('https://api.openai.com/v1'),
+        brain('https://api.anthropic.com/v1'),
+        brain('https://openrouter.ai/api/v1'),
+      ]) {
+        expect(CalendarTools.brainMayRead(s), isTrue, reason: s.llmEndpoint);
+        expect(CalendarTools.definitionsFor(s), isNotEmpty);
+      }
+    });
+
+    test('other hosted servers get no Google Calendar tools', () {
+      final s = brain('https://api.someone-else.ai/v1');
+      expect(CalendarTools.brainMayRead(s), isFalse);
+      expect(CalendarTools.definitionsFor(s), isEmpty);
+    });
+
+    test('CalDAV is not limited', () {
+      final s = AppSettings(
+        llmMode: LlmMode.external,
+        llmEndpoint: 'https://api.someone-else.ai/v1',
+        calendar: const CalendarPrefs(provider: CalendarProvider.caldav),
+      );
+      expect(CalendarTools.brainMayRead(s), isTrue);
+    });
+
+    test('OpenRouter is asked for no-training providers only', () {
+      expect(
+        CalendarTools.noTrainingRouting(brain('https://openrouter.ai/api/v1')),
+        isTrue,
+      );
+      expect(
+        CalendarTools.noTrainingRouting(brain('https://api.openai.com/v1')),
+        isFalse,
+      );
+    });
+  });
 }

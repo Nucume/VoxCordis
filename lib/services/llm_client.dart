@@ -223,9 +223,17 @@ class LlmClient {
               .send(req)
               .timeout(first, onTimeout: () => throw LlmStalled(first));
     if (res.statusCode != 200) {
-      throw LlmException(
-        'HTTP ${res.statusCode}: ${await res.stream.bytesToString()}',
-      );
+      final body = await res.stream.bytesToString();
+      if (_provider == LlmProvider.openRouter &&
+          body.toLowerCase().contains('data policy')) {
+        throw LlmException(
+          'OpenRouter has no provider for $model that promises not to keep '
+          'or train on what it\'s sent, which Google Calendar needs. Pick '
+          'another model, or disconnect Google Calendar in Settings → '
+          'Connections.',
+        );
+      }
+      throw LlmException('HTTP ${res.statusCode}: $body');
     }
 
     final pending = <int, ({String id, String name, StringBuffer args})>{};

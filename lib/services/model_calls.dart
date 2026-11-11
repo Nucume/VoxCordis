@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../data/settings.dart';
 import '../features/chat/prompt_history.dart' show samplingFor, stopFor;
+import 'calendar/calendar_tools.dart';
 import 'llm_client.dart';
 import 'logs/app_log.dart';
 import 'runtime/llama_server.dart' show serverExitHint;
@@ -36,7 +37,12 @@ LlmClient chatClient(
   progress: progress,
   firstWait: firstWait,
   stallWait: stallWait,
-  extra: extra,
+  extra: {
+    // Google Calendar data mustn't reach providers that train on it.
+    if (CalendarTools.noTrainingRouting(s))
+      'provider': {'data_collection': 'deny'},
+    ...extra,
+  },
   client: client,
 );
 

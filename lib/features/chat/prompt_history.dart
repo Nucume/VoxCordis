@@ -5,6 +5,7 @@ import 'package:intl/intl.dart';
 
 import '../../data/message_repository.dart';
 import '../../data/settings.dart';
+import '../../services/calendar/calendar_tools.dart';
 import '../../services/llm_client.dart';
 import '../../services/recall/recall.dart';
 import '../../services/runtime/model_catalog.dart';
@@ -260,6 +261,14 @@ String aboutCalendar(AppSettings s) {
     return '## Your human\'s calendar\n'
         'You can\'t see their calendar. If they ask about it, tell them they '
         'can connect it in Settings → Connections.';
+  }
+  if (!CalendarTools.brainMayRead(s)) {
+    return '## Your human\'s calendar\n'
+        'You can\'t see their Google Calendar with the brain they picked: '
+        'Google doesn\'t allow calendar data to go to AI services that may '
+        'train on it. If they ask, tell them it works with the built-in '
+        'brain, a server on their own computer or home network, OpenAI, '
+        'Anthropic and OpenRouter.';
   }
   return '## Your human\'s calendar\n'
       'You can see their calendar with calendar_events. Look whenever they '

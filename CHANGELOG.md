@@ -12,6 +12,11 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+### Changed
+- **Google Calendar only goes to AI that doesn't train on it.** Google doesn't allow calendar data to reach AI services that may train on it. Google Calendar now works with the built-in brain, a server on your own computer or home network, OpenAI, Anthropic and OpenRouter. With OpenRouter, VoxCordis asks only for providers that don't keep or train on what they're sent. Other server-hosted brains don't get your Google Calendar; CalDAV and calendar links are unchanged.
+
+## 0.4.3
+
 ### New
 - **Your companion can use your calendar.** Settings → Connections connects:
   - Google Calendar (you sign in in your browser).

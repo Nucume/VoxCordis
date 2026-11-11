@@ -3,6 +3,8 @@ import 'dart:convert';
 import '../../data/schedule/schedule_tools.dart';
 import '../../data/settings.dart';
 import '../import/untrusted_text.dart';
+import '../llm_providers.dart';
+import '../sight.dart';
 import 'calendar_event.dart';
 import 'calendar_service.dart';
 
@@ -72,9 +74,41 @@ class CalendarTools {
         '"2026-11-09" or "saturday".',
   };
 
+  /// Whether the brain in [s] may see Google Calendar data. Google's user
+  /// data policy forbids handing it to AI services that train on it, so
+  /// it goes only to the built-in brain, a server on this computer or the
+  /// home network, OpenAI and Anthropic (whose APIs don't train on what
+  /// they're sent), and OpenRouter, which [chatClient] tells to use only
+  /// providers that don't keep or train on prompts.
+  static bool brainMayRead(AppSettings s) {
+    if (s.calendar.provider != CalendarProvider.google) return true;
+    if (s.llmMode != LlmMode.external) return true;
+    return switch (LlmProvider.forEndpoint(s.llmEndpoint)) {
+      LlmProvider.openAi ||
+      LlmProvider.anthropic ||
+      LlmProvider.openRouter => true,
+      LlmProvider.custom => Sight.isLocalHost(
+        Uri.tryParse(s.llmEndpoint.trim())?.host.toLowerCase() ?? '',
+      ),
+    };
+  }
+
+  /// Whether requests to the brain in [s] must ask OpenRouter for providers
+  /// that neither keep nor train on prompts.
+  static bool noTrainingRouting(AppSettings s) =>
+      s.calendar.provider == CalendarProvider.google &&
+      s.llmMode == LlmMode.external &&
+      LlmProvider.forEndpoint(s.llmEndpoint) == LlmProvider.openRouter;
+
+  static const brainBlocked =
+      'Google Calendar can\'t be used with this brain. Google doesn\'t allow '
+      'calendar data to go to AI services that may train on it, so it '
+      'works with the built-in brain, a server on your own computer or home '
+      'network, OpenAI, Anthropic and OpenRouter.';
+
   static List<Map<String, Object?>> definitionsFor(AppSettings s) {
     final c = s.calendar;
-    if (!c.connected) return const [];
+    if (!c.connected || !brainMayRead(s)) return const [];
     return [
       {
         'type': 'function',
@@ -201,6 +235,9 @@ class CalendarTools {
     bool mustAsk = false,
   }) async {
     try {
+      if (!brainMayRead(service.settings())) {
+        throw const CalendarException(brainBlocked);
+      }
       final source = await service.source();
       if (source == null) {
         throw const CalendarException(
