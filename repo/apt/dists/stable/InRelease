@@ -1,0 +1,42 @@
+-----BEGIN PGP SIGNED MESSAGE-----
+Hash: SHA512
+
+Architectures: amd64
+Codename: stable
+Components: main
+Date: Wed, 11 Nov 2026 08:23:58 +0000
+Label: VoxCordis
+Origin: VoxCordis
+Suite: stable
+MD5Sum:
+ 410de662b60e9b936941c27f28d9d4c1             3195 main/binary-amd64/Packages
+ 3e309bf72edd6073a376a521e44e728d             1111 main/binary-amd64/Packages.gz
+ cc0057aaf5948cec3ae1a7d1d28adf6e             1160 main/binary-amd64/Packages.xz
+SHA1:
+ b0843d76b290ec16411c80425057b99d64eeba74             3195 main/binary-amd64/Packages
+ 7b306380f29af835f276a226b3b515ea01d332ec             1111 main/binary-amd64/Packages.gz
+ 36c26bc2c1e568fe81eadf1c03a76f5f79489db3             1160 main/binary-amd64/Packages.xz
+SHA256:
+ 7ad408b7aa6eb0c34b36687efbb9f25901cad6a289d63a8a8b0b98fd5b2b59ee             3195 main/binary-amd64/Packages
+ 983e74c516e7dfc87b3f1826a1f70d28b3584b5a94c20a1c5938a22191bcda96             1111 main/binary-amd64/Packages.gz
+ fa91320c4ebc6a7a7f356c462066d2e9f92a6c3ebed662b13552a5f35cc57fb5             1160 main/binary-amd64/Packages.xz
+SHA512:
+ b4254dab8a41588c795f7278aa0f83dd50b64fe616a1e77be718d4b159352b24259e38c59b83e0ba93ecfd2312fcacfe226e92dcb029175473e6afbf18d7de14             3195 main/binary-amd64/Packages
+ b9604ea6173b8962cfab5c3116346f43cf34c3b4273b4f530b5a21ec377f6a01df51f0bb0b6926c3f5bba1c3bb7f950bef1ee1338abf3f0a06c9e79b558a46e6             1111 main/binary-amd64/Packages.gz
+ 4f7813b7ccf729c2e111b7c07ea03f615904954395e155ece6955d94b94364d45ea79922ff7d1c76afa70728498e7020113c0df28945153fe94f2b6ffbae2c85             1160 main/binary-amd64/Packages.xz
+-----BEGIN PGP SIGNATURE-----
+
+iQIzBAEBCgAdFiEEpz9gP7Al0XPY7TNk0Nj3M4020EsFAmr0Jh4ACgkQ0Nj3M402
+0Eui+w/9FJdzw2PfiwrYFy+WaYb9ckyAVpOOoiLIJSTFlqPAUw9MgHm92uQKzib9
+2ntJCAtI8cS2HJaIEmfoRZBpGszHlzhojCJvZV4UEYAPx/qTxjQ1ftsow//bPZhB
+swEViU7E16SETwK+7VNMTy0nzittBfMSDXsy3lpK0MfPszUnstamlOSwDWbZaTiK
+9QWE2F58dW2jyslkOiqmajfsMnkugW6+6llEH0N4q4dmSFz0RoAIoHiM7hkNMiSO
+ctcWDdux+d8O4Zaf4Zef7ddHo1veDg01XomZ41HqrZe0CbdZUv22ZDSPzSEKKZ6z
+hBVRV8WGLjfj6driPsSwd122CDKIUL9OVPmYoqsp+62cC8qgaErsVYI57J4Guulh
+YxB8y2dHEYJmoJzhosF0INoSsre4sq8Zb1+I0srozjfRI/04A6cHwfI5lettXwqJ
+jZVp3pC5ipoV06p6oiLsy1ALFwPcgDNkHBewu7iQ4DykPq3uyjk9rgtuJ14Nk5Jb
+sOw2LrEAmPc7msiZO3U7NOpg5XJvVh+TniwH4ZEMKJmED+ZIAaH7gMNF3DfkvEhM
+yu+brhYPyIwAIr26MazOkKm8Dl2+2YX4NVsxD/BkQimPK3PthXwWVJv/KsrgfLnP
+BGXAYc3TDzO/H3NuFjFKDUQXbQ4KmottfSe8ovonzt+M9elc8Gk=
+=SiFz
+-----END PGP SIGNATURE-----

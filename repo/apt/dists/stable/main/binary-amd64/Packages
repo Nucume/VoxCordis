@@ -1,0 +1,72 @@
+Package: voxcordis
+Architecture: amd64
+Version: 0.4.2
+Priority: optional
+Section: net
+Maintainer: Nucume <119841008+Nucume@users.noreply.github.com>
+Installed-Size: 36572
+Depends: libc6 (>= 2.35), libstdc++6, liblzma5, libgtk-3-0 | libgtk-3-0t64
+Recommends: libwebkit2gtk-4.1-0, libmpv2 | libmpv1
+Filename: pool/main/voxcordis_0.4.2_amd64.deb
+Size: 12537016
+MD5sum: fda22d380b308c53d0126c7978efcd2c
+SHA1: eaea7f84dd3ed46997d2ffa068da5216a9d1a510
+SHA256: e02aa04a165dae4c3aabc30297b47521c27590503217fc64240e7423e3f5a7d1
+SHA512: 908ab047cb4a62d4f3d7e8e9bd3b62227bc0940036c72ae9327ee8bac1724328db0ea50847260e26bb1b7cf7dc1db63f6f73b9000351fa9d7dd0640c2a314987
+Homepage: https://github.com/Nucume/VoxCordis
+Description: A private AI companion that runs on your computer
+ VoxCordis chats with a local language model it runs itself, keeps its
+ files in a folder you choose, and remembers things in a memory you can read,
+ edit, pin and forget.
+ .
+ libwebkit2gtk-4.1 is only needed for the sign-in windows of character
+ importers, and libmpv only to play video portraits.
+
+Package: voxcordis
+Architecture: amd64
+Version: 0.4.3
+Priority: optional
+Section: net
+Maintainer: Nucume <119841008+Nucume@users.noreply.github.com>
+Installed-Size: 37504
+Depends: libc6 (>= 2.35), libstdc++6, liblzma5, libgtk-3-0 | libgtk-3-0t64
+Recommends: libwebkit2gtk-4.1-0, libmpv2 | libmpv1
+Filename: pool/main/voxcordis_0.4.3_amd64.deb
+Size: 12882470
+MD5sum: 6c30559c92b931242b312e64a17976e4
+SHA1: 58944bba776532e479f497d23dc61a3a9a30be0e
+SHA256: 26338ec103c8818d1737701ab78cb033f44b3536c46ed8780aadc645c80e57c0
+SHA512: b0b5934f8ce01eaf9d8aa5c8b0260e765d32c332fa8df563386ed5692f177a8102e4fb41802e0fdedcf4d9532573135ee66f65c07f83f569c0a95a32ba6d5d19
+Homepage: https://github.com/Nucume/VoxCordis
+Description: A private AI companion that runs on your computer
+ VoxCordis chats with a local language model it runs itself, keeps its
+ files in a folder you choose, and remembers things in a memory you can read,
+ edit, pin and forget.
+ .
+ libwebkit2gtk-4.1 is only needed for the sign-in windows of character
+ importers, and libmpv only to play video portraits.
+
+Package: voxcordis
+Architecture: amd64
+Version: 0.4.4
+Priority: optional
+Section: net
+Maintainer: Nucume <119841008+Nucume@users.noreply.github.com>
+Installed-Size: 37520
+Depends: libc6 (>= 2.35), libstdc++6, liblzma5, libgtk-3-0 | libgtk-3-0t64
+Recommends: libwebkit2gtk-4.1-0, libmpv2 | libmpv1
+Filename: pool/main/voxcordis_0.4.4_amd64.deb
+Size: 12881936
+MD5sum: 4384c06f8416c577066edd443480af09
+SHA1: 95f2974ab01d2409c72db7932e982b72dfcc12d0
+SHA256: 6393504a790d7b0ba7ec3d182d29c06dfd73f14c81576cc6bbb30453c4f0bf1b
+SHA512: 4a8d4311a94c586996ef33815a052dbe86c10a3e857689fa7978f0f7c671ea063a101af58df1bb8433555de42e7d832b6db6709cef4c6f40af0c6a91621cc5fc
+Homepage: https://github.com/Nucume/VoxCordis
+Description: A private AI companion that runs on your computer
+ VoxCordis chats with a local language model it runs itself, keeps its
+ files in a folder you choose, and remembers things in a memory you can read,
+ edit, pin and forget.
+ .
+ libwebkit2gtk-4.1 is only needed for the sign-in windows of character
+ importers, and libmpv only to play video portraits.
+
