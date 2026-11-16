@@ -8,6 +8,7 @@ import '../../data/voces/voces_library.dart';
 import '../../data/voces/voces_models.dart';
 import '../../services/voces/describer.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/glass_popover.dart';
 import 'voces_editor.dart';
 import 'voces_home.dart';
 import 'voces_picture.dart';
@@ -45,7 +46,10 @@ class _CharactersViewState extends State<CharactersView> {
     final data = widget.data;
     final palette = context.palette;
     final playedIds = {for (final s in data.stories) s.playerId};
-    final filter = _filter;
+    // A filter on a world that has been deleted since shows everyone.
+    final filter = _filter == _played || data.world(_filter ?? '') != null
+        ? _filter
+        : null;
     final shown = [
       for (final c in data.characters)
         if (filter == null ||
@@ -91,28 +95,21 @@ class _CharactersViewState extends State<CharactersView> {
                     ],
                   ),
                   const SizedBox(height: 8),
-                  Wrap(
-                    spacing: 6,
-                    runSpacing: 6,
-                    children: [
-                      VocesPill(
-                        'All',
-                        on: filter == null,
-                        onTap: () => setState(() => _filter = null),
-                      ),
-                      for (final w in data.worlds)
-                        VocesPill(
-                          w.name,
-                          on: filter == w.id,
-                          onTap: () => setState(() => _filter = w.id),
-                        ),
+                  // One button instead of a chip per world: with many worlds
+                  // the chips filled the column and pushed the list away.
+                  GlassSelect<String?>(
+                    value: filter,
+                    width: double.infinity,
+                    pill: true,
+                    active: filter != null,
+                    searchHint: 'Search worlds',
+                    options: [
+                      const GlassOption(null, 'All characters'),
                       if (playedIds.isNotEmpty)
-                        VocesPill(
-                          'Played by you',
-                          on: filter == _played,
-                          onTap: () => setState(() => _filter = _played),
-                        ),
+                        const GlassOption(_played, 'Played by you'),
+                      for (final w in data.worlds) GlassOption(w.id, w.name),
                     ],
+                    onChanged: (v) => setState(() => _filter = v),
                   ),
                   const SizedBox(height: 12),
                   Expanded(
@@ -448,6 +445,9 @@ class _CharacterEditorState extends State<_CharacterEditor> {
 
   /// "Describe them" writes for adults.
   var _describeAdult = false;
+
+  /// May turn up as a guest in other worlds.
+  var _visits = true;
   var _art = VocesLibrary.newArt();
 
   /// A new portrait, uploaded or drawn.
@@ -487,6 +487,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     _pronouns.text = c?.pronouns ?? '';
     _tags.text = c?.tags.join(', ') ?? '';
     _looksTags.text = c?.looksTags.join(', ') ?? '';
+    _visits = c?.visits ?? true;
     _setSections([
       if (c == null)
         for (final h in _starterSections) SheetSection(h, '')
@@ -546,6 +547,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
       art: _art,
       source: base.source,
       created: base.created,
+      visits: _visits,
     );
   }
 
@@ -704,6 +706,7 @@ class _CharacterEditorState extends State<_CharacterEditor> {
     _pronouns.text,
     _tags.text,
     _looksTags.text,
+    _visits,
     for (final (h, t) in _sections) '${h.text}\u0000${t.text}',
     _art,
     _portrait?.path,
@@ -782,6 +785,22 @@ class _CharacterEditorState extends State<_CharacterEditor> {
                 TextField(
                   controller: _tags,
                   decoration: field('Traits', hint: 'bold, witty, secretive'),
+                ),
+                const SizedBox(height: 6),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: _visits,
+                  onChanged: (on) => setState(() => _visits = on),
+                  title: const Text('Can turn up in other worlds'),
+                  subtitle: Text(
+                    'As a guest in worlds that let guests in, fitted to that '
+                    'world. Switch it off when their sheet only makes sense '
+                    'in their own world.',
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: context.palette.textMuted,
+                    ),
+                  ),
                 ),
               ],
             ),

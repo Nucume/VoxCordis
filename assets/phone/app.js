@@ -2088,7 +2088,7 @@
               'div.item',
               null,
               personAv(p, 36),
-              h('span.grow', null, h('b', { text: p.name }), h('span', { text: p.you ? 'You' : p.pinned ? 'Pinned: stays here' : 'Here' })),
+              h('span.grow', null, h('b', { text: p.name }), h('span', { text: p.you ? 'You' : (p.pinned ? 'Pinned: stays here' : 'Here') + (p.guest ? ' · guest from another world' : '') })),
               p.you
                 ? null
                 : h('button.pill' + (p.pinned ? '.on' : ''), { type: 'button', 'aria-label': (p.pinned ? 'Unpin ' : 'Pin ') + p.name, onclick: async () => { await storyOp('pin', { id: p.id, on: !p.pinned }); p.pinned = !p.pinned; draw(); } }, icon('pin')),
@@ -2113,6 +2113,23 @@
           }
           part.append(l2);
         }
+        const guests = st.guestsOpen ? st.guests || [] : [];
+        if (guests.length) {
+          part.append(h('div.note', { text: 'From other worlds', style: { margin: '12px 0 4px' } }));
+          const l3 = h('div.list');
+          for (const p of guests) {
+            l3.append(
+              h(
+                'div.item',
+                null,
+                personAv(p, 36),
+                h('span.grow', null, h('b', { text: p.name })),
+                h('button.pill', { type: 'button', disabled: st.busy, onclick: async () => { await storyOp('invite', { id: p.id }); close(); } }, icon('plus', 14), 'Bring in'),
+              ),
+            );
+          }
+          part.append(l3);
+        }
         part.append(h('div.note', { text: 'Comings and goings', style: { margin: '16px 0 6px' } }));
         part.append(
           h(
@@ -2120,6 +2137,16 @@
             null,
             [['calm', 'Calm'], ['normal', 'Normal'], ['busy', 'Busy']].map(([id, label]) =>
               h('button', { type: 'button', 'aria-pressed': st.liveliness === id ? 'true' : 'false', onclick: async () => { await storyOp('liveliness', { value: id }); st.liveliness = id; draw(); } }, label),
+            ),
+          ),
+        );
+        part.append(h('div.note', { text: 'Guests from other worlds', style: { margin: '14px 0 6px' } }));
+        part.append(
+          h(
+            'div.seg',
+            null,
+            [[false, 'Off'], [true, 'On']].map(([on, label]) =>
+              h('button', { type: 'button', 'aria-pressed': !!st.guestsOpen === on ? 'true' : 'false', onclick: async () => { await storyOp('guests', { on }); st.guestsOpen = on; draw(); } }, label),
             ),
           ),
         );

@@ -5,6 +5,7 @@ import '../../data/voces/story_log.dart';
 import '../../data/voces/voces_library.dart';
 import '../../data/voces/voces_models.dart';
 import 'content_rules.dart';
+import 'guests.dart';
 import 'living_cast.dart';
 import 'story_notes.dart';
 
@@ -39,7 +40,20 @@ class StoryState {
     this.notes = const StoryNotes(),
     this.notesAt = 0,
     this.rolls = const {},
+    this.guests,
+    this.guestIds = const {},
+    this.guestAt = 0,
   });
+
+  /// Guests from other worlds switched on (true) or off (false) for this
+  /// story; null follows the world's own rule.
+  final bool? guests;
+
+  /// Cast who came in as guests from other worlds.
+  final Set<String> guestIds;
+
+  /// The turn the last guest arrived at, so the next waits a while.
+  final int guestAt;
 
   /// What the story keeps track of; see [StoryNotes].
   final StoryNotes notes;
@@ -77,6 +91,9 @@ class StoryState {
     StoryNotes? notes,
     int? notesAt,
     Map<int, int>? rolls,
+    bool? Function()? guests,
+    Set<String>? guestIds,
+    int? guestAt,
   }) => StoryState(
     present: present ?? this.present,
     pinned: pinned ?? this.pinned,
@@ -87,6 +104,9 @@ class StoryState {
     notes: notes ?? this.notes,
     notesAt: notesAt ?? this.notesAt,
     rolls: rolls ?? this.rolls,
+    guests: guests == null ? this.guests : guests(),
+    guestIds: guestIds ?? this.guestIds,
+    guestAt: guestAt ?? this.guestAt,
   );
 
   Map<String, Object?> toJson() => {
@@ -100,6 +120,9 @@ class StoryState {
     if (notesAt > 0) 'notesAt': notesAt,
     if (rolls.isNotEmpty)
       'rolls': {for (final e in rolls.entries) '${e.key}': e.value},
+    'guests': ?guests,
+    if (guestIds.isNotEmpty) 'guestIds': guestIds.toList(),
+    if (guestAt > 0) 'guestAt': guestAt,
   };
 
   static StoryState fromJson(Map<String, Object?> json) => StoryState(
@@ -127,14 +150,23 @@ class StoryState {
           if (int.tryParse('${e.key}') case final id?)
             if (e.value is int) id: e.value as int,
     },
+    guests: json['guests'] is bool ? json['guests']! as bool : null,
+    guestIds: {
+      for (final p in (json['guestIds'] as List?) ?? const [])
+        if (p is String) p,
+    },
+    guestAt: json['guestAt'] is int ? json['guestAt']! as int : 0,
   );
 }
 
 /// Someone joining or leaving the scene.
 class CastChange {
-  const CastChange(this.who, {required this.arrives});
+  const CastChange(this.who, {required this.arrives, this.guest = false});
   final VocesCharacter who;
   final bool arrives;
+
+  /// A guest from another world, here for the first time.
+  final bool guest;
 
   /// The divider shown in the story.
   String get line => arrives ? '${who.name} arrives' : '${who.name} leaves';
@@ -255,6 +287,14 @@ class StoryEngine {
     return null;
   }
 
+  /// Whether a guest from another world turns up before the next narrator
+  /// turn (when the story lets guests in at all).
+  bool guestDue(StoryState state, List<StoryTurn> turns) =>
+      Guests.due(state, turns, _random.nextDouble());
+
+  /// The random the story rolls with, for picking guests.
+  Random get random => _random;
+
   /// What [speaker] is told for their next reply.
   StoryPrompt prompt(
     String? speaker,
@@ -324,7 +364,11 @@ class StoryEngine {
           'actions in *asterisks*. Never speak, act or decide for '
           '$playerName or anyone else. One or two paragraphs.',
         )
-        ..writeln(_playerLines)
+        ..writeln(_playerLines);
+      if (state.guestIds.contains(who.id)) {
+        system.writeln(Guests.fitIn(who, w.name));
+      }
+      system
         ..writeln()
         ..writeln('# ${who.name}')
         ..writeln(_sheet(who));
@@ -353,6 +397,13 @@ class StoryEngine {
         ..writeln('# Also here');
       for (final c in here) {
         system.writeln('- ${_line(c)}');
+      }
+      final guests = [
+        for (final c in here)
+          if (state.guestIds.contains(c.id)) c,
+      ];
+      if (who == null && guests.isNotEmpty) {
+        system.writeln(Guests.belongs(guests, w.name));
       }
     }
     if (who == null && state.extras.isNotEmpty) {
@@ -386,7 +437,9 @@ class StoryEngine {
       ..writeln(transcript(turns));
     if (change != null) {
       user.writeln(
-        change.arrives
+        change.guest
+            ? Guests.arrival(change.who, w.name)
+            : change.arrives
             ? '(${change.who.name} arrives now: show them coming in. '
                   '${_line(change.who)})'
             : '(${change.who.name} leaves now: show them going.)',

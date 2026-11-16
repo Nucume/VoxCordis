@@ -1079,6 +1079,17 @@ class PhoneApi implements PhoneHandler {
       'liveliness': s.state.liveliness.name,
       'chain': s.state.chain,
       'cast': engine == null ? const [] : _cast(c, s, engine),
+      'guestsOpen': s.guestsOpen,
+      'guests': [
+        for (final g in s.guestOptions)
+          {
+            'id': g.id,
+            'name': g.name,
+            'art': _art(g.name, g.art),
+            if (s.library.portraitOf(g) case final pic?)
+              if (pic.existsSync()) 'picture': c.ref(pic.path),
+          },
+      ],
     };
   }
 
@@ -1093,7 +1104,14 @@ class PhoneApi implements PhoneHandler {
       if (player != null) _person(c, s, player, here: true, you: true),
       for (final id in here)
         if (engine.world.cast[id] case final ch?)
-          _person(c, s, ch, here: true, pinned: s.state.pinned.contains(id)),
+          _person(
+            c,
+            s,
+            ch,
+            here: true,
+            pinned: s.state.pinned.contains(id),
+            guest: s.state.guestIds.contains(id),
+          ),
       for (final ch in engine.voices)
         if (!here.contains(ch.id)) _person(c, s, ch, here: false),
     ];
@@ -1106,6 +1124,7 @@ class PhoneApi implements PhoneHandler {
     required bool here,
     bool pinned = false,
     bool you = false,
+    bool guest = false,
   }) {
     final pic = s.engine?.world.portraitOf(ch);
     return {
@@ -1113,6 +1132,7 @@ class PhoneApi implements PhoneHandler {
       'name': ch.name,
       'here': here,
       'pinned': pinned,
+      if (guest) 'guest': true,
       'you': you,
       'art': _art(ch.name, ch.art),
       if (pic != null && pic.existsSync()) 'picture': c.ref(pic.path),
@@ -1169,6 +1189,11 @@ class PhoneApi implements PhoneHandler {
         await s.bringIn('${r['id']}');
       case 'sendAway':
         await s.sendAway('${r['id']}');
+      case 'invite':
+        if (s.busy) throw const PhoneError('Wait for the reply to finish.');
+        await s.invite('${r['id']}');
+      case 'guests':
+        await s.setGuests(r['on'] == true);
       case 'pin':
         final id = '${r['id']}';
         final pinned = {...s.state.pinned};

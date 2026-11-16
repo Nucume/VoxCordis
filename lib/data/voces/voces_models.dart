@@ -33,6 +33,7 @@ class VocesCharacter {
     this.art,
     this.source = '',
     this.created,
+    this.visits = true,
   });
 
   /// The folder name under `characters/`.
@@ -62,6 +63,10 @@ class VocesCharacter {
   final String source;
   final DateTime? created;
 
+  /// May turn up as a guest in worlds they aren't cast in (see
+  /// [GuestRule]). Off for someone whose sheet only makes sense at home.
+  final bool visits;
+
   /// Everything search looks through.
   String get searchText =>
       [name, line, ...tags, for (final s in sections) s.text].join(' ');
@@ -77,6 +82,7 @@ class VocesCharacter {
     String? portrait,
     bool clearPortrait = false,
     int? art,
+    bool? visits,
   }) => VocesCharacter(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -89,6 +95,7 @@ class VocesCharacter {
     art: art ?? this.art,
     source: source,
     created: created,
+    visits: visits ?? this.visits,
   );
 
   Map<String, Object?> toJson() => {
@@ -104,6 +111,7 @@ class VocesCharacter {
     'art': ?art,
     'source': source,
     'created': ?created?.toIso8601String(),
+    if (!visits) 'visits': false,
   };
 
   static VocesCharacter fromJson(Map json) => VocesCharacter(
@@ -121,6 +129,7 @@ class VocesCharacter {
     art: (json['art'] as num?)?.toInt(),
     source: _s(json['source']),
     created: DateTime.tryParse(_s(json['created'])),
+    visits: json['visits'] != false,
   );
 }
 
@@ -398,6 +407,25 @@ abstract final class WorldTags {
   }
 }
 
+/// Whether characters from elsewhere in the library may turn up in a
+/// world, besides its own cast.
+enum GuestRule {
+  /// Only the world's own cast (and whoever the narrator invents).
+  none('Only this world\'s cast'),
+
+  /// Anyone who fits the scene, except those barred from the world.
+  anyone('Anyone who fits'),
+
+  /// Only the characters picked for it.
+  picked('Only these');
+
+  const GuestRule(this.label);
+  final String label;
+
+  static GuestRule byName(Object? n) =>
+      values.where((r) => r.name == n).firstOrNull ?? none;
+}
+
 /// A template for stories: the setting, who lives there, the lore and how
 /// it can start. Stories take a copy when they begin, so editing a world
 /// never changes a story already under way.
@@ -415,6 +443,9 @@ class VocesWorld {
     this.picture,
     this.art,
     this.narratorLed = false,
+    this.guests = GuestRule.none,
+    this.guestIds = const [],
+    this.barredIds = const [],
     this.source = '',
     this.created,
   });
@@ -446,6 +477,16 @@ class VocesWorld {
   /// Made from one card that runs the whole game: the narrator invents the
   /// people and places as the story goes.
   final bool narratorLed;
+
+  /// Who from outside the cast may turn up in stories here. Off unless
+  /// switched on: an imported game card has rules of its own.
+  final GuestRule guests;
+
+  /// With [GuestRule.picked]: the characters who may visit.
+  final List<String> guestIds;
+
+  /// With [GuestRule.anyone]: the characters who never turn up here.
+  final List<String> barredIds;
   final String source;
   final DateTime? created;
 
@@ -466,6 +507,9 @@ class VocesWorld {
     bool clearPicture = false,
     int? art,
     bool? narratorLed,
+    GuestRule? guests,
+    List<String>? guestIds,
+    List<String>? barredIds,
   }) => VocesWorld(
     id: id ?? this.id,
     name: name ?? this.name,
@@ -479,6 +523,9 @@ class VocesWorld {
     picture: clearPicture ? null : picture ?? this.picture,
     art: art ?? this.art,
     narratorLed: narratorLed ?? this.narratorLed,
+    guests: guests ?? this.guests,
+    guestIds: guestIds ?? this.guestIds,
+    barredIds: barredIds ?? this.barredIds,
     source: source,
     created: created,
   );
@@ -497,6 +544,9 @@ class VocesWorld {
     'picture': ?picture,
     'art': ?art,
     'narratorLed': narratorLed,
+    if (guests != GuestRule.none) 'guests': guests.name,
+    if (guestIds.isNotEmpty) 'guestIds': guestIds,
+    if (barredIds.isNotEmpty) 'barred': barredIds,
     'source': source,
     'created': ?created?.toIso8601String(),
   };
@@ -519,6 +569,9 @@ class VocesWorld {
     picture: json['picture'] as String?,
     art: (json['art'] as num?)?.toInt(),
     narratorLed: json['narratorLed'] == true,
+    guests: GuestRule.byName(json['guests']),
+    guestIds: _strings(json['guestIds']),
+    barredIds: _strings(json['barred']),
     source: _s(json['source']),
     created: DateTime.tryParse(_s(json['created'])),
   );

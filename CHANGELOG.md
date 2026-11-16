@@ -12,6 +12,18 @@ the ids); it is left out of the release page.
 
 ## Unreleased
 
+### New
+- **Characters can turn up in other worlds.** In a world's editor, under Cast and lore, "Guests from other worlds" lets other characters drop in now and then when they fit the scene. You can let anyone in, bar some of them, or pick a few. It's off for every world until you switch it on.
+  - A guest is fitted into the world they visit, with a reason to be there. They keep their personality, looks and way of talking.
+  - A story's side panel can switch guests on or off for that story alone, so a story already under way can let them in too. "Bring someone in" lists guests as well.
+  - A character's editor has "Can turn up in other worlds" for anyone whose sheet only makes sense at home. Someone who is only cast in 18+ worlds never turns up in a world that isn't one.
+  - Nobody is added to the story's prompt until they actually arrive, so a long list of characters doesn't slow stories down.
+
+### Changed
+- **Voces Mundi: the world filter is one button.** With many worlds, the chips in Characters filled the column and left no room for the list. It is now a single picker with a search field, plus "Played by you". The tag filter on Worlds works the same way.
+
+## 0.4.4
+
 ### Changed
 - **Google Calendar only goes to AI that doesn't train on it.** Google doesn't allow calendar data to reach AI services that may train on it. Google Calendar now works with the built-in brain, a server on your own computer or home network, OpenAI, Anthropic and OpenRouter. With OpenRouter, VoxCordis asks only for providers that don't keep or train on what they're sent. Other server-hosted brains don't get your Google Calendar; CalDAV and calendar links are unchanged.
 

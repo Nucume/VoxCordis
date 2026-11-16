@@ -948,7 +948,11 @@ class _StoryViewState extends State<StoryView> {
     widget.done(null);
   }
 
-  Future<void> _bringIn(VocesCharacter c) => _s.bringIn(c.id);
+  /// Someone of the story's cast, or a guest from another world.
+  Future<void> _bringIn(VocesCharacter c) =>
+      _engine?.world.cast.containsKey(c.id) ?? false
+      ? _s.bringIn(c.id)
+      : _s.invite(c.id);
 
   Future<void> _sendAway(String id) async {
     if (_answerer == id) _answererSet = false;
@@ -1038,6 +1042,10 @@ class _StoryViewState extends State<StoryView> {
                           busy: _busy,
                           onState: _saveState,
                           onBringIn: _bringIn,
+                          library: library,
+                          guestsOpen: _s.guestsOpen,
+                          guests: _s.guestOptions,
+                          onGuests: _s.setGuests,
                           onSendAway: _sendAway,
                           onSave: _saveToCharacters,
                           onKeep: _busy ? null : _promote,
@@ -1711,6 +1719,10 @@ class _StorySide extends StatelessWidget {
     required this.busy,
     required this.onState,
     required this.onBringIn,
+    required this.library,
+    required this.guestsOpen,
+    required this.guests,
+    required this.onGuests,
     required this.onSendAway,
     required this.onSave,
     required this.onKeep,
@@ -1728,6 +1740,14 @@ class _StorySide extends StatelessWidget {
   final bool busy;
   final ValueChanged<StoryState> onState;
   final ValueChanged<VocesCharacter> onBringIn;
+
+  /// For guests' portraits, still in Characters.
+  final VocesLibrary library;
+
+  /// Guests from other worlds may turn up, and who may.
+  final bool guestsOpen;
+  final List<VocesCharacter> guests;
+  final ValueChanged<bool> onGuests;
   final ValueChanged<String> onSendAway;
   final ValueChanged<String> onSave;
 
@@ -1765,6 +1785,7 @@ class _StorySide extends StatelessWidget {
               context,
               engine.world.cast[id]!,
               pinned: state.pinned.contains(id),
+              guest: state.guestIds.contains(id),
               onPin: () => onState(
                 state.copyWith(
                   pinned: state.pinned.contains(id)
@@ -1776,7 +1797,7 @@ class _StorySide extends StatelessWidget {
               onSave: () => onSave(id),
             ),
         if (state.present.isEmpty) Text('Only you, for now.', style: muted),
-        if (away.isNotEmpty) ...[
+        if (away.isNotEmpty || (guestsOpen && guests.isNotEmpty)) ...[
           const SizedBox(height: 6),
           PopupMenuButton<VocesCharacter>(
             enabled: !busy,
@@ -1785,6 +1806,32 @@ class _StorySide extends StatelessWidget {
             itemBuilder: (_) => [
               for (final c in away)
                 PopupMenuItem(value: c, child: Text(c.name)),
+              if (guestsOpen && guests.isNotEmpty) ...[
+                if (away.isNotEmpty) const PopupMenuDivider(),
+                PopupMenuItem(
+                  enabled: false,
+                  height: 32,
+                  child: Text('From other worlds', style: muted),
+                ),
+                for (final c in guests)
+                  PopupMenuItem(
+                    value: c,
+                    child: Row(
+                      children: [
+                        VocesAvatar(
+                          name: c.name,
+                          seed: c.art,
+                          file: library.portraitOf(c),
+                          size: 22,
+                        ),
+                        const SizedBox(width: 10),
+                        Flexible(
+                          child: Text(c.name, overflow: TextOverflow.ellipsis),
+                        ),
+                      ],
+                    ),
+                  ),
+              ],
             ],
             child: Padding(
               padding: const EdgeInsets.symmetric(vertical: 6),
@@ -1937,6 +1984,30 @@ class _StorySide extends StatelessWidget {
           style: muted,
         ),
         const SizedBox(height: 20),
+        const VocesLabel('Guests from other worlds'),
+        const SizedBox(height: 8),
+        Wrap(
+          spacing: 6,
+          runSpacing: 6,
+          children: [
+            VocesPill('Off', on: !guestsOpen, onTap: () => onGuests(false)),
+            VocesPill('On', on: guestsOpen, onTap: () => onGuests(true)),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          guestsOpen
+              ? guests.isEmpty
+                    ? 'Nobody from your other characters may come here: '
+                          'the world\'s editor says who may.'
+                    : 'Now and then someone from your other characters '
+                          'who fits the scene turns up (${guests.length} '
+                          'may). You can bring one in yourself above.'
+              : 'Characters from your other worlds may drop in when they '
+                    'fit the scene. Who may is set in the world\'s editor.',
+          style: muted,
+        ),
+        const SizedBox(height: 20),
         const VocesLabel('Replies in a row'),
         const SizedBox(height: 8),
         Wrap(
@@ -1966,6 +2037,7 @@ class _StorySide extends StatelessWidget {
     VocesCharacter c, {
     bool you = false,
     bool pinned = false,
+    bool guest = false,
     VoidCallback? onPin,
     VoidCallback? onAway,
     VoidCallback? onSave,
@@ -1976,11 +2048,36 @@ class _StorySide extends StatelessWidget {
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
         children: [
-          VocesAvatar(
-            name: c.name,
-            seed: c.art,
-            file: engine.world.portraitOf(c),
-            size: 28,
+          Tooltip(
+            message: guest ? 'A guest from another world' : '',
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                VocesAvatar(
+                  name: c.name,
+                  seed: c.art,
+                  file: engine.world.portraitOf(c),
+                  size: 28,
+                ),
+                if (guest)
+                  Positioned(
+                    right: -4,
+                    bottom: -4,
+                    child: Container(
+                      padding: const EdgeInsets.all(1.5),
+                      decoration: BoxDecoration(
+                        color: palette.background,
+                        shape: BoxShape.circle,
+                      ),
+                      child: Icon(
+                        Icons.public_rounded,
+                        size: 12,
+                        color: accent,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
           ),
           const SizedBox(width: 10),
           Expanded(

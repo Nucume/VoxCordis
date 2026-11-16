@@ -160,6 +160,8 @@ class GlassSelect<T> extends StatefulWidget {
     this.minWidth,
     this.placeholder,
     this.pill = false,
+    this.active,
+    this.searchHint,
   });
 
   final T value;
@@ -183,6 +185,14 @@ class GlassSelect<T> extends StatefulWidget {
   /// to sit in a row with other chips.
   final bool pill;
 
+  /// Whether a [pill] tints; by default it does while an option matches
+  /// [value]. A filter turns it off for its "All" option.
+  final bool? active;
+
+  /// Adds a search field above the options (the hint is its placeholder),
+  /// for a list too long to scan.
+  final String? searchHint;
+
   @override
   State<GlassSelect<T>> createState() => _GlassSelectState<T>();
 }
@@ -201,12 +211,28 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
 
   static const _rowHeight = 38.0;
   static const _padding = 6.0;
+  static const _searchHeight = 46.0;
+
+  final _query = TextEditingController();
+
+  bool get _searchable => widget.searchHint != null;
+
+  /// The options that match what was typed into the search field.
+  List<GlassOption<T>> get _shown {
+    final q = _query.text.trim().toLowerCase();
+    if (q.isEmpty) return widget.options;
+    return [
+      for (final o in widget.options)
+        if (o.label.toLowerCase().contains(q)) o,
+    ];
+  }
 
   bool get _open =>
       _portal.isShowing && _anim.status != AnimationStatus.reverse;
 
   @override
   void dispose() {
+    _query.dispose();
     _anim.dispose();
     super.dispose();
   }
@@ -214,6 +240,7 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
   void _toggle() => _open ? _close() : _show();
 
   void _show() {
+    _query.clear();
     setState(_portal.show);
     _anim.forward(from: 0);
   }
@@ -242,7 +269,13 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
     final screen = MediaQuery.sizeOf(context);
     final top = box?.localToGlobal(Offset.zero).dy ?? 0;
     final height = box?.size.height ?? 36;
-    final full = widget.options.length * _rowHeight + _padding * 2;
+    final shown = _shown;
+    // A searchable list keeps the height of the whole list while typing, so
+    // the panel does not jump about under the pointer.
+    final full =
+        widget.options.length * _rowHeight +
+        _padding * 2 +
+        (_searchable ? _searchHeight : 0);
     final below = screen.height - top - height - 16;
     final above = top - 16;
     // Downwards unless it fits better above.
@@ -262,7 +295,7 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
               const SingleActivator(LogicalKeyboardKey.escape): _close,
             },
             child: Focus(
-              autofocus: true,
+              autofocus: !_searchable,
               child: ConstrainedBox(
                 constraints: BoxConstraints(
                   minWidth: (box?.size.width ?? 0) + _padding * 2,
@@ -277,29 +310,99 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
                     alignment: down
                         ? Alignment.topCenter
                         : Alignment.bottomCenter,
-                    child: SingleChildScrollView(
-                      padding: const EdgeInsets.all(_padding),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          for (var i = 0; i < widget.options.length; i++)
-                            glassStagger(
-                              _anim,
-                              i,
-                              _OptionRow(
-                                option: widget.options[i],
-                                selected:
-                                    widget.options[i].value == widget.value,
-                                height: _rowHeight,
-                                onTap: () => _pick(widget.options[i].value),
-                              ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (_searchable) _searchField(context),
+                        Flexible(
+                          child: SingleChildScrollView(
+                            padding: const EdgeInsets.all(_padding),
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              crossAxisAlignment: CrossAxisAlignment.stretch,
+                              children: [
+                                for (var i = 0; i < shown.length; i++)
+                                  glassStagger(
+                                    _anim,
+                                    i,
+                                    _OptionRow(
+                                      key: ValueKey(shown[i].value),
+                                      option: shown[i],
+                                      selected: shown[i].value == widget.value,
+                                      height: _rowHeight,
+                                      onTap: () => _pick(shown[i].value),
+                                    ),
+                                  ),
+                                if (shown.isEmpty)
+                                  Padding(
+                                    padding: const EdgeInsets.all(12),
+                                    child: Text(
+                                      'Nothing matches.',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        color: context.palette.textMuted,
+                                      ),
+                                    ),
+                                  ),
+                              ],
                             ),
-                        ],
-                      ),
+                          ),
+                        ),
+                      ],
                     ),
                   ),
                 ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _searchField(BuildContext context) {
+    final palette = context.palette;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(_padding, _padding, _padding, 0),
+      child: SizedBox(
+        height: _searchHeight - _padding,
+        child: TextField(
+          controller: _query,
+          autofocus: true,
+          onChanged: (_) => setState(() {}),
+          onSubmitted: (_) {
+            // Enter picks the only match.
+            final shown = _shown;
+            if (shown.length == 1) _pick(shown.single.value);
+          },
+          style: TextStyle(fontSize: 14, color: palette.text),
+          decoration: InputDecoration(
+            isDense: true,
+            hintText: widget.searchHint,
+            hintStyle: TextStyle(fontSize: 14, color: palette.textMuted),
+            prefixIcon: Icon(
+              Icons.search_rounded,
+              size: 18,
+              color: palette.textMuted,
+            ),
+            filled: true,
+            fillColor: palette.tile,
+            contentPadding: const EdgeInsets.symmetric(vertical: 8),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: palette.glassBorder),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: palette.glassBorder),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.6),
               ),
             ),
           ),
@@ -313,6 +416,7 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
     final palette = context.palette;
     final current = _current;
     final enabled = widget.onChanged != null;
+    final lit = widget.active ?? (widget.pill && current != null);
     final button = TapRegion(
       groupId: _tapGroup,
       onTapOutside: (_) => _close(),
@@ -334,7 +438,7 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
               padding: const EdgeInsets.only(left: 10, right: 6),
               decoration: BoxDecoration(
                 borderRadius: BorderRadius.circular(widget.pill ? 18 : 12),
-                color: widget.pill && current != null
+                color: lit
                     ? Theme.of(
                         context,
                       ).colorScheme.primary.withValues(alpha: 0.2)
@@ -342,7 +446,7 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
                     ? palette.tile
                     : Colors.transparent,
                 border: Border.all(
-                  color: _open || (widget.pill && current != null)
+                  color: _open || lit
                       ? Theme.of(
                           context,
                         ).colorScheme.primary.withValues(alpha: 0.6)
@@ -416,6 +520,7 @@ class _GlassSelectState<T> extends State<GlassSelect<T>>
 
 class _OptionRow<T> extends StatelessWidget {
   const _OptionRow({
+    super.key,
     required this.option,
     required this.selected,
     required this.height,

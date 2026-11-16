@@ -411,6 +411,19 @@ class VocesLibrary {
     return saved;
   }
 
+  /// Copies [c] from Characters into [story]'s own cast, portrait and all:
+  /// a guest from another world joining it. They keep their id unless the
+  /// story already has someone under it.
+  Future<VocesCharacter> addGuest(StorySave story, VocesCharacter c) async {
+    final cast = p.join(storyFolder(story.id), 'cast');
+    final taken = await Directory(p.join(cast, c.id)).exists();
+    final id = taken ? await _freeId(cast, c.name) : c.id;
+    await _copyDir(characterFolder(c.id), p.join(cast, id));
+    final saved = c.copyWith(id: id);
+    await _writeJson(File(p.join(cast, id, 'character.json')), saved.toJson());
+    return saved;
+  }
+
   /// Copies [c] from [story]'s cast into Characters, portrait and all, as
   /// [name] (their own by default).
   Future<VocesCharacter> copyFromStory(

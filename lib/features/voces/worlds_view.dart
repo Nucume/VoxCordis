@@ -10,6 +10,7 @@ import '../../services/voces/describer.dart';
 import '../../services/voces/opening_writer.dart';
 import '../../services/voces/tag_suggester.dart';
 import '../../theme/app_theme.dart';
+import '../../theme/glass_popover.dart';
 import 'voces_editor.dart';
 import 'voces_home.dart';
 import 'voces_picture.dart';
@@ -67,7 +68,7 @@ class _WorldsViewState extends State<WorldsView> {
     final tags = {for (final w in data.worlds) ...w.tags}.toList()..sort();
     final shown = [
       for (final w in data.worlds)
-        if (_tag == null || w.tags.contains(_tag)) w,
+        if (_tag == null || !tags.contains(_tag) || w.tags.contains(_tag)) w,
     ];
     return CustomScrollView(
       key: const ValueKey('library'),
@@ -105,21 +106,19 @@ class _WorldsViewState extends State<WorldsView> {
               Row(
                 children: [
                   const Expanded(child: VocesLabel('Worlds')),
-                  if (tags.isNotEmpty) ...[
-                    VocesPill(
-                      'All',
-                      on: _tag == null,
-                      onTap: () => setState(() => _tag = null),
+                  if (tags.isNotEmpty)
+                    GlassSelect<String?>(
+                      value: tags.contains(_tag) ? _tag : null,
+                      pill: true,
+                      active: _tag != null && tags.contains(_tag),
+                      minWidth: 140,
+                      searchHint: tags.length > 8 ? 'Search tags' : null,
+                      options: [
+                        const GlassOption(null, 'All worlds'),
+                        for (final t in tags) GlassOption(t, t),
+                      ],
+                      onChanged: (v) => setState(() => _tag = v),
                     ),
-                    for (final t in tags) ...[
-                      const SizedBox(width: 6),
-                      VocesPill(
-                        t,
-                        on: _tag == t,
-                        onTap: () => setState(() => _tag = t),
-                      ),
-                    ],
-                  ],
                 ],
               ),
               const SizedBox(height: 12),
@@ -279,6 +278,7 @@ class _WorldCard extends StatelessWidget {
           1 => '1 character',
           final n => '$n characters',
         },
+      if (world.guests != GuestRule.none) '+ guests',
       switch (stories) {
         0 => 'no stories yet',
         1 => '1 story',
@@ -582,7 +582,21 @@ class _WorldPage extends StatelessWidget {
                         ),
                       const SizedBox(height: 8),
                       Text(
-                        'You pick who you play when a story starts.',
+                        [
+                          'You pick who you play when a story starts.',
+                          switch (world.guests) {
+                            GuestRule.none => '',
+                            GuestRule.anyone =>
+                              world.barredIds.isEmpty
+                                  ? 'Guests from other worlds may turn up.'
+                                  : 'Guests from other worlds may turn up, '
+                                        'except ${world.barredIds.length} '
+                                        'barred.',
+                            GuestRule.picked =>
+                              '${world.guestIds.length} picked guests from '
+                                  'other worlds may turn up.',
+                          },
+                        ].where((l) => l.isNotEmpty).join(' '),
                         style: muted,
                       ),
                     ],
@@ -720,6 +734,9 @@ class _WorldEditorState extends State<_WorldEditor> {
   var _adult = false;
   var _narratorLed = false;
   final _cast = <String>{};
+  var _guests = GuestRule.none;
+  final _guestIds = <String>{};
+  final _barred = <String>{};
   final _books = <String>{};
   final _openings = <_OpeningFields>[];
   var _art = VocesLibrary.newArt();
@@ -779,6 +796,13 @@ class _WorldEditorState extends State<_WorldEditor> {
     _cast
       ..clear()
       ..addAll(w?.castIds ?? const []);
+    _guests = w?.guests ?? GuestRule.none;
+    _guestIds
+      ..clear()
+      ..addAll(w?.guestIds ?? const []);
+    _barred
+      ..clear()
+      ..addAll(w?.barredIds ?? const []);
     _books
       ..clear()
       ..addAll(w?.lorebookIds ?? const []);
@@ -821,6 +845,16 @@ class _WorldEditorState extends State<_WorldEditor> {
       castIds: [
         for (final c in widget.data.characters)
           if (_cast.contains(c.id)) c.id,
+      ],
+      guests: _guests,
+      // Only those who aren't in the cast anyway.
+      guestIds: [
+        for (final c in widget.data.characters)
+          if (_guestIds.contains(c.id) && !_cast.contains(c.id)) c.id,
+      ],
+      barredIds: [
+        for (final c in widget.data.characters)
+          if (_barred.contains(c.id) && !_cast.contains(c.id)) c.id,
       ],
       lorebookIds: [
         for (final b in widget.data.lorebooks)
@@ -1067,6 +1101,12 @@ class _WorldEditorState extends State<_WorldEditor> {
     _adult,
     _narratorLed,
     ..._cast,
+    _guests,
+    '[',
+    ..._guestIds,
+    '|',
+    ..._barred,
+    ']',
     ..._books,
     for (final (t, x) in _openings) '${t.text}\u0000${x.text}',
     _art,
@@ -1330,6 +1370,8 @@ class _WorldEditorState extends State<_WorldEditor> {
                     ],
                   ),
                 const SizedBox(height: 16),
+                ..._guestFields(muted),
+                const SizedBox(height: 16),
                 const VocesLabel('Lorebooks'),
                 const SizedBox(height: 8),
                 if (widget.data.lorebooks.isEmpty)
@@ -1411,6 +1453,79 @@ class _WorldEditorState extends State<_WorldEditor> {
         ],
       ),
     );
+  }
+
+  /// Who from outside the cast may turn up in stories here.
+  List<Widget> _guestFields(TextStyle muted) {
+    final others = [
+      for (final c in widget.data.characters)
+        if (!_cast.contains(c.id)) c,
+    ];
+    final picked = _guests == GuestRule.picked;
+    final list = picked ? _guestIds : _barred;
+    return [
+      const VocesLabel('Guests from other worlds'),
+      const SizedBox(height: 8),
+      Wrap(
+        spacing: 6,
+        runSpacing: 6,
+        children: [
+          for (final r in GuestRule.values)
+            VocesPill(
+              r == GuestRule.picked ? 'Only these…' : r.label,
+              on: _guests == r,
+              onTap: () => setState(() => _guests = r),
+            ),
+        ],
+      ),
+      const SizedBox(height: 6),
+      Text(switch (_guests) {
+        GuestRule.none =>
+          'Stories here keep to the cast above, and the people the narrator '
+              'makes up. A story can still let guests in from its own side '
+              'panel.',
+        GuestRule.anyone =>
+          'Now and then, someone from your other characters who fits the '
+              'scene turns up, fitted into this world. Pick anyone who '
+              'should never come here.',
+        GuestRule.picked =>
+          'Now and then, one of the characters picked below turns up when '
+              'they fit the scene, fitted into this world.',
+      }, style: muted),
+      if (_guests != GuestRule.none) ...[
+        const SizedBox(height: 12),
+        VocesLabel(picked ? 'Who may visit' : 'Never here'),
+        const SizedBox(height: 8),
+        if (others.isEmpty)
+          Text('Everyone is in the cast already.', style: muted)
+        else
+          Wrap(
+            spacing: 6,
+            runSpacing: 6,
+            children: [
+              for (final c in others)
+                FilterChip(
+                  avatar: VocesAvatar(
+                    name: c.name,
+                    seed: c.art,
+                    file: _library.portraitOf(c),
+                    size: 22,
+                  ),
+                  label: Text(c.name),
+                  tooltip: c.visits
+                      ? null
+                      : '${c.name} stays in their own worlds (see their '
+                            'sheet)',
+                  selected: list.contains(c.id),
+                  selectedColor: picked ? null : const Color(0x66B23A48),
+                  showCheckmark: false,
+                  onSelected: (on) =>
+                      setState(() => on ? list.add(c.id) : list.remove(c.id)),
+                ),
+            ],
+          ),
+      ],
+    ];
   }
 
   Widget _openingBox(

@@ -16,6 +16,7 @@ import '../images/sd_runtime.dart';
 import '../logs/app_log.dart';
 import 'chat_import.dart';
 import 'describer.dart';
+import 'guests.dart';
 import 'living_cast.dart';
 import 'scene_tags.dart';
 import 'story_engine.dart';
@@ -54,6 +55,16 @@ class StorySession extends ChangeNotifier {
 
   /// A picture of the scene is being made.
   bool drawing = false;
+
+  /// The world's guest rules as the library has them now (the story's own
+  /// copy when the world is gone), and who from the library may turn up
+  /// here by them; see [refreshGuests].
+  VocesWorld? _rules;
+  List<VocesCharacter> guestOptions = const [];
+  List<VocesWorld> _worlds = const [];
+
+  /// A guest is being picked.
+  bool _inviting = false;
 
   /// "Previously on…", shown until closed; [recapping] while it is
   /// written.
@@ -134,6 +145,7 @@ class StorySession extends ChangeNotifier {
       state = s;
       turns = list;
       _changed();
+      unawaited(refreshGuests());
       final now = DateTime.now();
       if (StoryEngine.wantsRecap(list, now, lastRecap: _recappedAt[story.id])) {
         _recappedAt[story.id] = now;
@@ -524,6 +536,140 @@ class StorySession extends ChangeNotifier {
     }
   }
 
+  /// Whether guests from other worlds may turn up: the story's own switch,
+  /// else the world's rule.
+  bool get guestsOpen {
+    final e = engine;
+    if (e == null) return false;
+    return Guests.open(_rules ?? e.world.world, state);
+  }
+
+  /// Switches guests from other worlds on or off for this story.
+  Future<void> setGuests(bool on) async {
+    await saveState(state.copyWith(guests: () => on));
+    await refreshGuests();
+  }
+
+  /// Reads the world's guest rules and the library again, for who may turn
+  /// up.
+  Future<void> refreshGuests() async {
+    final e = engine;
+    if (e == null || _closed) return;
+    try {
+      final worlds = await library.worlds();
+      final people = await library.characters();
+      if (_closed) return;
+      _worlds = worlds;
+      _rules =
+          worlds.where((w) => w.id == story.worldId).firstOrNull ??
+          e.world.world;
+      guestOptions = guestsOpen
+          ? Guests.allowed(
+              rules: _rules!,
+              story: e.world,
+              state: state,
+              library: people,
+              worlds: worlds,
+              mature: _services.settings.value.vocesMature,
+            )
+          : const [];
+      _changed();
+    } on Object catch (err) {
+      _note('Voces Mundi couldn\'t read who may visit this story', err);
+    }
+  }
+
+  /// Before a narrator turn: picks a guest who fits the scene, if any, and
+  /// brings them in. Null when nobody fits or anything goes wrong.
+  Future<CastChange?> _guestTurnsUp() async {
+    if (_inviting) return null;
+    _inviting = true;
+    try {
+      await refreshGuests();
+      final e = engine;
+      final options = guestOptions;
+      if (e == null || options.isEmpty || _closed) return null;
+      final recent = e.recentText(turns, count: 3);
+      final best = Guests.best(
+        options,
+        await _fit(options, Guests.scene(e.world.world, state.place, recent)),
+        e.random,
+      );
+      final reply = await _services.models.ask(
+        Guests.pickerInstructions,
+        Guests.pickerBrief(
+          world: e.world.world,
+          place: state.place,
+          recent: recent,
+          candidates: best,
+          worlds: _worlds,
+        ),
+        maxTokens: 300,
+        what: 'Who could turn up',
+        exact: true,
+      );
+      final pick = Guests.parsePick(reply, best);
+      if (pick == null || _closed) return null;
+      final c = await _admit(pick);
+      return c == null ? null : CastChange(c, arrives: true, guest: true);
+    } on Object catch (err) {
+      _note('Voces Mundi couldn\'t bring in a guest', err);
+      return null;
+    } finally {
+      _inviting = false;
+    }
+  }
+
+  /// How well each of [people] fits [scene]: by meaning with the Recall
+  /// model when it's downloaded, else by the words they share.
+  Future<List<double>> _fit(List<VocesCharacter> people, String scene) async {
+    final profiles = [for (final c in people) Guests.profile(c, _worlds)];
+    final recall = _services.recall;
+    if (recall.available()) {
+      try {
+        final q =
+            (await recall.embedder
+                    .embed([scene], query: true)
+                    .timeout(const Duration(seconds: 20)))
+                .single;
+        return await recall
+            .similarity(q, profiles)
+            .timeout(const Duration(seconds: 60));
+      } on Object catch (err) {
+        _note('Voces Mundi couldn\'t rank guests by meaning', err);
+      }
+    }
+    return [for (final p in profiles) Guests.wordScore(scene, p)];
+  }
+
+  /// Copies guest [c] into the story and has them here; a "turns up" line
+  /// marks it. Returns them as the story now has them.
+  Future<VocesCharacter?> _admit(VocesCharacter c) async {
+    final e = engine;
+    if (e == null || _closed) return null;
+    final saved = await library.addGuest(story, c);
+    if (_closed) return null;
+    e.world.cast[saved.id] = saved;
+    await saveState(
+      state.copyWith(
+        present: [...state.present, saved.id],
+        guestIds: {...state.guestIds, saved.id},
+        guestAt: turns.lastOrNull?.id ?? 0,
+      ),
+    );
+    await add(TurnKind.scene, '${saved.name} turns up', speakerId: saved.id);
+    unawaited(refreshGuests());
+    return saved;
+  }
+
+  /// The human brings in [id], a guest from another world, by hand.
+  Future<void> invite(String id) async {
+    if (busy) return;
+    final c = guestOptions.where((g) => g.id == id).firstOrNull;
+    if (c == null) return;
+    await _admit(c);
+  }
+
   /// Someone of the cast comes into the scene.
   Future<void> bringIn(String id) async {
     final c = engine?.world.cast[id];
@@ -564,6 +710,8 @@ class StorySession extends ChangeNotifier {
         await saveState(state.copyWith(present: present));
         await add(TurnKind.scene, change.line, speakerId: change.who.id);
         if (!change.arrives) _toStow.add(change.who.id);
+      } else if (guestsOpen && en.guestDue(state, turns)) {
+        change = await _guestTurnsUp();
       }
     }
     final prompt = en.prompt(
@@ -857,6 +1005,7 @@ class StorySession extends ChangeNotifier {
     story = saved;
     engine = StoryEngine(world, mature: _services.settings.value.vocesMature);
     _changed();
+    unawaited(refreshGuests());
   }
 
   /// Deletes the whole story, for good.
